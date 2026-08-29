@@ -20,7 +20,8 @@
 | 计划 | 状态 | 当前阶段 | 最后更新 | 依赖 | 证据 |
 |---|---|---|---|---|---|
 | [TunnelPad v1 隧道管理应用](plans/tunnelpad-v1.md) | 已完成 | - | 2026-08-29 | - | [阶段 2 功能与验收记录](data-quality/tunnelpad-v1-stage2-features-20260829.md) |
-| [ECS 动态 SSH 公网 IP 同步](plans/ecs-dynamic-ssh-ip.md) | 设计中 | 阶段 0 | 2026-08-29 | - | [阶段 0 本机预检](data-quality/ecs-dynamic-ssh-ip-stage0-local-preflight-20260829.md)；[CLI 与凭证准备](data-quality/ecs-dynamic-ssh-ip-stage0-cli-credential-prep-20260829.md) |
+| [ECS 动态 SSH 公网 IP 同步](plans/ecs-dynamic-ssh-ip.md) | 实施中 | 阶段 1 | 2026-08-29 | - | [阶段 0 本机预检](data-quality/ecs-dynamic-ssh-ip-stage0-local-preflight-20260829.md)；[CLI 与凭证准备](data-quality/ecs-dynamic-ssh-ip-stage0-cli-credential-prep-20260829.md)；[云端只读验证](data-quality/ecs-dynamic-ssh-ip-stage0-cloud-readonly-20260829.md)；[控制台拓扑基线](data-quality/ecs-dynamic-ssh-ip-stage0-console-topology-20260829.md)；[项目外受控实跑](data-quality/ecs-dynamic-ssh-ip-stage0-controlled-run-20260829.md)；[阶段 1 实现与验证](data-quality/ecs-dynamic-ssh-ip-stage1-implementation-20260829.md) |
+| [TunnelPad 界面优化](plans/tunnelpad-ui-refinements.md) | 实施中 | 阶段 2 | 2026-08-29 | tunnelpad-v1 | [阶段 1 证据](data-quality/tunnelpad-ui-refinements-stage1-20260829.md) |
 
 允许状态：`候选`、`设计中`、`待实施`、`实施中`、`已完成`、`已替代`、`已合并`、`已废弃`。
 
@@ -28,6 +29,7 @@
 
 1. `tunnelpad-v1` 与 `ecs-dynamic-ssh-ip` 阶段 0 可并行推进。
 2. `ecs-dynamic-ssh-ip` 后续阶段按其自身独立准入复核推进。
+3. `tunnelpad-ui-refinements` 各阶段按其自身独立准入复核推进，可与 `ecs-dynamic-ssh-ip` 并行。
 
 ## 依赖关系
 
@@ -35,6 +37,7 @@
 |---|---|---|
 | tunnelpad-v1 | - | - |
 | ecs-dynamic-ssh-ip | - | 用户确认可立即进行本计划的阶段 0 准备；本计划不修改 TunnelPad v1 范围，与 v1 无阶段依赖。 |
+| tunnelpad-ui-refinements | tunnelpad-v1 | 前置 v1 已完成；本计划不修改 config schema 与隧道启停语义，与 ecs-dynamic-ssh-ip 无依赖。 |
 
 ## 替代、合并和废弃
 
@@ -47,8 +50,7 @@
 | 问题 | 推荐方案 | 影响范围 | 是否阻塞当前阶段 | 状态 |
 |---|---|---|---|---|
 | - | - | - | 否 | 已延后 |
-| 新专用 RAM 用户及其策略已由用户创建，但实际身份与授权边界尚未验证 | 只用新专用凭证建立隔离 CLI profile，先验证 STS 身份和安全组只读权限；现有 FullAccess 凭证持续排除 | ecs-dynamic-ssh-ip 阶段 0、阶段 1 | 是 | 部分完成 |
-| 未确认受控实跑目标的 RegionId 与动态 SSH 安全组 ID | 用户提供非秘密的地域与安全组 ID；随后先做只读安全组基线与 Workbench 恢复通道确认 | ecs-dynamic-ssh-ip 阶段 0 | 是 | 待用户提供 |
+| 阶段 1 实现与独立复核 | 阶段 1 已完成实现、fixture 验证和真实 ECS 只读回归；阶段 2 自动集成尚未启动，需另行准入。运行时任一双端点不一致、规则歧义、API 写入未确认或锁冲突都必须停止或保留新旧规则；Workbench 保留为恢复通道 | ecs-dynamic-ssh-ip 阶段 1 | 否 | 已通过 |
 
 ## 完成证据
 
