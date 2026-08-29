@@ -109,6 +109,9 @@ struct TunnelSettingsSheet: View {
                     RoundedRectangle(cornerRadius: 5)
                         .strokeBorder(Color.secondary.opacity(0.3))
                 )
+            if SSHCommand.isSSH(parsedCommand) {
+                Toggle("SSH 详细日志（追加 -v 参数）", isOn: sshVerbose)
+            }
 
             Toggle("断线自动重连（keepAlive）", isOn: $keepAlive)
             HStack(spacing: 8) {
@@ -140,6 +143,27 @@ struct TunnelSettingsSheet: View {
 
     // MARK: - 保存
 
+    /// 命令文本解析出的参数数组，与 buildConfig 的解析规则一致。
+    private var parsedCommand: [String] {
+        commandText
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    /// 「SSH 详细日志」开关：状态取自命令里的独立 -v，切换即改写命令文本。
+    private var sshVerbose: Binding<Bool> {
+        Binding(
+            get: { SSHCommand.hasVerboseFlag(parsedCommand) },
+            set: { enabled in
+                let updated = enabled
+                    ? SSHCommand.addingVerboseFlag(parsedCommand)
+                    : SSHCommand.removingVerboseFlag(parsedCommand)
+                commandText = updated.joined(separator: "\n")
+            }
+        )
+    }
+
     private func save() {
         guard let updated = buildConfig() else { return }
         manager.updateTunnel(updated)
@@ -154,10 +178,7 @@ struct TunnelSettingsSheet: View {
             return nil
         }
 
-        let args = commandText
-            .split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
+        let args = parsedCommand
         guard let first = args.first, !first.isEmpty else {
             errorMessage = "命令至少需要一行可执行文件路径"
             return nil
