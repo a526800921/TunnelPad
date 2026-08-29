@@ -19,7 +19,7 @@
 
 | 计划 | 状态 | 当前阶段 | 最后更新 | 依赖 | 证据 |
 |---|---|---|---|---|---|
-| [TunnelPad v1 隧道管理应用](plans/tunnelpad-v1.md) | 实施中 | 阶段 1 | 2026-08-29 | - | [阶段 0 基线快照](data-quality/tunnelpad-v1-stage0-baseline-20260829.md) |
+| [TunnelPad v1 隧道管理应用](plans/tunnelpad-v1.md) | 设计中 | 阶段 2 | 2026-08-29 | - | [阶段 1 接管验证记录](data-quality/tunnelpad-v1-stage1-takeover-20260829.md) |
 
 允许状态：`候选`、`设计中`、`待实施`、`实施中`、`已完成`、`已替代`、`已合并`、`已废弃`。
 
@@ -50,3 +50,4 @@
 | 计划 | 阶段 | 证据 |
 |---|---|---|
 | tunnelpad-v1 | 阶段 0 | [基线快照](data-quality/tunnelpad-v1-stage0-baseline-20260829.md)（样本矩阵四项通过，2026-08-29） |
+| tunnelpad-v1 | 阶段 1 | [接管与验证记录](data-quality/tunnelpad-v1-stage1-takeover-20260829.md)（双隧道接管/杀进程 1s 重连/退出即停双路径/重启恢复，2026-08-29） |

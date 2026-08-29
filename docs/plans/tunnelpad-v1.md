@@ -85,14 +85,14 @@
 
 ## 公共契约变化
 
-v1 引入 TunnelPad 自身的配置文件 schema（config.json v1，定义见上方"技术方案（阶段 1 冻结）"章节：隧道条目字段、执行器枚举 `launchd|app`）与 launchd 标签约定 `com.jafish.tunnelpad.<tunnel-id>`。无对外 HTTP API。阶段 2 可向 schema 追加可选字段（如探针），保持向后兼容。
+v1 引入 TunnelPad 自身的配置文件 schema（config.json v1，定义见"技术方案（阶段 1 冻结，继续有效）"章节：隧道条目字段、执行器枚举 `launchd|app`）与 launchd 标签约定 `com.jafish.tunnelpad.<tunnel-id>`。无对外 HTTP API。阶段 2 可向 schema 追加可选字段（如探针），保持向后兼容。
 
 ## 阶段路线图
 
 | 阶段 | 目标 | 进入条件 | 验证方向 | 状态 |
 |---|---|---|---|---|
 | 阶段 0 | 迁移基线与现状快照（只读，不改动现有服务） | 治理文档已初始化 | 基线命令可复现、快照文档落盘 | 已完成 |
-| 阶段 1 | 应用骨架、配置模型、launchd 执行器、迁移接管与退出语义、最小 UI | 阶段 0 独立复核通过 | `swift test` + launchctl 真实验证 | 实施中 |
+| 阶段 1 | 应用骨架、配置模型、launchd 执行器、迁移接管与退出语义、最小 UI | 阶段 0 独立复核通过 | `swift test` + launchctl 真实验证 | 已完成 |
 | 阶段 2 | app 执行器、状态探针、日志查看与 .app 打包 | 阶段 1 独立复核通过 | `swift test` + 手动验收 | 设计中 |
 
 ## 阶段 0 记录（已完成，2026-08-29）
@@ -105,61 +105,7 @@ v1 引入 TunnelPad 自身的配置文件 schema（config.json v1，定义见上
 |---|---|---|---|---|---|
 | 2026-08-29 | 实施 | 阶段 0 四项基线采集完成，快照文档落盘，无阻塞项 | 基线快照文档 | 完成 | ZCode Agent（实施轮次） |
 
-## 当前阶段
-
-当前阶段为阶段 1（应用骨架、配置模型、launchd 执行器、迁移接管与退出语义、最小 UI）。
-
-### 范围
-
-- SPM 骨架：`TunnelPadCore` 库 + `TunnelPad` 可执行目标（SwiftUI MenuBarExtra，macOS 14+）+ `TunnelPadCoreTests`。
-- `TunnelConfig`/`AppConfig` 数据模型与 config.json 读写（含损坏恢复）。
-- launchd 执行器：生成 plist、`launchctl bootstrap/bootout`、状态查询，标签 `com.jafish.tunnelpad.<id>`。
-- 迁移导入与接管：解析旧 plist → 导入配置 → 备份 → bootout 旧 agent → bootstrap 新 agent，失败自动回滚。
-- 退出语义：退出 app = 对全部 launchd 执行器隧道逐条 bootout。
-- 最小 UI：菜单栏菜单（状态摘要、全部启动/停止、退出）+ 主面板（隧道列表、状态点、每条启动/停止/重启）+ 首启迁移面板。
-
-### 非目标（本阶段）
-
-- `app` 执行器实现、状态探针、日志查看 UI、.app 打包与图标（阶段 2）。
-- 不改 ECS 侧任何东西；公网零新增入口；不读取私钥内容。
-
-### 阶段准入摘要
-
-| 字段 | 内容 |
-|---|---|
-| 准入状态 | 实施中 |
-| Step 0 | 阶段 0 基线快照（`docs/data-quality/tunnelpad-v1-stage0-baseline-20260829.md`）作为迁移行为基线；骨架参照 ModelPad 可运行实现 |
-| 样本矩阵 | 见下方"Step 0 证据"节内阶段 1 样本矩阵表 |
-| 验证方式 | `swift build` 无错误、`swift test` 全部通过；真实验证矩阵逐项执行并记录证据；治理检查（含 `--strict-readiness`）通过 |
-| 失败/回滚边界 | 接管前完成备份才允许 bootout；bootstrap 失败立即回滚（恢复备份 plist + bootstrap 旧 agent）；回滚命令见"风险和回滚" |
-| 当前阻塞项 | 无 |
-| 最新独立准入复核 | 尚未进行 |
-
-### 实施步骤
-
-1. Core：数据模型、ConfigStore、plist 渲染、launchctl 执行器、旧 plist 导入（均配单元测试）。
-2. UI：菜单栏菜单、主面板、迁移面板。
-3. 真实迁移接管两条隧道并验证行为等价（curl/ss 探测）。
-4. 真实验证杀进程重连、退出即停、重启恢复。
-5. 证据落盘、跨仓库同步项、治理同步与提交。
-
-### Step 0 证据
-
-类型：行为迁移基线（阶段 0 快照）+ 新项目可执行验收（测试套件）。阶段 1 样本矩阵：
-
-| 输入或基线 | 可执行命令 | 预期结果 | 失败判定 | 输出位置 |
-|---|---|---|---|---|
-| 测试套件 | `swift build && swift test` | 构建无错误、全部用例通过（记录用例数） | 任一失败 | 阶段证据文档 |
-| config 损坏恢复 | XCTest：损坏 JSON → 改名留档并重建空配置 | 用例通过 | - | 阶段证据文档 |
-| plist 生成等价性 | XCTest：config → plist XML → 解析回 ProgramArguments 与 `command` 全等 | 用例通过 | - | 阶段证据文档 |
-| 旧 plist 导入 | XCTest：以阶段 0 备份 plist 为 fixture → 导入 `command` 与原文全等 | 用例通过 | - | 阶段证据文档 |
-| 真实接管 admin | 接管后 `launchctl print gui/$(id -u)/com.jafish.tunnelpad.admin-tunnel`；旧标签 print 失败；`curl --noproxy '*' 127.0.0.1:8081/admin` 返回 401 | 三项全部满足 | 任一不满足 | 阶段证据文档 |
-| 真实接管 reverse | 同上（标签 `reverse-ssh`）；ECS 侧 `ss -tln \| grep 22022` 有监听 | 全部满足 | 任一不满足 | 阶段证据文档 |
-| 杀进程自动重连 | `kill <新标签 ssh pid>` 后轮询 `launchctl print` | 60 秒内回到 `running`（受 ThrottleInterval 约束） | 超时未恢复 | 阶段证据文档 |
-| 退出即停 | 正常退出 app → 两个新标签 print 失败；curl 8081 拒连；ECS ss 无 22022 监听 | 全部满足 | 任一仍在 | 阶段证据文档 |
-| 重启恢复 | 重启 app → 全部启动 → print/curl/ECS ss 探测 | 全部恢复且探测通过 | 任一失败 | 阶段证据文档 |
-
-### 技术方案（阶段 1 冻结）
+## 技术方案（阶段 1 冻结，继续有效）
 
 #### config.json Schema v1
 
@@ -187,7 +133,7 @@ v1 引入 TunnelPad 自身的配置文件 schema（config.json v1，定义见上
 - `tunnels[].id`（string，必填，`[a-z0-9-]+`）：派生 launchd 标签 `com.jafish.tunnelpad.<id>` 与 plist 文件名。
 - `tunnels[].name`（string，必填）：显示名。
 - `tunnels[].command`（string 数组，必填，非空，首元素为可执行路径）：等价于 plist `ProgramArguments`，原样保存不规范化。
-- `tunnels[].executor`（enum `launchd|app`，默认 `launchd`）：阶段 1 仅实现 `launchd`；配置为 `app` 时 UI 标注"阶段 2 支持"并禁止启动。
+- `tunnels[].executor`（enum `launchd|app`，默认 `launchd`）：阶段 1 已实现 `launchd`；`app` 在阶段 2 实现。
 - `tunnels[].keepAlive`（bool，默认 true）：写入生成 plist 的 `KeepAlive`。
 - `tunnels[].throttleInterval`（int 秒，默认 10）：写入生成 plist 的 `ThrottleInterval`。
 
@@ -200,58 +146,92 @@ v1 引入 TunnelPad 自身的配置文件 schema（config.json v1，定义见上
 - restart：bootout 后 bootstrap。
 - status：`launchctl print gui/$(id -u)/com.jafish.tunnelpad.<id>`，输出含 `state = running` 即运行中；命令失败视为已停止；其余 state 原样展示。
 
-#### 迁移接管流程（逐条执行，任一步失败即停并回滚该条）
+#### 迁移接管流程（已执行完成，保留作回滚参照）
 
-1. 扫描 `~/Library/LaunchAgents` 下 Label 前缀为 `com.jafish.motorcycle-manual.` 的旧 plist，列出待接管项（不硬编码清单，发现即列出）。
+1. 扫描 `~/Library/LaunchAgents` 下 Label 前缀为 `com.jafish.motorcycle-manual.` 的旧 plist，列出待接管项。
 2. 导入：`ProgramArguments` → `command`（原样）；`id`/`name` 取 Label 末段；`keepAlive=true`；`throttleInterval` 取旧 plist 值（缺省 10）。
-3. 备份：旧 plist **移动**到 `~/Library/Application Support/TunnelPad/migration-backup/`（移动而非复制：旧文件留在 `~/Library/LaunchAgents` 会在下次登录时随 `RunAtLoad` 与新 agent 双跑，抢端口或抢反向转发）。
-4. bootout 旧 agent。
-5. bootstrap 新 agent（标签 `com.jafish.tunnelpad.<id>`）。
-6. 验证 `state=running`；失败 → 立即回滚（bootout 新、备份移回 `~/Library/LaunchAgents`、bootstrap 旧）并在 UI 标记失败。
+3. 备份：旧 plist 移动到 `~/Library/Application Support/TunnelPad/migration-backup/`。
+4. bootout 旧 agent → bootstrap 新 agent（标签 `com.jafish.tunnelpad.<id>`）→ 验证 `state=running`；失败自动回滚（bootout 新、备份移回 `~/Library/LaunchAgents`、bootstrap 旧）。
 
-UI 触发：首启检测到旧 agent 且配置中无对应隧道 → 迁移面板列出并一键"导入并接管"；之后也可从主面板再次触发。
+回滚到手工模式：把 migration-backup 内对应 plist 移回 `~/Library/LaunchAgents`，`launchctl bootstrap gui/$(id -u) <plist>`。
 
-#### 退出语义
+#### 退出语义（冻结）
 
-正常退出（菜单退出 / Cmd+Q）先对全部 launchd 执行器隧道逐条 bootout（单条失败记录日志、不阻塞其余与退出），再正常结束进程。已知边界（计划"风险和回滚"已知情确认）：app 崩溃时无法 bootout，agent 继续运行；下次启动 app 时 status 查询可见并可再次管理。
+正常退出（菜单退出 / Cmd+Q，`applicationShouldTerminate`）与 SIGTERM/SIGINT（`Shutdown` 信号路径，直接读 config.json）同语义：先对全部 launchd 执行器隧道逐条 bootout（单条失败不阻塞其余与退出），再结束进程。已知边界（已知情确认）：app 崩溃时无法 bootout，agent 继续运行；下次启动 app 可重新纳管。
 
-#### 架构
+## 阶段 1 记录（已完成，2026-08-29）
 
-- `TunnelPadCore`：`TunnelConfig`/`AppConfig`（Codable）、`ConfigStore`（读写；损坏时改名 `config.json.corrupt-<ts>` 留档并重建空配置）、`LaunchdPlistRenderer`（plist XML 生成）、`LaunchCtlExecutor`（start/stop/status，`ProcessRunner` 协议注入便于测试）、`LegacyImporter`（旧 plist 解析）、`MigrationService`（备份/bootout/bootstrap/回滚编排）。
-- `TunnelPad`（executable）：SwiftUI `MenuBarExtra` + 主面板 + 迁移 sheet；退出前执行停机编排。
-- 开发期运行 `.build/debug/tunnelpad`；.app 打包与 LSUIElement 行为在阶段 2 处理。
+- 证据事实源：[tunnelpad-v1-stage1-takeover-20260829.md](../data-quality/tunnelpad-v1-stage1-takeover-20260829.md)。
+- 结论：两条隧道经 UI 接管至 `com.jafish.tunnelpad.*`，命令逐字等价、行为探测（curl 401 / ECS LISTEN 22022）接管前后一致；杀 ssh 进程 1 秒自动重连；退出即停两条路径（菜单正常退出 + SIGTERM）均实测通过；重启 app 一键恢复两次实测通过。`swift build` 零告警、`swift test` 29 用例全通过。
+- 实施中发现并修复：SIGTERM 信号处理闭包继承 `@MainActor` 隔离导致 `dispatch_assert_queue` 崩溃（bootout 未执行）；已移入 nonisolated `Shutdown.installSignalHandlers()` 并复测通过。
+- 旧 plist 备份于 `~/Library/Application Support/TunnelPad/migration-backup/`；`~/Library/LaunchAgents` 已无旧 plist。
+- 跨仓库同步项已执行：motorcycle-manual-app `user-document-processing-admin.md` 追加托管方变更记录（commit `e4f2c4b`）。
+
+| 日期 | 类型 | 动作/结果 | 证据 | 状态 | 记录者 |
+|---|---|---|---|---|---|
+| 2026-08-29 | 实施 | 阶段 1 代码完成：SPM 骨架（TunnelPadCore + tunnelpad）、config.json v1、launchd 执行器、迁移接管（备份先行+失败回滚）、退出语义（正常退出+SIGTERM）、菜单栏与主面板 UI；`swift build` 零告警，`swift test` 29 用例全部通过 | swift build/test 输出（阶段证据文档收录） | 完成 | ZCode Agent（实施轮次） |
+| 2026-08-29 | 实施 | 真实接管两条隧道 + 杀 ssh 重连（1s）+ 退出即停（双路径，含 SIGTERM 崩溃修复）+ 重启恢复（两次）全部实测通过，线上状态恢复为 TunnelPad 托管运行 | 阶段证据文档 | 完成 | ZCode Agent（实施轮次） |
+
+## 当前阶段
+
+当前阶段为阶段 2（app 执行器、状态探针、日志查看与 .app 打包）。
+
+### 范围（粗粒度，准入时细化）
+
+- `app` 执行器：子进程托管（ModelPad 模式），捕获 stdout/stderr。
+- 每条隧道可选状态探针（如 admin-tunnel 探 `http://127.0.0.1:8081` 期待 401/200）。
+- launchd/app 日志查看（tail plist 指定日志文件）。
+- `build_app.sh` 打包 .app 与图标（LSUIElement 菜单栏纯常驻行为在此落实）。
+
+### 非目标（本阶段）
+
+- 见"非目标"章节；不改变阶段 1 已冻结的退出语义与 launchd 标签约定。
+
+### 阶段准入摘要
+
+| 字段 | 内容 |
+|---|---|
+| 准入状态 | 设计中 |
+| Step 0 | 待本阶段准入时补充定义（探针语义、app 执行器基线参照 ModelPad） |
+| 样本矩阵 | 待本阶段准入时补充定义 |
+| 验证方式 | 待本阶段准入时细化（`swift test` + 手动验收） |
+| 失败/回滚边界 | 待本阶段准入时补充定义 |
+| 当前阻塞项 | 无 |
+| 最新独立准入复核 | 尚未进行 |
+
+### 实施步骤
+
+待本阶段准入时补充。
+
+### Step 0 证据
+
+阶段 2 尚未完成自身准入：Step 0 类型、样本矩阵、验证方式与完成条件将在准入复核前补充定义于本节。
 
 ### 阶段证据
 
-- 待阶段 1 完成后填写：验证证据文档链接（`docs/data-quality/tunnelpad-v1-stage1-takeover-<日期>.md`）。
+- 待阶段 2 完成后填写。
 
 ### 最近实施/验证记录
 
 | 日期 | 类型 | 动作/结果 | 证据 | 状态 | 记录者 |
 |---|---|---|---|---|---|
-| 2026-08-29 | 实施 | 阶段 1 代码完成：SPM 骨架（TunnelPadCore + tunnelpad）、config.json v1、launchd 执行器、迁移接管（备份先行+失败回滚）、退出语义（正常退出+SIGTERM）、菜单栏与主面板 UI；`swift build` 零告警，`swift test` 29 用例全部通过 | swift build/test 输出（阶段证据文档收录） | 进行中 | ZCode Agent（实施轮次） |
+| - | - | - | - | - | - |
 
 ### 验证方式
 
-- `swift build` 无错误；`swift test` 全部通过并记录用例数。
-- 样本矩阵"真实验证"行逐条执行，命令与输出记录于阶段证据文档。
-- `plan-governance-cli check .` 与 `--strict-readiness` 均无 ERROR。
+待本阶段准入时细化。
 
 ### 测试覆盖率
 
-`swift test` 数量与结果记录于阶段证据；Core 关键路径（ConfigStore、PlistRenderer、LegacyImporter、executor 状态解析、迁移回滚编排）必须有用例覆盖。
+阶段 2 起继续要求 `swift test` 全部通过并记录测试数量；覆盖率要求随准入细化。
 
 ### 完成条件
 
-- 样本矩阵全部行有证据且通过。
-- 两条隧道真实接管完成，验收口径（杀进程重连 / 退出即停 / 重启恢复）实测通过。
-- 旧 plist 备份存在于 `migration-backup` 目录，且 `~/Library/LaunchAgents` 下旧 agent 已 bootout。
-- `docs/PLAN_MAP.md` 与本计划状态、证据已同步；治理检查通过。
-- motorcycle-manual-app 仓库"SSH 隧道使用说明"跨仓库同步项已执行并记录。
+待本阶段准入时定义。
 
 ## 后续阶段（粗粒度）
 
-- 阶段 2：`app` 执行器（子进程托管，ModelPad 模式）；每条隧道可选状态探针；launchd/app 日志查看；`build_app.sh` 打包 .app 与图标。准入时补充探针语义与打包验证方式。
+- 阶段 2 已进入当前阶段（见"当前阶段"章节）；v1 范围内暂无更后续阶段。
 
 ## 最新独立准入复核
 
@@ -269,6 +249,7 @@ UI 触发：首启检测到旧 agent 且配置中无对应隧道 → 迁移面�
 |---|---|---|---|---|---|
 | 2026-08-29 | 阶段 0 完成复核 | 阶段 0 | 通过 | 独立复核轮次复跑四条基线命令（两 agent running、curl 401、ECS LISTEN 22022）与快照一致；嵌入 plist 与磁盘原文脱敏外全等；仓库无 ECS 明文地址；治理检查通过 | ZCode Agent（独立复核轮次） |
 | 2026-08-29 | 阶段准入复核 | 阶段 1 | 通过（达到待实施标准） | 准入摘要七字段齐备；样本矩阵九行完整；Step 0 基线快照存在；失败/回滚边界明确（备份先行、bootstrap 失败即回滚）；PLAN_MAP 已同步；治理检查含 `--strict-readiness` 通过 | ZCode Agent（独立复核轮次） |
+| 2026-08-29 | 阶段 1 完成复核 | 阶段 1 | 通过 | 独立复核轮次复跑：双新标签 `running`（pid 90512/90517）、curl 401、ECS LISTEN 22022；config `command` 与旧 plist `ProgramArguments` 逐字等价（双隧道）；备份 2 份、`~/Library/LaunchAgents` 零残留；`swift test` 29/29、构建零告警；治理检查含 `--strict-readiness` 通过 | ZCode Agent（独立复核轮次） |
 
 ## 未决问题
 
