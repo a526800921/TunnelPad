@@ -30,6 +30,15 @@ public struct TunnelPaths: Sendable, Equatable {
         supportDirectory.appendingPathComponent("migration-backup", isDirectory: true)
     }
 
+    /// app 执行器子进程的 pidfile 目录（信号退出路径据此终止残留子进程）。
+    public var runDirectory: URL {
+        supportDirectory.appendingPathComponent("run", isDirectory: true)
+    }
+
+    public func pidfileURL(for tunnel: TunnelConfig) -> URL {
+        runDirectory.appendingPathComponent("\(tunnel.id).pid")
+    }
+
     /// 日志放 `~/Library/Logs/TunnelPad`，避开 TCC 限制路径。
     public var logsDirectory: URL {
         homeDirectory.appendingPathComponent("Library/Logs/TunnelPad", isDirectory: true)

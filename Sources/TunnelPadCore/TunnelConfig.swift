@@ -6,6 +6,27 @@ public enum ExecutorKind: String, Codable, Sendable, CaseIterable {
     case app
 }
 
+/// 可选状态探针配置（schema v1 追加的可选字段，向后兼容）。
+public struct ProbeConfig: Codable, Equatable, Sendable {
+    public var url: String
+    public var expectedStatuses: [Int]
+
+    public init(url: String, expectedStatuses: [Int] = [200]) {
+        self.url = url
+        self.expectedStatuses = expectedStatuses
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case url, expectedStatuses
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        url = try container.decode(String.self, forKey: .url)
+        expectedStatuses = try container.decodeIfPresent([Int].self, forKey: .expectedStatuses) ?? [200]
+    }
+}
+
 /// 单条隧道配置（config.json 的 tunnels 条目）。
 public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
     public var id: String
@@ -14,8 +35,10 @@ public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
     public var command: [String]
     public var executor: ExecutorKind
     public var keepAlive: Bool
-    /// 秒。写入生成 plist 的 ThrottleInterval。
+    /// 秒。写入生成 plist 的 ThrottleInterval；app 执行器用作意外退出后的重启延迟。
     public var throttleInterval: Int
+    /// 可选状态探针；缺省不探测。
+    public var probe: ProbeConfig?
 
     public static let idPattern = "^[a-z0-9-]+$"
     public static let launchdLabelPrefix = "com.jafish.tunnelpad."
@@ -26,7 +49,8 @@ public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
         command: [String],
         executor: ExecutorKind = .launchd,
         keepAlive: Bool = true,
-        throttleInterval: Int = 10
+        throttleInterval: Int = 10,
+        probe: ProbeConfig? = nil
     ) {
         self.id = id
         self.name = name
@@ -34,6 +58,7 @@ public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
         self.executor = executor
         self.keepAlive = keepAlive
         self.throttleInterval = throttleInterval
+        self.probe = probe
     }
 
     public var launchdLabel: String { Self.launchdLabelPrefix + id }
@@ -44,10 +69,10 @@ public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, command, executor, keepAlive, throttleInterval
+        case id, name, command, executor, keepAlive, throttleInterval, probe
     }
 
-    /// 手写配置允许省略带默认值的字段。
+    /// 手写配置允许省略带默认值的字段；缺 `probe` 即不探测（向后兼容）。
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
@@ -56,6 +81,7 @@ public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
         executor = try container.decodeIfPresent(ExecutorKind.self, forKey: .executor) ?? .launchd
         keepAlive = try container.decodeIfPresent(Bool.self, forKey: .keepAlive) ?? true
         throttleInterval = try container.decodeIfPresent(Int.self, forKey: .throttleInterval) ?? 10
+        probe = try container.decodeIfPresent(ProbeConfig.self, forKey: .probe)
 
         guard Self.isValidID(id) else {
             throw DecodingError.dataCorruptedError(

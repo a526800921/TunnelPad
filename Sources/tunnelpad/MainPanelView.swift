@@ -131,6 +131,7 @@ struct MainPanelView: View {
 struct TunnelRowView: View {
     let tunnel: TunnelConfig
     @EnvironmentObject private var manager: TunnelManager
+    @State private var showLog = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -140,43 +141,71 @@ struct TunnelRowView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(tunnel.name).font(.body.bold())
-                    Text(tunnel.executor == .launchd ? "launchd" : "app（阶段 2）")
+                    Text(tunnel.executor == .launchd ? "launchd" : "app")
                         .font(.caption2)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                    if tunnel.probe != nil {
+                        probeBadge
+                    }
                 }
                 Text(tunnel.launchdLabel)
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            if tunnel.executor == .launchd {
-                HStack(spacing: 6) {
-                    Button("启动") { manager.start(tunnel.id) }
-                        .disabled(!canStart)
-                    Button("停止") { manager.stop(tunnel.id) }
-                        .disabled(!canStop)
-                    Button("重启") { manager.restart(tunnel.id) }
-                        .disabled(!canRestart)
-                }
-                Text(statusText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 110, alignment: .trailing)
+            HStack(spacing: 6) {
+                Button("启动") { manager.start(tunnel.id) }
+                    .disabled(!canStart)
+                Button("停止") { manager.stop(tunnel.id) }
+                    .disabled(!canStop)
+                Button("重启") { manager.restart(tunnel.id) }
+                    .disabled(!canRestart)
+                Button("日志") { showLog = true }
             }
+            Text(statusText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 110, alignment: .trailing)
         }
         .padding(.vertical, 2)
+        .sheet(isPresented: $showLog) {
+            LogSheetView(tunnel: tunnel)
+        }
+    }
+
+    @ViewBuilder
+    private var probeBadge: some View {
+        switch manager.probeResults[tunnel.id] {
+        case .satisfied(let status):
+            probeText("探针 \(status) ✓", color: .green)
+        case .unexpected(let status):
+            probeText("探针 \(status) !", color: .orange)
+        case .failed:
+            probeText("探针失败", color: .red)
+        case nil:
+            probeText("探针 …", color: .gray)
+        }
+    }
+
+    private func probeText(_ label: String, color: Color) -> some View {
+        Text(label)
+            .font(.caption2)
+            .foregroundStyle(color)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(Capsule().strokeBorder(color.opacity(0.5)))
     }
 
     private var status: TunnelStatus? { manager.statuses[tunnel.id] }
     private var busy: Bool { manager.busyIDs.contains(tunnel.id) }
 
     private var canStart: Bool {
-        !busy && tunnel.executor == .launchd && !(status?.isRunning ?? false)
+        !busy && !(status?.isRunning ?? false)
     }
     private var canStop: Bool {
-        !busy && tunnel.executor == .launchd && status?.isLoaded == true
+        !busy && (status?.isLoaded == true || status?.isRunning == true)
     }
     private var canRestart: Bool { canStop }
 

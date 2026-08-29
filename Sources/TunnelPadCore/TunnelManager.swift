@@ -6,19 +6,23 @@ import Combine
 public final class TunnelManager: ObservableObject {
     public let paths: TunnelPaths
     public let executor: LaunchCtlExecutor
+    public let appExecutor: AppProcessExecutor
     public let migrationService: MigrationService
 
     @Published public private(set) var config: AppConfig
     @Published public private(set) var statuses: [String: TunnelStatus] = [:]
+    @Published public private(set) var probeResults: [String: ProbeResult] = [:]
     @Published public private(set) var busyIDs: Set<String> = []
     @Published public var lastMessage: String?
     @Published public var lastError: String?
 
     private let store: ConfigStore
+    private let probeService = ProbeService()
 
     public init(paths: TunnelPaths, executor: LaunchCtlExecutor = LaunchCtlExecutor()) {
         self.paths = paths
         self.executor = executor
+        self.appExecutor = AppProcessExecutor(paths: paths)
         self.migrationService = MigrationService(paths: paths, executor: executor)
         self.store = ConfigStore(paths: paths)
         let loaded = store.load()
@@ -35,8 +39,36 @@ public final class TunnelManager: ObservableObject {
     // MARK: - 状态
 
     public func refresh() {
-        for tunnel in config.tunnels where tunnel.executor == .launchd {
-            statuses[tunnel.id] = executor.status(label: tunnel.launchdLabel)
+        for tunnel in config.tunnels {
+            switch tunnel.executor {
+            case .launchd:
+                statuses[tunnel.id] = executor.status(label: tunnel.launchdLabel)
+            case .app:
+                statuses[tunnel.id] = appExecutor.status(id: tunnel.id)
+            }
+        }
+        runProbes()
+    }
+
+    /// 异步执行配置了探针的隧道探测，完成后更新展示。
+    private func runProbes() {
+        let probes = config.tunnels.compactMap { tunnel -> (String, ProbeConfig)? in
+            guard let probe = tunnel.probe else { return nil }
+            return (tunnel.id, probe)
+        }
+        guard !probes.isEmpty else { return }
+        let service = probeService
+        Task.detached(priority: .utility) { [weak self] in
+            for (id, probe) in probes {
+                let result = await service.check(probe)
+                guard let self else { return }
+                await MainActor.run {
+                    // 隧道可能已被移除或探针配置已变化，仅按 id 写回
+                    if self.config.tunnels.contains(where: { $0.id == id && $0.probe != nil }) {
+                        self.probeResults[id] = result
+                    }
+                }
+            }
         }
     }
 
@@ -44,73 +76,90 @@ public final class TunnelManager: ObservableObject {
 
     public func start(_ id: String) {
         guard let tunnel = tunnel(id: id) else { return }
-        guard tunnel.executor == .launchd else {
-            lastError = "「\(tunnel.name)」使用 app 执行器，阶段 2 支持"
-            return
-        }
         guard !busyIDs.contains(id) else { return }
-        if case .running = executor.status(label: tunnel.launchdLabel) { return }
 
         busyIDs.insert(id)
         defer { busyIDs.remove(id) }
-        do {
-            let plistURL = try LaunchdPlistRenderer.writePlist(for: tunnel, paths: paths)
-            try executor.bootstrap(label: tunnel.launchdLabel, plistURL: plistURL)
-            lastMessage = "「\(tunnel.name)」已启动"
-        } catch {
-            lastError = "启动「\(tunnel.name)」失败：\(error)"
+
+        switch tunnel.executor {
+        case .launchd:
+            if case .running = executor.status(label: tunnel.launchdLabel) { return }
+            do {
+                let plistURL = try LaunchdPlistRenderer.writePlist(for: tunnel, paths: paths)
+                try executor.bootstrap(label: tunnel.launchdLabel, plistURL: plistURL)
+                lastMessage = "「\(tunnel.name)」已启动"
+            } catch {
+                lastError = "启动「\(tunnel.name)」失败：\(error)"
+            }
+        case .app:
+            do {
+                try appExecutor.start(tunnel)
+                lastMessage = "「\(tunnel.name)」已启动（app 执行器）"
+            } catch {
+                lastError = "启动「\(tunnel.name)」失败：\(error)"
+            }
         }
         refresh()
     }
 
     public func stop(_ id: String) {
         guard let tunnel = tunnel(id: id) else { return }
-        guard tunnel.executor == .launchd else {
-            lastError = "「\(tunnel.name)」使用 app 执行器，阶段 2 支持"
-            return
-        }
         guard !busyIDs.contains(id) else { return }
 
         busyIDs.insert(id)
         defer { busyIDs.remove(id) }
-        do {
-            try executor.bootout(label: tunnel.launchdLabel)
+
+        switch tunnel.executor {
+        case .launchd:
+            do {
+                try executor.bootout(label: tunnel.launchdLabel)
+                lastMessage = "「\(tunnel.name)」已停止"
+            } catch {
+                lastError = "停止「\(tunnel.name)」失败：\(error)"
+            }
+        case .app:
+            appExecutor.stop(tunnel)
             lastMessage = "「\(tunnel.name)」已停止"
-        } catch {
-            lastError = "停止「\(tunnel.name)」失败：\(error)"
         }
         refresh()
     }
 
     public func restart(_ id: String) {
         guard let tunnel = tunnel(id: id) else { return }
-        guard tunnel.executor == .launchd else {
-            lastError = "「\(tunnel.name)」使用 app 执行器，阶段 2 支持"
-            return
-        }
         guard !busyIDs.contains(id) else { return }
 
         busyIDs.insert(id)
         defer { busyIDs.remove(id) }
-        do {
-            _ = try? executor.bootout(label: tunnel.launchdLabel)
-            let plistURL = try LaunchdPlistRenderer.writePlist(for: tunnel, paths: paths)
-            try executor.bootstrap(label: tunnel.launchdLabel, plistURL: plistURL)
-            lastMessage = "「\(tunnel.name)」已重启"
-        } catch {
-            lastError = "重启「\(tunnel.name)」失败：\(error)"
+
+        switch tunnel.executor {
+        case .launchd:
+            do {
+                _ = try? executor.bootout(label: tunnel.launchdLabel)
+                let plistURL = try LaunchdPlistRenderer.writePlist(for: tunnel, paths: paths)
+                try executor.bootstrap(label: tunnel.launchdLabel, plistURL: plistURL)
+                lastMessage = "「\(tunnel.name)」已重启"
+            } catch {
+                lastError = "重启「\(tunnel.name)」失败：\(error)"
+            }
+        case .app:
+            do {
+                try appExecutor.restart(tunnel)
+                lastMessage = "「\(tunnel.name)」已重启"
+            } catch {
+                lastError = "重启「\(tunnel.name)」失败：\(error)"
+            }
         }
         refresh()
     }
 
     public func startAll() {
-        for tunnel in config.tunnels where tunnel.executor == .launchd {
+        for tunnel in config.tunnels {
             start(tunnel.id)
         }
     }
 
     public func stopAll() {
-        for tunnel in config.tunnels where tunnel.executor == .launchd {
+        for tunnel in config.tunnels {
             stop(tunnel.id)
         }
     }

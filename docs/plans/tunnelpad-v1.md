@@ -93,7 +93,7 @@ v1 引入 TunnelPad 自身的配置文件 schema（config.json v1，定义见"�
 |---|---|---|---|---|
 | 阶段 0 | 迁移基线与现状快照（只读，不改动现有服务） | 治理文档已初始化 | 基线命令可复现、快照文档落盘 | 已完成 |
 | 阶段 1 | 应用骨架、配置模型、launchd 执行器、迁移接管与退出语义、最小 UI | 阶段 0 独立复核通过 | `swift test` + launchctl 真实验证 | 已完成 |
-| 阶段 2 | app 执行器、状态探针、日志查看与 .app 打包 | 阶段 1 独立复核通过 | `swift test` + 手动验收 | 待实施 |
+| 阶段 2 | app 执行器、状态探针、日志查看与 .app 打包 | 阶段 1 独立复核通过 | `swift test` + 手动验收 | 实施中 |
 
 ## 阶段 0 记录（已完成，2026-08-29）
 
@@ -234,7 +234,7 @@ v1 引入 TunnelPad 自身的配置文件 schema（config.json v1，定义见"�
 
 | 字段 | 内容 |
 |---|---|
-| 准入状态 | 待实施 |
+| 准入状态 | 实施中 |
 | Step 0 | 功能新增 + 行为迁移混合基线：ModelPad 子进程托管实现（`ModelProcessManager.swift`，2026-08-29 已读取核对）为 app 执行器参照；阶段 0/1 真实行为（curl 401 / ECS LISTEN 22022）为探针期望值基线 |
 | 样本矩阵 | 见下方"Step 0 证据"节内阶段 2 样本矩阵表 |
 | 验证方式 | `swift build` 零告警、`swift test` 全部通过（记录数量）；真实验证矩阵逐项执行并记录；治理检查（含 `--strict-readiness`）通过 |
@@ -278,7 +278,7 @@ v1 引入 TunnelPad 自身的配置文件 schema（config.json v1，定义见"�
 
 | 日期 | 类型 | 动作/结果 | 证据 | 状态 | 记录者 |
 |---|---|---|---|---|---|
-| - | - | - | - | - | - |
+| 2026-08-29 | 实施 | 阶段 2 代码完成：ProbeConfig/ProbeService（三态、绕过系统代理）、AppProcessExecutor（spawn/keepAlive 重启/SIGTERM→KILL/pidfile/日志追加）、LogTail、TunnelManager 按 executor 分派 + 异步探针、Shutdown 按 pidfile 终止 app 子进程、行内探针徽标 + 日志 sheet、App/Resources（Info.plist LSUIElement + TunnelPad.icns）、scripts/make_icon.swift 与 build_app.sh；`swift build` 零告警，`swift test` 48 用例全部通过 | swift build/test 输出（阶段证据文档收录） | 进行中 | ZCode Agent（实施轮次） |
 
 ### 验证方式
 

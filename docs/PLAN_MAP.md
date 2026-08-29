@@ -19,19 +19,22 @@
 
 | 计划 | 状态 | 当前阶段 | 最后更新 | 依赖 | 证据 |
 |---|---|---|---|---|---|
-| [TunnelPad v1 隧道管理应用](plans/tunnelpad-v1.md) | 待实施 | 阶段 2 | 2026-08-29 | - | [阶段 1 接管验证记录](data-quality/tunnelpad-v1-stage1-takeover-20260829.md) |
+| [TunnelPad v1 隧道管理应用](plans/tunnelpad-v1.md) | 实施中 | 阶段 2 | 2026-08-29 | - | [阶段 1 接管验证记录](data-quality/tunnelpad-v1-stage1-takeover-20260829.md) |
+| [ECS 动态 SSH 公网 IP 同步](plans/ecs-dynamic-ssh-ip.md) | 设计中 | 阶段 0 | 2026-08-29 | - | [阶段 0 计划与准入项](plans/ecs-dynamic-ssh-ip.md#当前阶段) |
 
 允许状态：`候选`、`设计中`、`待实施`、`实施中`、`已完成`、`已替代`、`已合并`、`已废弃`。
 
 ## 推荐顺序
 
-1. `tunnelpad-v1`
+1. `tunnelpad-v1` 与 `ecs-dynamic-ssh-ip` 阶段 0 可并行推进。
+2. `ecs-dynamic-ssh-ip` 后续阶段按其自身独立准入复核推进。
 
 ## 依赖关系
 
 | 计划 | 依赖 | 原因 |
 |---|---|---|
 | tunnelpad-v1 | - | - |
+| ecs-dynamic-ssh-ip | - | 用户确认可立即进行本计划的阶段 0 准备；本计划不修改 TunnelPad v1 范围，与 v1 无阶段依赖。 |
 
 ## 替代、合并和废弃
 
@@ -44,6 +47,7 @@
 | 问题 | 推荐方案 | 影响范围 | 是否阻塞当前阶段 | 状态 |
 |---|---|---|---|---|
 | - | - | - | 否 | 已延后 |
+| 新专用 RAM 凭证尚未创建，且其实际授权边界未验证 | 排除现有 FullAccess 凭证；仅在新的专用凭证通过最小权限验证后继续 | ecs-dynamic-ssh-ip 阶段 0、阶段 1 | 是 | 待用户后续创建与验证 |
 
 ## 完成证据
 
