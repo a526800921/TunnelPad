@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 import TunnelPadCore
 
-/// 主面板：左侧隧道列表，右侧详情（操作 + 内嵌日志），详情标题栏右上角是设置入口。
+/// 主面板：左侧固定隧道列表，右侧详情（操作 + 内嵌日志），详情标题栏右上角是设置入口。
+/// 不用 NavigationSplitView：它自带的侧栏折叠控件与"固定侧栏"的产品约定相悖，改用 HSplitView 保留拖拽调宽。
 struct MainPanelView: View {
     @EnvironmentObject private var manager: TunnelManager
     @State private var selectedID: String?
@@ -13,11 +14,11 @@ struct MainPanelView: View {
     private let refreshTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        NavigationSplitView {
+        HSplitView {
             sidebar
-                .navigationSplitViewColumnWidth(min: 230, ideal: 270, max: 360)
-        } detail: {
+                .frame(minWidth: 230, idealWidth: 270, maxWidth: 360)
             detailPane
+                .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
         }
         .onAppear {
             manager.refresh()
@@ -111,10 +112,6 @@ struct MainPanelView: View {
             }
             .help("重新加载 config.json")
             Spacer()
-            Button("全部启动") { manager.startAll() }
-                .disabled(manager.config.tunnels.isEmpty)
-            Button("全部停止") { manager.stopAll() }
-                .disabled(manager.config.tunnels.isEmpty)
         }
     }
 
@@ -183,23 +180,20 @@ struct MainPanelView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    /// 消息栏只承载错误；信息类文案（已保存/已启动等）已按界面优化计划移除，操作结果以状态点与列表变化呈现。
+    @ViewBuilder
     private var messageBar: some View {
-        HStack {
-            if let error = manager.lastError {
+        if let error = manager.lastError {
+            HStack {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
                     .font(.caption)
                     .lineLimit(2)
-            } else if let message = manager.lastMessage {
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                Spacer()
             }
-            Spacer()
+            .padding(.horizontal, 20)
+            .padding(.vertical, 6)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 6)
     }
 
     private func rescanLegacyAgents() {
