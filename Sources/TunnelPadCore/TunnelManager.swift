@@ -36,6 +36,21 @@ public final class TunnelManager: ObservableObject {
         config.tunnels.first { $0.id == id }
     }
 
+    /// 手动编辑 config.json 后重新加载；丢弃已移除隧道的状态与探针缓存。
+    public func reloadConfig() {
+        let loaded = store.load()
+        config = loaded.config
+        let validIDs = Set(config.tunnels.map(\.id))
+        statuses = statuses.filter { validIDs.contains($0.key) }
+        probeResults = probeResults.filter { validIDs.contains($0.key) }
+        if let recovered = loaded.recoveredFrom {
+            lastMessage = "配置文件损坏，已留档 \(recovered.lastPathComponent)，已重建空配置"
+        } else {
+            lastMessage = "已重新加载配置，共 \(config.tunnels.count) 条隧道"
+        }
+        refresh()
+    }
+
     // MARK: - 状态
 
     public func refresh() {

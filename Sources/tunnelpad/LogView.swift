@@ -1,11 +1,11 @@
+import AppKit
 import SwiftUI
 import TunnelPadCore
 
-/// 日志查看 sheet：显示隧道日志文件末 500 行，支持 2s 自动刷新与复制全部。
-struct LogSheetView: View {
+/// 内嵌日志面板：显示隧道日志文件末 500 行，支持 2s 自动刷新与复制。
+struct LogView: View {
     let tunnel: TunnelConfig
     @EnvironmentObject private var manager: TunnelManager
-    @Environment(\.dismiss) private var dismiss
 
     @State private var text = ""
     @State private var fileMissing = false
@@ -15,52 +15,59 @@ struct LogSheetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("日志：\(tunnel.name)")
+            HStack(spacing: 10) {
+                Text("日志")
                     .font(.headline)
-                Text(tunnel.executor == .launchd ? "launchd" : "app")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 Spacer()
                 Toggle("自动刷新", isOn: $autoRefresh)
                     .toggleStyle(.checkbox)
-                Button("刷新") { load() }
-                Button("复制全部") {
+                Button {
+                    load()
+                } label: {
+                    Label("刷新", systemImage: "arrow.clockwise")
+                }
+                Button {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(text, forType: .string)
+                } label: {
+                    Label("复制", systemImage: "doc.on.doc")
                 }
-                Button("完成") { dismiss() }
-                    .keyboardShortcut(.defaultAction)
-            }
-            if fileMissing {
-                Text("日志文件尚未生成（隧道启动后写入 \(manager.paths.logURL(for: tunnel).path)）")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             ScrollViewReader { proxy in
                 ScrollView {
-                    Text(text.isEmpty ? " " : text)
+                    Text(logText)
                         .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(fileMissing ? Color.secondary : Color.primary)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .id("log-bottom")
                 }
+                .frame(maxHeight: .infinity)
                 .onChange(of: text) { _, _ in
-                    proxy.scrollTo("log-bottom", anchor: .bottom)
+                    // 自动刷新时跟随最新内容；手动刷新不打断回看位置。
+                    if autoRefresh {
+                        proxy.scrollTo("log-bottom", anchor: .bottom)
+                    }
                 }
             }
             Text(manager.paths.logURL(for: tunnel).path)
                 .font(.caption2.monospaced())
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
+                .lineLimit(1)
+                .truncationMode(.head)
         }
-        .padding(14)
-        .frame(minWidth: 720, minHeight: 460)
         .onAppear(perform: load)
         .onReceive(timer) { _ in
             if autoRefresh { load() }
         }
+    }
+
+    private var logText: String {
+        if fileMissing {
+            return "日志文件尚未生成（隧道启动后写入）"
+        }
+        return text.isEmpty ? " " : text
     }
 
     private func load() {
