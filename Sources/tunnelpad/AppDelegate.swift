@@ -11,7 +11,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var menuBarController: MenuBarController?
     private var mainWindow: NSWindow?
     private var isTerminating = false
-    private var signalSources: [DispatchSourceSignal] = []
 
     override init() {
         self.manager = TunnelManager(paths: .standard())
@@ -21,7 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     // MARK: - 应用生命周期
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        installSignalHandlers()
+        Shutdown.installSignalHandlers()
         menuBarController = MenuBarController(manager: manager) { [weak self] in
             self?.showMainWindow()
         }
@@ -70,21 +69,5 @@ extension AppDelegate: NSWindowDelegate {
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         sender.orderOut(nil)
         return false
-    }
-}
-
-// MARK: - 信号处理（SIGTERM/SIGINT 也执行"退出即停"）
-
-extension AppDelegate {
-
-    /// logout / shutdown / kill 等场景与正常退出保持同语义。
-    private func installSignalHandlers() {
-        for signalNumber: Int32 in [SIGTERM, SIGINT] {
-            signal(signalNumber, SIG_IGN)
-            let source = DispatchSource.makeSignalSource(signal: signalNumber, queue: DispatchQueue.global())
-            source.setEventHandler { Shutdown.stopAllAndExit() }
-            source.resume()
-            signalSources.append(source)
-        }
     }
 }
