@@ -27,7 +27,7 @@
 
 ### plist 原文
 
-来源：`/Users/jafish/Library/LaunchAgents/com.jafish.motorcycle-manual.admin-tunnel.plist`（仓库外，只读读取）。`root@47.109.202.254` 按红线脱敏为 `root@<ECS>`：
+来源：`/Users/jafish/Library/LaunchAgents/com.jafish.motorcycle-manual.admin-tunnel.plist`（仓库外，只读读取）。原文中的 ECS 主机地址按红线脱敏为 `root@<ECS>`：
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>

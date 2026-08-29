@@ -19,7 +19,7 @@
 
 | 计划 | 状态 | 当前阶段 | 最后更新 | 依赖 | 证据 |
 |---|---|---|---|---|---|
-| [TunnelPad v1 隧道管理应用](plans/tunnelpad-v1.md) | 设计中 | 阶段 1 | 2026-08-29 | - | [阶段 0 基线快照](data-quality/tunnelpad-v1-stage0-baseline-20260829.md) |
+| [TunnelPad v1 隧道管理应用](plans/tunnelpad-v1.md) | 待实施 | 阶段 1 | 2026-08-29 | - | [阶段 0 基线快照](data-quality/tunnelpad-v1-stage0-baseline-20260829.md) |
 
 允许状态：`候选`、`设计中`、`待实施`、`实施中`、`已完成`、`已替代`、`已合并`、`已废弃`。
 
