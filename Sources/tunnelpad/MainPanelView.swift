@@ -8,6 +8,7 @@ struct MainPanelView: View {
     @EnvironmentObject private var manager: TunnelManager
     @State private var selectedID: String?
     @State private var settingsTunnel: TunnelConfig?
+    @State private var showNewTunnel = false
     @State private var legacyAgents: [LegacyAgent] = []
 
     /// 周期刷新状态与探针，避免启动瞬间的过期红标一直挂着。
@@ -98,6 +99,12 @@ struct MainPanelView: View {
     private var sidebarFooter: some View {
         HStack(spacing: 8) {
             Button {
+                showNewTunnel = true
+            } label: {
+                Image(systemName: "plus")
+            }
+            .help("新增隧道")
+            Button {
                 manager.refresh()
                 rescanLegacyAgents()
             } label: {
@@ -131,6 +138,9 @@ struct MainPanelView: View {
         }
         .sheet(item: $settingsTunnel) { tunnel in
             TunnelSettingsSheet(tunnel: tunnel)
+        }
+        .sheet(isPresented: $showNewTunnel) {
+            NewTunnelSheet()
         }
     }
 

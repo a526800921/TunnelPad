@@ -214,4 +214,54 @@ final class TunnelManagerTests: XCTestCase {
         XCTAssertEqual(manager.config.tunnels.map(\.id), ["keep-a"])
         XCTAssertNil(manager.lastError)
     }
+
+    // MARK: - addTunnel
+
+    @MainActor
+    func testAddTunnelPersistsWithoutStarting() throws {
+        let tempHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tunnelpad-manager-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempHome, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempHome) }
+
+        let paths = TunnelPaths(homeDirectory: tempHome)
+        let store = ConfigStore(paths: paths)
+        try store.save(AppConfig(tunnels: [
+            TunnelConfig(id: "base", name: "B", command: ["/usr/bin/ssh", "-N", "b"])
+        ]))
+
+        let manager = TunnelManager(paths: paths)
+        manager.addTunnel(TunnelConfig(id: "new-a", name: "A", command: ["/bin/sleep", "30"], executor: .app))
+
+        XCTAssertEqual(manager.config.tunnels.map(\.id), ["base", "new-a"], "新增应追加到列表末尾")
+        XCTAssertEqual(store.load().config.tunnels.map(\.id), ["base", "new-a"], "新增应持久化到 config.json")
+        XCTAssertNil(manager.lastError)
+        manager.refresh()
+        XCTAssertEqual(manager.statuses["new-a"], .notLoaded, "新增后不应自动启动")
+    }
+
+    @MainActor
+    func testAddTunnelRejectsDuplicateAndInvalidIDs() throws {
+        let tempHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tunnelpad-manager-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempHome, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempHome) }
+
+        let paths = TunnelPaths(homeDirectory: tempHome)
+        let store = ConfigStore(paths: paths)
+        try store.save(AppConfig(tunnels: [
+            TunnelConfig(id: "dup", name: "D", command: ["/usr/bin/ssh", "-N", "d"])
+        ]))
+
+        let manager = TunnelManager(paths: paths)
+        manager.addTunnel(TunnelConfig(id: "dup", name: "Again", command: ["/bin/echo"]))
+        XCTAssertEqual(manager.config.tunnels.count, 1, "重复 id 应被拒绝")
+        XCTAssertNotNil(manager.lastError)
+
+        manager.lastError = nil
+        manager.addTunnel(TunnelConfig(id: "Bad_ID", name: "Bad", command: ["/bin/echo"]))
+        XCTAssertEqual(manager.config.tunnels.count, 1, "非法 id 应被拒绝")
+        XCTAssertNotNil(manager.lastError)
+        XCTAssertEqual(store.load().config.tunnels.count, 1, "拒绝时不得写入配置")
+    }
 }

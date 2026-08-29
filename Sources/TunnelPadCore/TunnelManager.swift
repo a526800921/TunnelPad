@@ -137,6 +137,31 @@ public final class TunnelManager: ObservableObject {
         refresh()
     }
 
+    /// 新增隧道：校验 id 非空/合法/唯一后追加并落盘；不自动启动。保存失败回滚内存态。
+    public func addTunnel(_ tunnel: TunnelConfig) {
+        let validID = !tunnel.id.isEmpty && tunnel.id.allSatisfy { char in
+            char.isASCII && (char.isLetter || char.isNumber || char == "-")
+        }
+        guard validID else {
+            lastError = "新增「\(tunnel.name)」失败：id 非法（仅限字母、数字、连字符）"
+            return
+        }
+        guard !config.tunnels.contains(where: { $0.id == tunnel.id }) else {
+            lastError = "新增「\(tunnel.name)」失败：id「\(tunnel.id)」已存在"
+            return
+        }
+
+        config.tunnels.append(tunnel)
+        do {
+            try store.save(config)
+        } catch {
+            config.tunnels.removeAll { $0.id == tunnel.id }
+            lastError = "新增「\(tunnel.name)」失败：写入配置出错 \(error)"
+            return
+        }
+        refresh()
+    }
+
     // MARK: - 状态
 
     public func refresh() {
