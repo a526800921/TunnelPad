@@ -19,8 +19,8 @@
 
 | 计划 | 状态 | 当前阶段 | 最后更新 | 依赖 | 证据 |
 |---|---|---|---|---|---|
-| [TunnelPad v1 隧道管理应用](plans/tunnelpad-v1.md) | 实施中 | 阶段 2 | 2026-08-29 | - | [阶段 1 接管验证记录](data-quality/tunnelpad-v1-stage1-takeover-20260829.md) |
-| [ECS 动态 SSH 公网 IP 同步](plans/ecs-dynamic-ssh-ip.md) | 设计中 | 阶段 0 | 2026-08-29 | - | [阶段 0 计划与准入项](plans/ecs-dynamic-ssh-ip.md#当前阶段) |
+| [TunnelPad v1 隧道管理应用](plans/tunnelpad-v1.md) | 已完成 | - | 2026-08-29 | - | [阶段 2 功能与验收记录](data-quality/tunnelpad-v1-stage2-features-20260829.md) |
+| [ECS 动态 SSH 公网 IP 同步](plans/ecs-dynamic-ssh-ip.md) | 设计中 | 阶段 0 | 2026-08-29 | - | [阶段 0 本机预检](data-quality/ecs-dynamic-ssh-ip-stage0-local-preflight-20260829.md) |
 
 允许状态：`候选`、`设计中`、`待实施`、`实施中`、`已完成`、`已替代`、`已合并`、`已废弃`。
 
@@ -48,6 +48,7 @@
 |---|---|---|---|---|
 | - | - | - | 否 | 已延后 |
 | 新专用 RAM 凭证尚未创建，且其实际授权边界未验证 | 排除现有 FullAccess 凭证；仅在新的专用凭证通过最小权限验证后继续 | ecs-dynamic-ssh-ip 阶段 0、阶段 1 | 是 | 待用户后续创建与验证 |
+| 阿里云 CLI 尚未安装 | 阶段 0 获得新专用凭证后安装并以命名 profile 进行只读验证；不得导入现有 FullAccess 凭证 | ecs-dynamic-ssh-ip 阶段 0 | 是 | 已由本机预检确认 |
 
 ## 完成证据
 
@@ -55,3 +56,4 @@
 |---|---|---|
 | tunnelpad-v1 | 阶段 0 | [基线快照](data-quality/tunnelpad-v1-stage0-baseline-20260829.md)（样本矩阵四项通过，2026-08-29） |
 | tunnelpad-v1 | 阶段 1 | [接管与验证记录](data-quality/tunnelpad-v1-stage1-takeover-20260829.md)（双隧道接管/杀进程 1s 重连/退出即停双路径/重启恢复，2026-08-29） |
+| tunnelpad-v1 | 阶段 2 | [功能与验收记录](data-quality/tunnelpad-v1-stage2-features-20260829.md)（9 行矩阵全过、app 执行器/探针/日志/打包，.app 交付，2026-08-29） |

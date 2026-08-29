@@ -32,8 +32,14 @@ final class MenuBarController: NSObject {
     private func setup() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         guard let button = statusItem?.button else { return }
-        button.image = Self.makeIcon()
+        button.image = Self.makeMenuBarIcon(size: 22)
         button.imagePosition = .imageOnly
+        button.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: NSStatusItem.squareLength,
+            height: NSStatusItem.squareLength
+        )
 
         let menu = NSMenu()
         menu.delegate = self
@@ -120,24 +126,36 @@ final class MenuBarController: NSObject {
         return image
     }
 
-    private static func makeIcon() -> NSImage {
-        let symbol = NSImage(
-            systemSymbolName: "arrow.triangle.branch",
-            accessibilityDescription: "TunnelPad"
-        )
-        return symbol ?? makeFallbackIcon()
-    }
-
-    private static func makeFallbackIcon() -> NSImage {
-        let size: CGFloat = 18
+    private static func makeMenuBarIcon(size: CGFloat) -> NSImage {
         let image = NSImage(size: NSSize(width: size, height: size))
         image.isTemplate = true
+        image.accessibilityDescription = "TunnelPad"
         image.lockFocus()
-        let path = NSBezierPath(roundedRect: NSRect(x: 1, y: 1, width: size - 2, height: size - 2),
-                                xRadius: 4, yRadius: 4)
+
+        let inset: CGFloat = 1
+        let borderRect = NSRect(x: inset, y: inset, width: size - inset * 2, height: size - inset * 2)
+        let path = NSBezierPath(roundedRect: borderRect, xRadius: 4, yRadius: 4)
         path.lineWidth = 1.2
         NSColor.black.setStroke()
         path.stroke()
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 13, weight: .regular),
+            .foregroundColor: NSColor.black,
+            .paragraphStyle: paragraph,
+        ]
+        let text = "T" as NSString
+        let textSize = text.size(withAttributes: attributes)
+        let textRect = NSRect(
+            x: (size - textSize.width) / 2,
+            y: (size - textSize.height) / 2,
+            width: textSize.width,
+            height: textSize.height
+        )
+        text.draw(in: textRect, withAttributes: attributes)
+
         image.unlockFocus()
         return image
     }

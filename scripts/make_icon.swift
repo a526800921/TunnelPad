@@ -37,15 +37,9 @@ NSGradient(colors: [
     NSColor(calibratedRed: 0.07, green: 0.30, blue: 0.68, alpha: 1),
 ])?.draw(in: rect, angle: -90)
 
-// TunnelPad 字标：外圈 + 居中 T。
-let ringRect = NSRect(x: 218, y: 218, width: 588, height: 588)
-let ring = NSBezierPath(ovalIn: ringRect)
-ring.lineWidth = 52
-NSColor.white.withAlphaComponent(0.96).setStroke()
-ring.stroke()
-
+// TunnelPad 字标：居中 T。
 let letter = "T" as NSString
-let letterFont = NSFont.systemFont(ofSize: 432, weight: .bold)
+let letterFont = NSFont.systemFont(ofSize: 560, weight: .bold)
 let letterAttributes: [NSAttributedString.Key: Any] = [
     .font: letterFont,
     .foregroundColor: NSColor.white,
@@ -53,7 +47,7 @@ let letterAttributes: [NSAttributedString.Key: Any] = [
 let letterSize = letter.size(withAttributes: letterAttributes)
 let letterRect = NSRect(
     x: (size - letterSize.width) / 2,
-    y: (size - letterSize.height) / 2 - 38,
+    y: (size - letterSize.height) / 2 - 48,
     width: letterSize.width,
     height: letterSize.height
 )

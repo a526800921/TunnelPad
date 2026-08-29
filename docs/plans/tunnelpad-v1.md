@@ -93,7 +93,7 @@ v1 引入 TunnelPad 自身的配置文件 schema（config.json v1，定义见"�
 |---|---|---|---|---|
 | 阶段 0 | 迁移基线与现状快照（只读，不改动现有服务） | 治理文档已初始化 | 基线命令可复现、快照文档落盘 | 已完成 |
 | 阶段 1 | 应用骨架、配置模型、launchd 执行器、迁移接管与退出语义、最小 UI | 阶段 0 独立复核通过 | `swift test` + launchctl 真实验证 | 已完成 |
-| 阶段 2 | app 执行器、状态探针、日志查看与 .app 打包 | 阶段 1 独立复核通过 | `swift test` + 手动验收 | 实施中 |
+| 阶段 2 | app 执行器、状态探针、日志查看与 .app 打包 | 阶段 1 独立复核通过 | `swift test` + 手动验收 | 已完成 |
 
 ## 阶段 0 记录（已完成，2026-08-29）
 
@@ -214,92 +214,48 @@ v1 引入 TunnelPad 自身的配置文件 schema（config.json v1，定义见"�
 | 2026-08-29 | 实施 | 阶段 1 代码完成：SPM 骨架（TunnelPadCore + tunnelpad）、config.json v1、launchd 执行器、迁移接管（备份先行+失败回滚）、退出语义（正常退出+SIGTERM）、菜单栏与主面板 UI；`swift build` 零告警，`swift test` 29 用例全部通过 | swift build/test 输出（阶段证据文档收录） | 完成 | ZCode Agent（实施轮次） |
 | 2026-08-29 | 实施 | 真实接管两条隧道 + 杀 ssh 重连（1s）+ 退出即停（双路径，含 SIGTERM 崩溃修复）+ 重启恢复（两次）全部实测通过，线上状态恢复为 TunnelPad 托管运行 | 阶段证据文档 | 完成 | ZCode Agent（实施轮次） |
 
-## 当前阶段
+## 阶段 2 记录（已完成，2026-08-29）
 
-当前阶段为阶段 2（app 执行器、状态探针、日志查看与 .app 打包）。
-
-### 范围
-
-- `app` 执行器：子进程托管（ModelPad 模式），stdout/stderr 追加写入日志文件，`keepAlive` 意外退出自动重启（间隔 `throttleInterval`），stop 为 SIGTERM→5s→SIGKILL；pidfile 供信号退出路径与崩溃残留清理。
-- 每条隧道可选状态探针：HTTP GET（绕过系统代理），`expectedStatuses` 满足即绿；只影响展示，不影响进程管理。
-- 日志查看：主面板每行"日志"按钮打开 sheet，显示日志文件末 500 行，2s 自动刷新（可关）。
-- `scripts/build_app.sh` 打包 `dist/TunnelPad.app`（LSUIElement 菜单栏纯常驻、ad-hoc 签名）+ 应用图标。
-
-### 非目标（本阶段）
-
-- 见"非目标"章节；不改变阶段 1 已冻结的退出语义、launchd 标签约定与 config schema 既有字段。
-- 探针不引入对外依赖（仅用户配置的 URL，阶段内默认只用于回环 admin 探测）。
-
-### 阶段准入摘要
-
-| 字段 | 内容 |
-|---|---|
-| 准入状态 | 实施中 |
-| Step 0 | 功能新增 + 行为迁移混合基线：ModelPad 子进程托管实现（`ModelProcessManager.swift`，2026-08-29 已读取核对）为 app 执行器参照；阶段 0/1 真实行为（curl 401 / ECS LISTEN 22022）为探针期望值基线 |
-| 样本矩阵 | 见下方"Step 0 证据"节内阶段 2 样本矩阵表 |
-| 验证方式 | `swift build` 零告警、`swift test` 全部通过（记录数量）；真实验证矩阵逐项执行并记录；治理检查（含 `--strict-readiness`）通过 |
-| 失败/回滚边界 | 打包失败不影响开发运行；探针配置错误仅展示失败、不影响隧道；验收用临时 demo 隧道结束后从 config 移除；两条真实隧道始终由 TunnelPad 托管在线；实现回滚 = git revert 对应提交 |
-| 当前阻塞项 | 无 |
-| 最新独立准入复核 | 2026-08-29 通过（达到待实施标准） |
-
-### 实施步骤
-
-1. Core：ProbeConfig/ProbeService、AppProcessExecutor（含 pidfile）、LogTail、TunnelPaths 扩展、TunnelManager 集成（按 executor 分派 + 探针异步刷新）、Shutdown 扩展（app 子进程按 pidfile 终止）。
-2. UI：行内探针徽标 + "日志"按钮 + 日志 sheet。
-3. 打包：App/Resources（Info.plist + icns）、`scripts/make_icon.swift`、`scripts/build_app.sh`。
-4. 单元测试全通过后进入真实验证：探针接入 admin-tunnel、demo app 隧道实测、.app 打包与 LSUIElement/退出语义验证。
-5. 证据落盘、治理同步与提交。
-
-### Step 0 证据
-
-类型：功能新增（探针/日志/打包）+ 行为迁移（app 执行器参照 ModelPad 模式）。阶段 2 样本矩阵：
-
-| 输入或基线 | 可执行命令 | 预期结果 | 失败判定 | 输出位置 |
-|---|---|---|---|---|
-| 测试套件 | `swift build && swift test` | 零告警、全部用例通过（记录数量） | 任一失败 | 阶段证据文档 |
-| app 执行器单元 | XCTest：`/bin/sleep` fixture → start 即 running、stop 后进程终止、keepAlive 下外部 kill 后自动重启 | 用例通过 | - | 阶段证据文档 |
-| 探针单元 | XCTest：expectedStatuses 匹配/不匹配/出错三态；config 无 `probe` 字段照常解码（向后兼容） | 用例通过 | - | 阶段证据文档 |
-| 日志单元 | XCTest：LogTail 末 N 行、文件缺失返回 nil | 用例通过 | - | 阶段证据文档 |
-| 真实探针 | config 给 admin-tunnel 加 `probe{url: http://127.0.0.1:8081/admin, expectedStatuses:[200,401]}` → app 内探针显示满足 | 满足 | 失败/不满足 | 阶段证据文档 |
-| 真实 app 执行器 | 临时 demo 隧道（`/bin/sleep 300`，executor=app）经 UI 启动/停止；外部 kill 子进程 → keepAlive 自动重启；验收后从 config 移除 | 全部满足 | 任一失败 | 阶段证据文档 |
-| 打包产物 | `./scripts/build_app.sh` | `dist/TunnelPad.app` 生成、`plutil -lint` 通过、ad-hoc 签名有效 | 任一失败 | 阶段证据文档 |
-| .app 行为 | `open dist/TunnelPad.app` → LSUIElement 生效（`lsappinfo` ApplicationType 或等价证据）；退出 → launchd 隧道 bootout + app 子进程终止；重启 → 一键恢复 | 全部满足 | 任一失败 | 阶段证据文档 |
-| 治理检查 | `plan-governance-cli check .` 与 `--strict-readiness` | 无 ERROR | 有 ERROR | 提交记录 |
-
-### 技术方案
-
-见"技术方案（阶段 2 冻结）"章节（schema 追加 `probe` 可选字段、app 执行器语义、探针语义、日志查看、打包约定）。
-
-### 阶段证据
-
-- 待阶段 2 完成后填写：`docs/data-quality/tunnelpad-v1-stage2-features-20260829.md`。
-
-### 最近实施/验证记录
+- 证据事实源：[tunnelpad-v1-stage2-features-20260829.md](../data-quality/tunnelpad-v1-stage2-features-20260829.md)。
+- 结论：样本矩阵 9 行全部通过——app 执行器（真实 demo 隧道 + 外部 kill 后 keepAlive 1s 自动重启）、真实探针（`探针 401 ✓`）、日志查看 sheet、`build_app.sh` 打包（plutil/codesign 通过）、.app LSUIElement 生效（`ApplicationType="UIElement"`）与退出语义（菜单退出 → launchd 卸载 + app 子进程终止 + pidfile 清理）；`swift build` 零告警、`swift test` 48 用例全部通过。
+- 最终状态：`dist/TunnelPad.app`（UIElement）常驻菜单栏托管两条真实隧道，admin 探针满足；demo 验收隧道已从 config 移除。
+- 技术契约见"技术方案（阶段 2 冻结）"章节；schema 追加的可选 `probe` 字段向后兼容。
 
 | 日期 | 类型 | 动作/结果 | 证据 | 状态 | 记录者 |
 |---|---|---|---|---|---|
 | 2026-08-29 | 实施 | 阶段 2 代码完成：ProbeConfig/ProbeService（三态、绕过系统代理）、AppProcessExecutor（spawn/keepAlive 重启/SIGTERM→KILL/pidfile/日志追加）、LogTail、TunnelManager 按 executor 分派 + 异步探针、Shutdown 按 pidfile 终止 app 子进程、行内探针徽标 + 日志 sheet、App/Resources（Info.plist LSUIElement + TunnelPad.icns）、scripts/make_icon.swift 与 build_app.sh；`swift build` 零告警，`swift test` 48 用例全部通过 | swift build/test 输出（阶段证据文档收录） | 进行中 | ZCode Agent（实施轮次） |
+| 2026-08-29 | 实施 | 真实验证矩阵 9 行全部通过（探针/demo app 隧道 keepAlive 重启/打包/LSUIElement/退出语义），线上切换为 dist/TunnelPad.app 托管 | 阶段证据文档 | 完成 | ZCode Agent（实施轮次） |
 
-### 验证方式
+## v1 完成记录
 
-- 样本矩阵全部行执行并记录；`swift test` 全部通过并记录数量。
+- 计划完成日期：2026-08-29；三个阶段全部完成（见"阶段路线图"）。
+- 验收口径（用户 2026-08-29 确认）逐项达成：构建 + 全部测试通过（48 用例）；真实接管两条隧道；杀 ssh 进程秒级自动重连（实测 1s）；退出 app（正常退出与 SIGTERM 双路径）→ launchctl 里代理消失、隧道断开；重启 app 一键恢复。
+- 交付物：`TunnelPadCore` 库 + `tunnelpad` 可执行 + `scripts/build_app.sh` 产出的 `dist/TunnelPad.app`；config.json schema v1（含阶段 2 追加的可选 `probe` 字段）。
+- 已知情代价（隧道不随 Mac 重启自启、app 崩溃边界）与回滚路径见"风险和回滚"与各阶段记录。
+
+## Step 0 证据
+
+类型：现状快照（阶段 0）+ 行为迁移基线（阶段 1）+ 功能新增混合基线（阶段 2）。
+
+| 阶段 | Step 0 基线 | 证据 |
+|---|---|---|
+| 阶段 0 | 两条手工 launchd 隧道现状快照（plist 脱敏原文、launchctl 状态、curl 401、ECS LISTEN 22022） | [基线快照](../data-quality/tunnelpad-v1-stage0-baseline-20260829.md) |
+| 阶段 1 | 阶段 0 快照作为迁移行为基线；ModelPad 骨架为可运行参照 | [接管与验证记录](../data-quality/tunnelpad-v1-stage1-takeover-20260829.md) |
+| 阶段 2 | ModelPad `ModelProcessManager` 为 app 执行器参照；阶段 0/1 真实行为（curl 401 / ECS LISTEN 22022）为探针期望值 | [功能与验收记录](../data-quality/tunnelpad-v1-stage2-features-20260829.md) |
+
+## 验证方式
+
+- `swift build` 零告警；`swift test` 48 用例全部通过（2026-08-29 独立复核轮次复测）。
+- 真实验证矩阵证据：[阶段 1 接管验证记录](../data-quality/tunnelpad-v1-stage1-takeover-20260829.md)、[阶段 2 功能与验收记录](../data-quality/tunnelpad-v1-stage2-features-20260829.md)。
 - `plan-governance-cli check .` 与 `--strict-readiness` 无 ERROR。
 
-### 测试覆盖率
+## 测试覆盖率
 
-`swift test` 数量与结果记录于阶段证据；新增关键路径（AppProcessExecutor 生命周期/keepAlive、ProbeService 三态、LogTail、schema 向后兼容、pidfile 终止）必须有用例覆盖。
-
-### 完成条件
-
-- 样本矩阵全部行有证据且通过。
-- `swift test` 全部通过；两条真实隧道保持 TunnelPad 托管在线且探针显示满足。
-- `dist/TunnelPad.app` 可构建、LSUIElement 生效、退出语义经 .app 实测。
-- 验收用 demo 隧道已从 config 移除。
-- `docs/PLAN_MAP.md` 与本计划状态、证据已同步；治理检查通过。
+`swift test` 48 用例全部通过，测试通过 48/48（2026-08-29），覆盖 ConfigStore（损坏恢复）、LaunchdPlistRenderer（ProgramArguments 等价）、LaunchCtlExecutor（状态解析/bootout 语义）、LegacyImporter、MigrationService（备份/回滚编排）、ProbeConfig 向后兼容、ProbeService 三态、AppProcessExecutor（生命周期/keepAlive/pidfile/幂等）、LogTail、Shutdown.killByPidfile。
 
 ## 后续阶段（粗粒度）
 
-- 阶段 2 已进入当前阶段（见"当前阶段"章节）；v1 范围内暂无更后续阶段。
+- 无（v1 三阶段已全部完成；后续独立优化见 ecs-dynamic-ssh-ip 计划与"未决问题"）。
 
 ## 最新独立准入复核
 
@@ -319,6 +275,7 @@ v1 引入 TunnelPad 自身的配置文件 schema（config.json v1，定义见"�
 | 2026-08-29 | 阶段准入复核 | 阶段 1 | 通过（达到待实施标准） | 准入摘要七字段齐备；样本矩阵九行完整；Step 0 基线快照存在；失败/回滚边界明确（备份先行、bootstrap 失败即回滚）；PLAN_MAP 已同步；治理检查含 `--strict-readiness` 通过 | ZCode Agent（独立复核轮次） |
 | 2026-08-29 | 阶段 1 完成复核 | 阶段 1 | 通过 | 独立复核轮次复跑：双新标签 `running`（pid 90512/90517）、curl 401、ECS LISTEN 22022；config `command` 与旧 plist `ProgramArguments` 逐字等价（双隧道）；备份 2 份、`~/Library/LaunchAgents` 零残留；`swift test` 29/29、构建零告警；治理检查含 `--strict-readiness` 通过 | ZCode Agent（独立复核轮次） |
 | 2026-08-29 | 阶段准入复核 | 阶段 2 | 通过（达到待实施标准） | 准入摘要七字段齐备；样本矩阵 9 行完整（探针/app 执行器/日志/打包/.app 行为/治理检查）；Step 0 双基线落实（ModelPad 参照 + 阶段 0/1 期望值）；失败/回滚边界明确；治理检查含 `--strict-readiness` 通过 | ZCode Agent（独立复核轮次） |
+| 2026-08-29 | 阶段 2 完成复核 | 阶段 2 | 通过 | 独立复核轮次复跑：双标签 running、curl 401、ECS LISTEN 22022；`swift test` 48/48、构建零告警；`codesign --verify --deep --strict` 通过、`lsappinfo` ApplicationType="UIElement"；config 仅含两条真实隧道且 admin 带 probe；治理检查含 `--strict-readiness` 通过 | ZCode Agent（独立复核轮次） |
 
 ## 未决问题
 
