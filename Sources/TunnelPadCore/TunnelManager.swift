@@ -79,6 +79,64 @@ public final class TunnelManager: ObservableObject {
         refresh()
     }
 
+    /// 删除单条隧道：停止实例 → 清理生成的 plist/pidfile → 删除日志 → 从配置移除并落盘。
+    /// 实例停止与配置写入失败即中断并保留配置；日志清理失败仅告警不中断。操作不可恢复。
+    public func removeTunnel(_ id: String) {
+        guard let tunnel = tunnel(id: id) else { return }
+        guard !busyIDs.contains(id) else { return }
+
+        busyIDs.insert(id)
+        defer { busyIDs.remove(id) }
+
+        switch tunnel.executor {
+        case .launchd:
+            if executor.status(label: tunnel.launchdLabel) != .notLoaded {
+                do {
+                    try executor.bootout(label: tunnel.launchdLabel)
+                } catch {
+                    lastError = "删除「\(tunnel.name)」失败：停止实例出错 \(error)"
+                    return
+                }
+                if executor.status(label: tunnel.launchdLabel) != .notLoaded {
+                    lastError = "删除「\(tunnel.name)」失败：实例未成功停止"
+                    return
+                }
+            }
+            let plistURL = paths.launchdPlistURL(for: tunnel)
+            if FileManager.default.fileExists(atPath: plistURL.path) {
+                do {
+                    try FileManager.default.removeItem(at: plistURL)
+                } catch {
+                    lastError = "删除「\(tunnel.name)」失败：清理 plist 出错 \(error)"
+                    return
+                }
+            }
+        case .app:
+            appExecutor.stop(tunnel)
+        }
+
+        let logURL = paths.logURL(for: tunnel)
+        if FileManager.default.fileExists(atPath: logURL.path) {
+            try? FileManager.default.removeItem(at: logURL)
+            if FileManager.default.fileExists(atPath: logURL.path) {
+                lastError = "「\(tunnel.name)」已删除，但其日志文件清理失败：\(logURL.path)"
+            }
+        }
+
+        guard let index = config.tunnels.firstIndex(where: { $0.id == id }) else { return }
+        let removed = config.tunnels.remove(at: index)
+        do {
+            try store.save(config)
+        } catch {
+            config.tunnels.insert(removed, at: min(index, config.tunnels.count))
+            lastError = "删除「\(tunnel.name)」失败：写入配置出错 \(error)"
+            return
+        }
+        statuses[id] = nil
+        probeResults[id] = nil
+        refresh()
+    }
+
     // MARK: - 状态
 
     public func refresh() {

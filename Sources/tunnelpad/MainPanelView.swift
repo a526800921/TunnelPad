@@ -237,6 +237,7 @@ struct TunnelSidebarRow: View {
 struct TunnelDetailView: View {
     let tunnel: TunnelConfig
     @EnvironmentObject private var manager: TunnelManager
+    @State private var confirmDelete = false
 
     private var status: TunnelStatus? { manager.statuses[tunnel.id] }
     private var busy: Bool { manager.busyIDs.contains(tunnel.id) }
@@ -265,6 +266,23 @@ struct TunnelDetailView: View {
                     Label("重启", systemImage: "arrow.clockwise")
                 }
                 .disabled(!TunnelDisplay.canRestart(status, busy: busy))
+                Button { confirmDelete = true } label: {
+                    Label("删除…", systemImage: "trash")
+                }
+                .tint(.red)
+                .disabled(busy)
+                .confirmationDialog(
+                    "删除「\(tunnel.name)」？",
+                    isPresented: $confirmDelete,
+                    titleVisibility: .visible
+                ) {
+                    Button("删除隧道与日志（不可恢复）", role: .destructive) {
+                        manager.removeTunnel(tunnel.id)
+                    }
+                    Button("取消", role: .cancel) {}
+                } message: {
+                    Text("将停止实例并删除其配置条目、生成的 plist 与日志文件。")
+                }
             }
             Divider()
             LogView(tunnel: tunnel)
