@@ -51,6 +51,34 @@ public final class TunnelManager: ObservableObject {
         refresh()
     }
 
+    /// 保存对单条隧道的修改并持久化；切换执行器时先停掉旧执行器下的实例。
+    /// 运行中的隧道继续沿用旧参数，直到下次重启。
+    public func updateTunnel(_ tunnel: TunnelConfig) {
+        guard let index = config.tunnels.firstIndex(where: { $0.id == tunnel.id }) else { return }
+        let old = config.tunnels[index]
+        config.tunnels[index] = tunnel
+
+        if old.executor != tunnel.executor {
+            switch old.executor {
+            case .launchd:
+                _ = try? executor.bootout(label: old.launchdLabel)
+            case .app:
+                appExecutor.stop(old)
+            }
+        }
+        if tunnel.probe == nil {
+            probeResults[tunnel.id] = nil
+        }
+
+        do {
+            try store.save(config)
+            lastMessage = "已保存「\(tunnel.name)」的配置；运行中的隧道在下次重启后使用新参数"
+        } catch {
+            lastError = "保存配置失败：\(error)"
+        }
+        refresh()
+    }
+
     // MARK: - 状态
 
     public func refresh() {

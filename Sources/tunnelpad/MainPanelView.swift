@@ -6,6 +6,7 @@ import TunnelPadCore
 struct MainPanelView: View {
     @EnvironmentObject private var manager: TunnelManager
     @State private var selectedID: String?
+    @State private var settingsTunnel: TunnelConfig?
     @State private var legacyAgents: [LegacyAgent] = []
 
     /// 周期刷新状态与探针，避免启动瞬间的过期红标一直挂着。
@@ -102,6 +103,13 @@ struct MainPanelView: View {
                 Image(systemName: "arrow.clockwise")
             }
             .help("刷新状态")
+            Button {
+                manager.reloadConfig()
+                rescanLegacyAgents()
+            } label: {
+                Image(systemName: "arrow.triangle.2.circlepath")
+            }
+            .help("重新加载 config.json")
             Spacer()
             Button("全部启动") { manager.startAll() }
                 .disabled(manager.config.tunnels.isEmpty)
@@ -124,6 +132,9 @@ struct MainPanelView: View {
             Divider()
             messageBar
         }
+        .sheet(item: $settingsTunnel) { tunnel in
+            TunnelSettingsSheet(tunnel: tunnel)
+        }
     }
 
     private var detailHeader: some View {
@@ -143,44 +154,20 @@ struct MainPanelView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            settingsMenu
+            if selectedTunnel != nil {
+                Button {
+                    settingsTunnel = selectedTunnel
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 13, weight: .medium))
+                        .frame(width: 30, height: 26)
+                }
+                .buttonStyle(.bordered)
+                .help("隧道设置")
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
-    }
-
-    private var settingsMenu: some View {
-        Menu {
-            Button {
-                manager.reloadConfig()
-                rescanLegacyAgents()
-            } label: {
-                Label("重新加载配置", systemImage: "arrow.triangle.2.circlepath")
-            }
-            Divider()
-            Button {
-                NSWorkspace.shared.open(manager.paths.configURL)
-            } label: {
-                Label("打开配置文件", systemImage: "pencil")
-            }
-            Button {
-                NSWorkspace.shared.activateFileViewerSelecting([manager.paths.configURL])
-            } label: {
-                Label("在 Finder 中显示配置文件", systemImage: "folder")
-            }
-            Button {
-                NSWorkspace.shared.open(manager.paths.logsDirectory)
-            } label: {
-                Label("打开日志目录", systemImage: "doc.text")
-            }
-        } label: {
-            Image(systemName: "gearshape")
-                .font(.system(size: 14, weight: .medium))
-                .frame(width: 28, height: 28)
-        }
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("设置")
     }
 
     private var emptyDetail: some View {
