@@ -1,0 +1,78 @@
+#!/bin/bash
+
+set -u
+
+STATE_FILE=${FAKE_STATE_FILE:?}
+CALL_LOG=${FAKE_CALL_LOG:?}
+JQ_BIN=${JQ_BIN:-jq}
+
+action=
+source_cidr=
+rule_id=
+client_token=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    DescribeSecurityGroupAttribute|AuthorizeSecurityGroup|RevokeSecurityGroup)
+      action=$1
+      ;;
+    --SourceCidrIp)
+      shift
+      source_cidr=${1:-}
+      ;;
+    --SecurityGroupRuleId.1)
+      shift
+      rule_id=${1:-}
+      ;;
+    --ClientToken)
+      shift
+      client_token=${1:-}
+      ;;
+  esac
+  shift
+done
+
+token_status=missing
+[ -n "$client_token" ] && token_status=present
+printf '%s source=%s rule=%s token=%s\n' "$action" "$source_cidr" "$rule_id" "$token_status" >>"$CALL_LOG"
+
+case "$action" in
+  DescribeSecurityGroupAttribute)
+    if [ "${FAKE_DESCRIBE_FAIL:-0}" = "1" ]; then
+      printf '%s\n' 'ErrorCode: FixtureDescribeFailed'
+      exit 0
+    fi
+    cat "$STATE_FILE"
+    ;;
+  AuthorizeSecurityGroup)
+    if [ "${FAKE_AUTHORIZE_FAIL:-0}" = "1" ]; then
+      printf '%s\n' 'ErrorCode: FixtureAuthorizeFailed'
+      exit 0
+    fi
+    tmp_file="${STATE_FILE}.tmp.$$"
+    "$JQ_BIN" --arg cidr "$source_cidr" '.Permissions.Permission += [{"Description":"tunnelpad-dynamic-ssh-managed","Direction":"ingress","IpProtocol":"TCP","PortRange":"22/22","Policy":"Accept","NicType":"intranet","SourceCidrIp":$cidr,"SecurityGroupRuleId":"sgr-fixture-new"}]' "$STATE_FILE" >"$tmp_file"
+    mv "$tmp_file" "$STATE_FILE"
+    if [ "${FAKE_AUTHORIZE_ERROR_AFTER_APPLY:-0}" = "1" ]; then
+      printf '%s\n' 'ErrorCode: FixtureAuthorizeResponseLost'
+      exit 0
+    fi
+    printf '%s\n' '{}'
+    ;;
+  RevokeSecurityGroup)
+    if [ "${FAKE_REVOKE_FAIL:-0}" = "1" ]; then
+      printf '%s\n' 'ErrorCode: FixtureRevokeFailed'
+      exit 0
+    fi
+    tmp_file="${STATE_FILE}.tmp.$$"
+    "$JQ_BIN" --arg rule_id "$rule_id" '.Permissions.Permission |= map(select(.SecurityGroupRuleId != $rule_id))' "$STATE_FILE" >"$tmp_file"
+    mv "$tmp_file" "$STATE_FILE"
+    if [ "${FAKE_REVOKE_ERROR_AFTER_APPLY:-0}" = "1" ]; then
+      printf '%s\n' 'ErrorCode: FixtureRevokeResponseLost'
+      exit 0
+    fi
+    printf '%s\n' '{}'
+    ;;
+  *)
+    printf '%s\n' 'ErrorCode: FixtureUnknownAction'
+    exit 0
+    ;;
+esac

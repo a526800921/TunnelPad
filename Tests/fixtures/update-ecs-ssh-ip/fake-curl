@@ -1,0 +1,16 @@
+#!/bin/bash
+
+endpoint=
+for argument in "$@"; do
+  endpoint=$argument
+done
+
+if [ "${FAKE_CURL_FAIL:-0}" = "1" ]; then
+  exit 1
+fi
+
+case "$endpoint" in
+  *endpoint-one*) printf '%s\n' "${FAKE_IP_1:-45.67.89.101}" ;;
+  *endpoint-two*) printf '%s\n' "${FAKE_IP_2:-45.67.89.101}" ;;
+  *) exit 1 ;;
+esac
