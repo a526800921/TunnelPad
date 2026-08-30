@@ -12,7 +12,8 @@
  * 2. 传入的 const char* 必须是 NUL 结尾的合法 UTF-8；Rust 只在调用期间借用。
  * 3. 返回 NULL 表示失败，此时 tp_last_error() 返回最近一次错误的 JSON
  *    （{"code":N,"message":"..."}）；错误随下一次 tp_* 调用更新，成功即清除。
- * 4. Rust 不持有跨调用状态、不启动线程；并发与取消由 Swift 侧拥有。
+ * 4. 旧 tp_* 兼容函数不持有跨调用状态；阶段 5 的 tp_core_* owner 另有
+ *    长期 handle，并通过 generation 命令拒绝迟到生命周期操作。
  */
 
 uint32_t tp_abi_version(void);
@@ -34,7 +35,7 @@ char *tp_last_error(void);
 void tp_string_free(char *s);
 
 /*
- * 阶段 5 owner 原型扩展（tp_core_abi_version() == 1）。
+ * 阶段 5 owner 扩展（tp_core_abi_version() == 1）。
  *
  * 该扩展使用长期 opaque handle + UTF-8 JSON 命令。owner 命令的业务失败
  * 仍返回 {"ok":false,...} JSON；只有参数/传输错误返回 NULL，并通过

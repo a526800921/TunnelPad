@@ -32,6 +32,7 @@
 
 - C ABI、JSON 所有权、opaque handle 线程安全和状态快照需要严格测试。
 - Rust Core 出错可能影响整个 App 进程；阶段 5 不能依赖 App 内 Swift fallback。
+- 异步操作需要在 Swift FFI 边界申请 Rust owner 代次；代次失配时 Rust 必须在系统副作用前拒绝迟到命令。
 - 删除 Swift Core 后，修复必须通过新的 Rust 测试、构建和受控实机验证完成。
 - 阶段 5 暂不提供 app 执行器能力，未来新增 app 需要重新设计配置和生命周期边界。
 

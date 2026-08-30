@@ -1,8 +1,7 @@
-//! 阶段 5 owner 的 C ABI 扩展。
+//! 阶段 5 Rust owner 的 C ABI。
 //!
-//! 旧 `tp_*` ABI v1 保持不变；本模块用 `tp_core_*` 命名空间验证长期
-//! opaque handle + JSON command。阶段 5 完成 Step 0 后再把该原型收敛为
-//! 产品正式 ABI，并由 Swift 适配层接入。
+//! 旧 `tp_*` ABI v1 保持不变；`tp_core_*` 提供长期 opaque handle + JSON
+//! command，供 Swift 生产适配层接入。
 
 use std::cell::RefCell;
 use std::ffi::{CStr, CString};

@@ -27,6 +27,11 @@ final class RustCoreClient: @unchecked Sendable {
             case .invalidResponse(let reason): return "Rust Core 返回无效结果：\(reason)"
             }
         }
+
+        var isStaleOperation: Bool {
+            guard case let .remote(code, _) = self else { return false }
+            return code == 13
+        }
     }
 
     struct Snapshot: Sendable {
@@ -142,6 +147,22 @@ final class RustCoreClient: @unchecked Sendable {
         _ = try send(["op": "saveConfig", "config": configObject])
     }
 
+    func beginOperation(id: String) throws -> UInt64 {
+        let result = try send(["op": "begin", "id": id])
+        guard let generation = result["generation"] as? NSNumber else {
+            throw ClientError.invalidResponse("begin 缺少 generation")
+        }
+        return generation.uint64Value
+    }
+
+    func cancelOperation(id: String, generation: UInt64) throws {
+        _ = try send([
+            "op": "cancel",
+            "id": id,
+            "generation": NSNumber(value: generation),
+        ])
+    }
+
     func snapshot() throws -> Snapshot {
         let result = try send(["op": "snapshot"])
         let config = try decode(AppConfig.self, from: result["config"])
@@ -160,20 +181,24 @@ final class RustCoreClient: @unchecked Sendable {
         return try decodeStatus(result["status"])
     }
 
-    func start(id: String) throws -> TunnelStatus {
-        try lifecycle(op: "start", id: id)
+    func start(id: String, generation: UInt64? = nil) throws -> TunnelStatus {
+        try lifecycle(op: "start", id: id, generation: generation)
     }
 
-    func stop(id: String) throws -> TunnelStatus {
-        try lifecycle(op: "stop", id: id)
+    func stop(id: String, generation: UInt64? = nil) throws -> TunnelStatus {
+        try lifecycle(op: "stop", id: id, generation: generation)
     }
 
-    func restart(id: String) throws -> TunnelStatus {
-        try lifecycle(op: "restart", id: id)
+    func restart(id: String, generation: UInt64? = nil) throws -> TunnelStatus {
+        try lifecycle(op: "restart", id: id, generation: generation)
     }
 
-    func remove(id: String) throws {
-        _ = try send(["op": "remove", "id": id])
+    func remove(id: String, generation: UInt64? = nil) throws {
+        var command: [String: Any] = ["op": "remove", "id": id]
+        if let generation {
+            command["generation"] = NSNumber(value: generation)
+        }
+        _ = try send(command)
     }
 
     func shutdown() throws -> Int {
@@ -184,8 +209,12 @@ final class RustCoreClient: @unchecked Sendable {
         return stopped.intValue
     }
 
-    private func lifecycle(op: String, id: String) throws -> TunnelStatus {
-        let result = try send(["op": op, "id": id])
+    private func lifecycle(op: String, id: String, generation: UInt64?) throws -> TunnelStatus {
+        var command: [String: Any] = ["op": op, "id": id]
+        if let generation {
+            command["generation"] = NSNumber(value: generation)
+        }
+        let result = try send(command)
         return try decodeStatus(result["status"])
     }
 

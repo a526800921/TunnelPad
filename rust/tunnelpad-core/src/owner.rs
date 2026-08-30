@@ -1,9 +1,8 @@
-//! 阶段 5 Rust Core owner 原型。
+//! 阶段 5 Rust Core owner。
 //!
 //! 该模块先隔离验证最终 owner 的边界：一个长期存在的 Rust handle 持有
 //! 配置、launchd 执行器和每条隧道的串行锁；跨边界只传 UTF-8 JSON。它不
-//! 改写现有 Swift 门面，也不启用真实 App 路径，供阶段 5 Step 0 fixture
-//! 与 C ABI smoke 使用。
+//! Swift 通过 C ABI 使用该 owner；当前生产范围只启用 launchd。
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -27,12 +26,30 @@ use crate::{error_code, AppConfig, ExecutorKind, TpError, TunnelConfig};
 pub enum CoreCommand {
     LoadConfig,
     SaveConfig { config: AppConfig },
+    Begin { id: String },
+    Cancel { id: String, generation: u64 },
     Snapshot,
     Status { id: String },
-    Start { id: String },
-    Stop { id: String },
-    Restart { id: String },
-    Remove { id: String },
+    Start {
+        id: String,
+        #[serde(default)]
+        generation: Option<u64>,
+    },
+    Stop {
+        id: String,
+        #[serde(default)]
+        generation: Option<u64>,
+    },
+    Restart {
+        id: String,
+        #[serde(default)]
+        generation: Option<u64>,
+    },
+    Remove {
+        id: String,
+        #[serde(default)]
+        generation: Option<u64>,
+    },
     Shutdown,
 }
 
@@ -72,6 +89,7 @@ pub struct CoreOwner<L: LaunchdExecuting> {
     pub(crate) launchd: L,
     config: Mutex<AppConfig>,
     tunnel_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    generations: Mutex<HashMap<String, u64>>,
     closed: AtomicBool,
 }
 
@@ -86,6 +104,7 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
             launchd,
             config: Mutex::new(config),
             tunnel_locks: Mutex::new(HashMap::new()),
+            generations: Mutex::new(HashMap::new()),
             closed: AtomicBool::new(false),
         })
     }
@@ -101,12 +120,16 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
             CoreCommand::SaveConfig { config } => {
                 self.save_config(config).map(|()| json!({ "saved": true }))
             }
+            CoreCommand::Begin { id } => self.begin(&id),
+            CoreCommand::Cancel { id, generation } => self.cancel(&id, generation),
             CoreCommand::Snapshot => self.snapshot().map(|snapshot| json!(snapshot)),
             CoreCommand::Status { id } => self.status_result(&id),
-            CoreCommand::Start { id } => self.start(&id),
-            CoreCommand::Stop { id } => self.stop(&id),
-            CoreCommand::Restart { id } => self.restart(&id),
-            CoreCommand::Remove { id } => self.remove(&id),
+            CoreCommand::Start { id, generation } => self.start_with_generation(&id, generation),
+            CoreCommand::Stop { id, generation } => self.stop_with_generation(&id, generation),
+            CoreCommand::Restart { id, generation } => {
+                self.restart_with_generation(&id, generation)
+            }
+            CoreCommand::Remove { id, generation } => self.remove_with_generation(&id, generation),
             CoreCommand::Shutdown => self.shutdown(),
         };
         match outcome {
@@ -183,6 +206,62 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
             .ok_or_else(|| TpError::new(error_code::TUNNEL_NOT_FOUND, format!("找不到隧道：{id}")))
     }
 
+    fn next_generation(&self, id: &str) -> u64 {
+        let mut generations = self
+            .generations
+            .lock()
+            .expect("owner generation mutex 不应中毒");
+        let generation = generations.entry(id.to_string()).or_insert(0);
+        *generation = generation.wrapping_add(1).max(1);
+        *generation
+    }
+
+    fn ensure_generation(&self, id: &str, expected: Option<u64>) -> Result<(), TpError> {
+        let Some(expected) = expected else { return Ok(()) };
+        let current = self
+            .generations
+            .lock()
+            .expect("owner generation mutex 不应中毒")
+            .get(id)
+            .copied();
+        if current != Some(expected) {
+            return Err(TpError::new(
+                error_code::STALE_OPERATION,
+                format!("隧道操作代次已过期：{id}（expected={expected}, current={current:?}）"),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn begin(&self, id: &str) -> Result<Value, TpError> {
+        self.ensure_open()?;
+        let lock = self.lock_for(id);
+        let _guard = lock.lock().expect("owner tunnel mutex 不应中毒");
+        self.tunnel(id)?;
+        let generation = self.next_generation(id);
+        Ok(json!({ "id": id, "operation": "begin", "generation": generation }))
+    }
+
+    pub fn cancel(&self, id: &str, generation: u64) -> Result<Value, TpError> {
+        self.ensure_open()?;
+        // 取消必须和同隧道生命周期命令共用串行锁；否则它可能在生命周期
+        // 通过 generation 检查后、触发 launchd/plist 副作用前插入，形成竞态。
+        let lock = self.lock_for(id);
+        let _guard = lock.lock().expect("owner tunnel mutex 不应中毒");
+        self.tunnel(id)?;
+        let current = self
+            .generations
+            .lock()
+            .expect("owner generation mutex 不应中毒")
+            .get(id)
+            .copied();
+        if current == Some(generation) {
+            let next = self.next_generation(id);
+            return Ok(json!({ "id": id, "operation": "cancel", "generation": next }));
+        }
+        Ok(json!({ "id": id, "operation": "stale", "generation": current }))
+    }
+
     fn status_result(&self, id: &str) -> Result<Value, TpError> {
         let status = self.status(id)?;
         Ok(json!({ "id": id, "status": status }))
@@ -199,17 +278,20 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
     }
 
     pub fn start(&self, id: &str) -> Result<Value, TpError> {
+        self.start_with_generation(id, None)
+    }
+
+    fn start_with_generation(&self, id: &str, generation: Option<u64>) -> Result<Value, TpError> {
         self.ensure_open()?;
+        self.ensure_generation(id, generation)?;
         let lock = self.lock_for(id);
         let _guard = lock.lock().expect("owner tunnel mutex 不应中毒");
+        self.ensure_generation(id, generation)?;
         let tunnel = self.tunnel(id)?;
-        if matches!(
-            self.launchd.status(&tunnel.launchd_label()),
-            TunnelStatus::Running { .. }
-        ) {
-            return Ok(
-                json!({ "id": id, "operation": "noop", "status": self.launchd.status(&tunnel.launchd_label()) }),
-            );
+        let current_status = self.launchd.status(&tunnel.launchd_label());
+        self.ensure_generation(id, generation)?;
+        if matches!(current_status, TunnelStatus::Running { .. }) {
+            return Ok(json!({ "id": id, "operation": "noop", "status": current_status }));
         }
         let plist = write_plist(&tunnel, &self.paths).map_err(|error| {
             TpError::new(
@@ -220,33 +302,52 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
         self.launchd
             .bootstrap(&tunnel.launchd_label(), &plist)
             .map_err(|error| executor_error("启动", error))?;
-        Ok(
-            json!({ "id": id, "operation": "start", "status": self.launchd.status(&tunnel.launchd_label()) }),
-        )
+        self.ensure_generation(id, generation)?;
+        let status = self.launchd.status(&tunnel.launchd_label());
+        self.ensure_generation(id, generation)?;
+        Ok(json!({ "id": id, "operation": "start", "status": status }))
     }
 
     pub fn stop(&self, id: &str) -> Result<Value, TpError> {
+        self.stop_with_generation(id, None)
+    }
+
+    fn stop_with_generation(&self, id: &str, generation: Option<u64>) -> Result<Value, TpError> {
         self.ensure_open()?;
+        self.ensure_generation(id, generation)?;
         let lock = self.lock_for(id);
         let _guard = lock.lock().expect("owner tunnel mutex 不应中毒");
+        self.ensure_generation(id, generation)?;
         let tunnel = self.tunnel(id)?;
         let stopped = self
             .launchd
             .bootout(&tunnel.launchd_label())
             .map_err(|error| executor_error("停止", error))?;
-        Ok(
-            json!({ "id": id, "operation": "stop", "stopped": stopped, "status": self.launchd.status(&tunnel.launchd_label()) }),
-        )
+        self.ensure_generation(id, generation)?;
+        let status = self.launchd.status(&tunnel.launchd_label());
+        self.ensure_generation(id, generation)?;
+        Ok(json!({ "id": id, "operation": "stop", "stopped": stopped, "status": status }))
     }
 
     pub fn restart(&self, id: &str) -> Result<Value, TpError> {
+        self.restart_with_generation(id, None)
+    }
+
+    fn restart_with_generation(
+        &self,
+        id: &str,
+        generation: Option<u64>,
+    ) -> Result<Value, TpError> {
         self.ensure_open()?;
+        self.ensure_generation(id, generation)?;
         let lock = self.lock_for(id);
         let _guard = lock.lock().expect("owner tunnel mutex 不应中毒");
+        self.ensure_generation(id, generation)?;
         let tunnel = self.tunnel(id)?;
         // 保持现有 Swift restartSync 的兼容语义：未加载或 bootout 失败
         // 不阻断后续 plist 重写/bootstrap，bootstrap 失败仍返回错误。
         let _ = self.launchd.bootout(&tunnel.launchd_label());
+        self.ensure_generation(id, generation)?;
         let plist = write_plist(&tunnel, &self.paths).map_err(|error| {
             TpError::new(
                 error_code::CONFIG_IO,
@@ -256,25 +357,40 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
         self.launchd
             .bootstrap(&tunnel.launchd_label(), &plist)
             .map_err(|error| executor_error("重启", error))?;
-        Ok(
-            json!({ "id": id, "operation": "restart", "status": self.launchd.status(&tunnel.launchd_label()) }),
-        )
+        self.ensure_generation(id, generation)?;
+        let status = self.launchd.status(&tunnel.launchd_label());
+        self.ensure_generation(id, generation)?;
+        Ok(json!({ "id": id, "operation": "restart", "status": status }))
     }
 
     pub fn remove(&self, id: &str) -> Result<Value, TpError> {
+        self.remove_with_generation(id, None)
+    }
+
+    fn remove_with_generation(
+        &self,
+        id: &str,
+        generation: Option<u64>,
+    ) -> Result<Value, TpError> {
         self.ensure_open()?;
+        self.ensure_generation(id, generation)?;
         let lock = self.lock_for(id);
         let _guard = lock.lock().expect("owner tunnel mutex 不应中毒");
+        self.ensure_generation(id, generation)?;
         let tunnel = self.tunnel(id)?;
-        if self.launchd.status(&tunnel.launchd_label()) != TunnelStatus::NotLoaded {
+        let status = self.launchd.status(&tunnel.launchd_label());
+        self.ensure_generation(id, generation)?;
+        if status != TunnelStatus::NotLoaded {
             self.launchd
                 .bootout(&tunnel.launchd_label())
                 .map_err(|error| executor_error("删除时停止", error))?;
+            self.ensure_generation(id, generation)?;
             if self.launchd.status(&tunnel.launchd_label()) != TunnelStatus::NotLoaded {
                 return Err(TpError::new(error_code::STILL_RUNNING, "实例未成功停止"));
             }
         }
 
+        self.ensure_generation(id, generation)?;
         let plist = self.paths.launchd_plist_url(&tunnel);
         if plist.exists() {
             fs::remove_file(&plist).map_err(|error| {
@@ -290,6 +406,8 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
             let _ = fs::remove_file(&log);
             log_warning = log.exists();
         }
+
+        self.ensure_generation(id, generation)?;
 
         let mut config = self
             .config
@@ -430,6 +548,7 @@ mod tests {
     use crate::launchctl::{LaunchCtlExecutor, ProcessResult, ProcessRunning};
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::mpsc::{self, Receiver, Sender};
     use std::collections::VecDeque;
     use std::thread;
     use std::time::Duration;
@@ -522,6 +641,45 @@ mod tests {
                 .unwrap()
                 .pop_front()
                 .expect("launchd fixture 调用超出脚本")
+        }
+    }
+
+    #[derive(Clone)]
+    struct BlockingRunner {
+        entered: Arc<Mutex<Option<Sender<()>>>>,
+        release: Arc<Mutex<Receiver<()>>>,
+    }
+
+    impl BlockingRunner {
+        fn new() -> (Self, Receiver<()>, Sender<()>) {
+            let (entered_tx, entered_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            (
+                Self {
+                    entered: Arc::new(Mutex::new(Some(entered_tx))),
+                    release: Arc::new(Mutex::new(release_rx)),
+                },
+                entered_rx,
+                release_tx,
+            )
+        }
+    }
+
+    impl ProcessRunning for BlockingRunner {
+        fn run(
+            &self,
+            _executable_path: &str,
+            _arguments: &[String],
+        ) -> Result<ProcessResult, String> {
+            if let Some(entered) = self.entered.lock().unwrap().take() {
+                entered.send(()).unwrap();
+                self.release.lock().unwrap().recv().unwrap();
+            }
+            Ok(ProcessResult {
+                exit_code: 0,
+                stdout: "\tstate = not running\n".into(),
+                stderr: String::new(),
+            })
         }
     }
 
@@ -771,6 +929,81 @@ mod tests {
         let error = owner.status("missing").unwrap_err();
         assert_eq!(error.code, error_code::TUNNEL_NOT_FOUND);
         runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn stale_generation_is_rejected_before_any_launchd_call() {
+        let home = temp_home("generation");
+        let runner = ScriptedRunner::new(vec![]);
+        let owner = scripted_owner(&home, &["generation"], runner.clone());
+        let first = owner.begin("generation").unwrap()["generation"]
+            .as_u64()
+            .unwrap();
+        let second = owner.begin("generation").unwrap()["generation"]
+            .as_u64()
+            .unwrap();
+        assert!(second > first);
+
+        let stale = owner.execute(CoreCommand::Start {
+            id: "generation".into(),
+            generation: Some(first),
+        });
+        assert!(!stale.ok);
+        assert_eq!(stale.error.unwrap().code, error_code::STALE_OPERATION);
+        runner.assert_exhausted();
+
+        let cancel = owner.cancel("generation", second).unwrap();
+        assert_eq!(cancel["operation"], "cancel");
+        let cancelled = owner.execute(CoreCommand::Stop {
+            id: "generation".into(),
+            generation: Some(second),
+        });
+        assert!(!cancelled.ok);
+        assert_eq!(cancelled.error.unwrap().code, error_code::STALE_OPERATION);
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn cancel_serializes_with_lifecycle_commands() {
+        let home = temp_home("cancel-lock");
+        let paths = TunnelPaths::new(&home);
+        ConfigStore::new(paths.clone()).save(&config(&["cancel-lock"])).unwrap();
+        let (runner, entered_rx, release_tx) = BlockingRunner::new();
+        let owner = Arc::new(CoreOwner::new(paths, LaunchCtlExecutor::new(runner, 501)).unwrap());
+        let generation = owner.begin("cancel-lock").unwrap()["generation"]
+            .as_u64()
+            .unwrap();
+
+        let lifecycle_owner = owner.clone();
+        let lifecycle = thread::spawn(move || {
+            lifecycle_owner.execute(CoreCommand::Start {
+                id: "cancel-lock".into(),
+                generation: Some(generation),
+            })
+        });
+        entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        let (cancel_started_tx, cancel_started_rx) = mpsc::channel();
+        let (cancel_done_tx, cancel_done_rx) = mpsc::channel();
+        let cancel_owner = owner.clone();
+        let cancel = thread::spawn(move || {
+            cancel_started_tx.send(()).unwrap();
+            let response = cancel_owner.cancel("cancel-lock", generation).unwrap();
+            cancel_done_tx.send(response).unwrap();
+        });
+        cancel_started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(
+            cancel_done_rx.recv_timeout(Duration::from_millis(25)).is_err(),
+            "cancel 不应在同隧道生命周期持锁时完成"
+        );
+
+        release_tx.send(()).unwrap();
+        assert!(lifecycle.join().unwrap().ok);
+        let response = cancel_done_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(response["operation"], "cancel");
+        cancel.join().unwrap();
         let _ = fs::remove_dir_all(home);
     }
 

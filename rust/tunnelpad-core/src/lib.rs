@@ -50,6 +50,7 @@ pub mod error_code {
     pub const EXECUTOR: u32 = 10;
     pub const CONFIG_IO: u32 = 11;
     pub const STILL_RUNNING: u32 = 12;
+    pub const STALE_OPERATION: u32 = 13;
 }
 
 /// 跨边界错误：`code` 取 [`error_code`] 常量，`message` 语义对齐 Swift 抛错文案。

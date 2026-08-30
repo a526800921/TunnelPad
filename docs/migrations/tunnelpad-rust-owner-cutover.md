@@ -28,6 +28,8 @@
 | UI 表单临时值 | 接收 JSON 命令 | 唯一 owner |
 | App 退出清理 | 执行停止和任务取消 | 发起 shutdown 并等待结果 |
 
+生命周期异步调用先通过同一 owner 的 `begin` 命令取得隧道代次，再把代次带入后续命令；取消通过 `cancel` 使该代次失效。Rust 在代次失配时不得触发 launchd 或配置副作用。
+
 ## 迁移步骤
 
 1. 完成阶段 5 Step 0：固定 owner ABI、JSON、handle、状态快照、错误、并发和退出契约。

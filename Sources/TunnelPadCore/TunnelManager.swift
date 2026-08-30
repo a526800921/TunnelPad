@@ -31,6 +31,9 @@ public final class TunnelManager: ObservableObject {
     /// 每个隧道的操作代际：异步操作即使底层系统调用无法立即取消，
     /// 也不能在后续操作已经开始后把旧结果写回门面。
     private var operationGenerations: [String: UInt] = [:]
+    /// Rust owner 的操作代次；Swift generation 只负责 UI busy/结果门禁，
+    /// 真正的系统副作用前置校验由 Rust owner 完成。
+    private var rustOperationGenerations: [String: UInt64] = [:]
 
     public convenience init(
         paths: TunnelPaths,
@@ -281,8 +284,9 @@ public final class TunnelManager: ObservableObject {
         defer { endOperation(for: id, generation: operation) }
 
         if let rustCore {
+            guard let rustGeneration = beginRustOperation(for: id) else { return }
             do {
-                try rustCore.remove(id: id)
+                try rustCore.remove(id: id, generation: rustGeneration)
                 config.tunnels.removeAll { $0.id == id }
                 updateRuntime {
                     $0.setStatus(nil, for: id)
@@ -354,9 +358,15 @@ public final class TunnelManager: ObservableObject {
         defer { endOperation(for: id, generation: operation) }
 
         if let rustCore {
+            guard let rustGeneration = beginRustOperation(for: id) else { return }
+            defer {
+                if Task.isCancelled {
+                    cancelRustOperation(id: id, generation: rustGeneration)
+                }
+            }
             do {
                 try await Task.detached(priority: .userInitiated) {
-                    try rustCore.remove(id: id)
+                    try rustCore.remove(id: id, generation: rustGeneration)
                 }.value
                 guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return }
                 config.tunnels.removeAll { $0.id == id }
@@ -368,6 +378,7 @@ public final class TunnelManager: ObservableObject {
             } catch is CancellationError {
                 return
             } catch {
+                if isStaleRustOperation(error) { return }
                 lastError = "删除「\(tunnel.name)」失败：\(error)"
             }
             return
@@ -569,8 +580,9 @@ public final class TunnelManager: ObservableObject {
         guard let operation = beginOperation(for: id) else { return }
         defer { endOperation(for: id, generation: operation) }
         if let rustCore {
+            guard let rustGeneration = beginRustOperation(for: id) else { return }
             do {
-                let status = try rustCore.start(id: id)
+                let status = try rustCore.start(id: id, generation: rustGeneration)
                 updateRuntime { $0.setStatus(status, for: id) }
                 lastMessage = "「\(tunnel.name)」已启动"
             } catch {
@@ -590,9 +602,15 @@ public final class TunnelManager: ObservableObject {
         defer { endOperation(for: id, generation: operation) }
 
         if let rustCore {
+            guard let rustGeneration = beginRustOperation(for: id) else { return }
+            defer {
+                if Task.isCancelled {
+                    cancelRustOperation(id: id, generation: rustGeneration)
+                }
+            }
             do {
                 let status = try await Task.detached(priority: .userInitiated) {
-                    try rustCore.start(id: id)
+                    try rustCore.start(id: id, generation: rustGeneration)
                 }.value
                 guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return }
                 updateRuntime { $0.setStatus(status, for: id) }
@@ -601,6 +619,7 @@ public final class TunnelManager: ObservableObject {
             } catch is CancellationError {
                 return
             } catch {
+                if isStaleRustOperation(error) { return }
                 lastError = "启动「\(tunnel.name)」失败：\(error)"
             }
             return
@@ -617,8 +636,9 @@ public final class TunnelManager: ObservableObject {
         guard let operation = beginOperation(for: id) else { return }
         defer { endOperation(for: id, generation: operation) }
         if let rustCore {
+            guard let rustGeneration = beginRustOperation(for: id) else { return }
             do {
-                let status = try rustCore.stop(id: id)
+                let status = try rustCore.stop(id: id, generation: rustGeneration)
                 updateRuntime { $0.setStatus(status, for: id) }
                 lastMessage = "「\(tunnel.name)」已停止"
             } catch {
@@ -637,9 +657,15 @@ public final class TunnelManager: ObservableObject {
         defer { endOperation(for: id, generation: operation) }
 
         if let rustCore {
+            guard let rustGeneration = beginRustOperation(for: id) else { return }
+            defer {
+                if Task.isCancelled {
+                    cancelRustOperation(id: id, generation: rustGeneration)
+                }
+            }
             do {
                 let status = try await Task.detached(priority: .userInitiated) {
-                    try rustCore.stop(id: id)
+                    try rustCore.stop(id: id, generation: rustGeneration)
                 }.value
                 guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return }
                 updateRuntime { $0.setStatus(status, for: id) }
@@ -648,6 +674,7 @@ public final class TunnelManager: ObservableObject {
             } catch is CancellationError {
                 return
             } catch {
+                if isStaleRustOperation(error) { return }
                 lastError = "停止「\(tunnel.name)」失败：\(error)"
             }
             return
@@ -664,8 +691,9 @@ public final class TunnelManager: ObservableObject {
         guard let operation = beginOperation(for: id) else { return }
         defer { endOperation(for: id, generation: operation) }
         if let rustCore {
+            guard let rustGeneration = beginRustOperation(for: id) else { return }
             do {
-                let status = try rustCore.restart(id: id)
+                let status = try rustCore.restart(id: id, generation: rustGeneration)
                 updateRuntime { $0.setStatus(status, for: id) }
                 lastMessage = "「\(tunnel.name)」已重启"
             } catch {
@@ -684,9 +712,15 @@ public final class TunnelManager: ObservableObject {
         defer { endOperation(for: id, generation: operation) }
 
         if let rustCore {
+            guard let rustGeneration = beginRustOperation(for: id) else { return }
+            defer {
+                if Task.isCancelled {
+                    cancelRustOperation(id: id, generation: rustGeneration)
+                }
+            }
             do {
                 let status = try await Task.detached(priority: .userInitiated) {
-                    try rustCore.restart(id: id)
+                    try rustCore.restart(id: id, generation: rustGeneration)
                 }.value
                 guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return }
                 updateRuntime { $0.setStatus(status, for: id) }
@@ -695,6 +729,7 @@ public final class TunnelManager: ObservableObject {
             } catch is CancellationError {
                 return
             } catch {
+                if isStaleRustOperation(error) { return }
                 lastError = "重启「\(tunnel.name)」失败：\(error)"
             }
             return
@@ -812,6 +847,29 @@ public final class TunnelManager: ObservableObject {
     private func endOperation(for id: String, generation: UInt) {
         guard operationGenerations[id] == generation else { return }
         updateRuntime { $0.setBusy(false, for: id) }
+        rustOperationGenerations.removeValue(forKey: id)
+    }
+
+    private func beginRustOperation(for id: String) -> UInt64? {
+        guard let rustCore else { return nil }
+        do {
+            let generation = try rustCore.beginOperation(id: id)
+            rustOperationGenerations[id] = generation
+            return generation
+        } catch {
+            lastError = "Rust Core 开始隧道操作失败：\(error)"
+            return nil
+        }
+    }
+
+    private func cancelRustOperation(id: String, generation: UInt64) {
+        guard let rustCore else { return }
+        try? rustCore.cancelOperation(id: id, generation: generation)
+    }
+
+    private func isStaleRustOperation(_ error: Error) -> Bool {
+        guard let error = error as? RustCoreClient.ClientError else { return false }
+        return error.isStaleOperation
     }
 
     private func apply(_ outcome: TunnelOperationOutcome) {
