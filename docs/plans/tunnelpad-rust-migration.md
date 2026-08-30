@@ -1,11 +1,11 @@
 # 计划：TunnelPad Rust Core 迁移
 
-- 状态：设计中
-- 当前阶段：阶段 0
+- 状态：待实施
+- 当前阶段：阶段 1
 - 最后更新：2026-08-30
 - 前置：`tunnelpad-v1`、`tunnelpad-ui-refinements` 与 `tunnelpad-code-quality-refactor` 已完成；本计划只在现有 Swift 行为基线上设计 Rust Core 的渐进替换
 
-当前说明：用户已确认迁移边界为“保留 SwiftUI/AppKit 菜单栏与窗口 UI，逐步用 Rust 替换 `TunnelPadCore`”。阶段 0 基线执行已完成，当前等待独立准入复核；本计划仍不直接修改现有 Swift 实现，不接管真实用户隧道。
+当前说明：用户已确认迁移边界为“保留 SwiftUI/AppKit 菜单栏与窗口 UI，逐步用 Rust 替换 `TunnelPadCore`”，并确认以“C ABI 主路径 + Swift Core 可回退”作为默认 bridge 方案（sidecar IPC 为备选）。阶段 0 已通过独立准入复核（2026-08-30）；阶段 1（最小 C ABI 原型与契约冻结）已达到待实施标准。本计划仍不直接修改现有 Swift 行为，不接管真实用户隧道。
 
 ## 背景
 
@@ -32,9 +32,10 @@ TunnelPad 当前是 SwiftUI/AppKit + SwiftPM 的 macOS 菜单栏应用。Swift U
 ### 已确认事实（2026-08-30 查证）
 
 - 用户确认采用“保留 SwiftUI/AppKit，只替换 `TunnelPadCore`”的迁移范围。
+- 用户确认采用“C ABI 主路径 + Swift Core 可回退”的默认 bridge 方案；sidecar IPC 仅作为 C ABI 原型不满足安全或契约门槛时的备选。
 - 当前仓库没有 `Cargo.toml`、Rust 源码或 Rust target；现有产品目标见 [Package.swift](../../Package.swift)。
 - 当前 Swift Core 已完成内部职责拆分；现有行为契约由 [TunnelPad v1 计划](tunnelpad-v1.md)、[界面优化计划](tunnelpad-ui-refinements.md) 和 [代码质量重构计划](tunnelpad-code-quality-refactor.md) 共同约束。
-- 当前自动化基线为 `swift test` 74/74；Debug/Release 构建和 `.app` 签名校验已通过。最新工作树仍包含未提交的 Swift/UI、ECS 文档和 fixture 改动，Rust 实施前必须选择性提交或创建干净分支。
+- 当前自动化基线为 `swift test` 74/74；Debug/Release 构建和 `.app` 签名校验已通过。当前工作树已清理，Rust 实施可从独立、可复现的提交基线开始；74/74 与 Release 构建已在 HEAD `64e126fa` 复验（见阶段 0 基线证据）。
 - 本机已安装 `rustc 1.96.0` 与 `cargo 1.96.0`；当前 Swift 为 Apple Swift 6.3.3，目标为 arm64 macOS。
 
 ### 已确认决策（2026-08-30）
@@ -45,12 +46,13 @@ TunnelPad 当前是 SwiftUI/AppKit + SwiftPM 的 macOS 菜单栏应用。Swift U
 | 首轮替换范围 | Rust 逐步替换 `TunnelPadCore` 的配置、执行器、探针、日志、迁移和生命周期实现 |
 | 兼容要求 | 外部功能和可观察行为保持正常；任何行为变化另开计划，不以迁移名义静默改变 |
 | 真实隧道边界 | 阶段 0–3 只读审计、fake/fixture 和隔离 demo；真实隧道需用户明确授权并单独记录 |
+| 默认 bridge 方案 | C ABI 进程内 bridge 为主路径，Swift Core 保留为可切换回退；sidecar IPC 作为失败时的备选（2026-08-30 用户确认） |
 
 ### 候选连接方式与取舍
 
 | 方案 | 说明 | 优点 | 风险/代价 | 当前结论 |
 |---|---|---|---|---|
-| Rust 静态/动态库 + C ABI Swift wrapper | Rust 在进程内提供 Core，Swift 保留 `TunnelManager` 门面与 UI | 性能和状态调用直接；不增加运行时子进程；最接近当前架构 | FFI DTO、内存所有权、错误/并发边界需要严格冻结 | **推荐先做最小原型** |
+| Rust 静态/动态库 + C ABI Swift wrapper | Rust 在进程内提供 Core，Swift 保留 `TunnelManager` 门面与 UI | 性能和状态调用直接；不增加运行时子进程；最接近当前架构 | FFI DTO、内存所有权、错误/并发边界需要严格冻结 | **已确认默认路径；先做最小原型** |
 | Rust sidecar + 本地 IPC | Rust 独立进程，通过 Unix socket/JSON 等协议提供 Core | 进程隔离强；Rust 崩溃不直接拖垮 UI；跨语言边界直观 | 子进程生命周期、协议版本、启动/退出和打包复杂；与现有 app 执行器语义容易混淆 | 作为备选原型 |
 | Rust 全量 UI 重写 | UI 与 Core 一起迁移到 Rust 框架 | 单语言 | macOS 原生菜单栏/窗口行为变化大，回归面和发布风险最高 | 本计划非目标 |
 
@@ -67,7 +69,7 @@ TunnelPad 当前是 SwiftUI/AppKit + SwiftPM 的 macOS 菜单栏应用。Swift U
 
 | 问题 | 影响 | 计划处理阶段 | 状态 |
 |---|---|---|---|
-| C ABI wrapper 与 sidecar IPC 最终选型 | 决定进程边界、协议和打包方式 | 阶段 0–1 | 待最小原型比较 |
+| C ABI 原型是否满足安全、契约和发布门槛 | 决定是否继续主路径或启用 sidecar 备选 | 阶段 0–1 | 待最小原型验证 |
 | Rust Core 的并发模型与 Swift async 映射 | 影响取消、busy、状态顺序和退出清理 | 阶段 1 | 未冻结 |
 | FFI/IPC DTO、错误码和版本策略 | 影响兼容性与回滚 | 阶段 1 | 未冻结 |
 | Rust 最低工具链、静态链接和 arm64 发布矩阵 | 影响 CI/本机发布 | 阶段 1/4 | 未冻结 |
@@ -98,8 +100,8 @@ TunnelPad 当前是 SwiftUI/AppKit + SwiftPM 的 macOS 菜单栏应用。Swift U
 
 | 阶段 | 目标 | 进入条件 | 验证方向 | 状态 |
 |---|---|---|---|---|
-| 阶段 0 | 迁移基线、行为契约、边界与候选连接方式冻结 | 用户确认迁移范围 | Swift/Rust 工具链、现有测试/构建、调用边界、风险和安全样本 | 设计中 |
-| 阶段 1 | 最小 bridge/sidecar 原型与 DTO/错误/取消契约 | 阶段 0 独立准入复核通过 | FFI/IPC 原型、Swift 兼容调用、发布链接样本 | 设计中 |
+| 阶段 0 | 迁移基线、行为契约、边界与候选连接方式冻结 | 用户确认迁移范围 | Swift/Rust 工具链、现有测试/构建、调用边界、风险和安全样本 | 已完成 |
+| 阶段 1 | 最小 bridge/sidecar 原型与 DTO/错误/取消契约 | 阶段 0 独立准入复核通过 | FFI/IPC 原型、Swift 兼容调用、发布链接样本 | 待实施 |
 | 阶段 2 | Rust Core 组件 parity：配置、ID、命令、执行器、探针、日志、迁移、退出 | 阶段 1 契约冻结 | fake executor、故障注入、差分测试 | 设计中 |
 | 阶段 3 | 隔离 demo 生命周期与 shadow/differential 回归 | 阶段 2 组件 parity 通过 | demo 启停/重启/删除/退出、取消竞态、产物清理 | 设计中 |
 | 阶段 4 | SwiftUI App 可选接入 Rust Core，保持一键回退 Swift | 阶段 3 独立复核通过 | Release `.app`、AX 冒烟、demo 实机与回滚 | 设计中 |
@@ -107,60 +109,77 @@ TunnelPad 当前是 SwiftUI/AppKit + SwiftPM 的 macOS 菜单栏应用。Swift U
 
 ## 当前阶段
 
-当前阶段为阶段 0（迁移基线与接口原型）。阶段 0 只完成设计、基线和候选方案比较，不创建 Cargo 工程，不接入 Swift 构建，不操作真实隧道。
+当前阶段为阶段 1（最小 bridge 原型与契约冻结）。阶段 0 已通过独立准入复核（2026-08-30），阶段 1 达到待实施标准。阶段 1 只在新增的 Rust workspace 与 Swift 样本中创建 C ABI 最小原型，不修改现有 Swift 行为，不操作真实隧道。阶段 0 的基线与复验记录见[阶段 0 基线证据](../data-quality/tunnelpad-rust-migration-stage0-20260830.md)。
 
 ### 目标与范围
 
-- 固定 Swift 当前行为、配置/执行器/退出/迁移契约和 UI 保留边界。
-- 固定 Rust 工具链、架构、构建产物和发布约束。
-- 用最小、可回滚的原型验证 C ABI wrapper 与 sidecar IPC 的可行性，不冻结尚未验证的 DTO 或并发实现。
-- 明确阶段 1 的独立准入条件、失败策略和回滚方式。
+- 创建独立 Rust workspace（`rust/`，crate `tunnelpad-core`），不接入 `Package.swift` 产品目标，不修改现有 Swift 行为。
+- 定义最小 C ABI 原型契约：`TunnelConfig`、`TunnelStatus`、`ProbeResult`、错误分类、异步操作结果的最小表达；跨边界字符串/缓冲区所有权与释放规则；错误码与版本字段。
+- 提供独立 Swift 兼容调用样本（用 swiftc 直接编译样本可执行文件链接 Rust 静态库，不改动 `Package.swift` 与 `Sources/tunnelpad/` 产品代码）。
+- 产出 arm64 Release 链接样本与 ad-hoc 签名校验记录。
+- 冻结阶段 2 依赖的 DTO/错误/取消契约草案与并发模型映射方案。
 
 ### 非目标
 
-- 不改 Swift 源码、`Package.swift`、`config.json`、launchd plist 或用户配置。
-- 不创建或提交 Rust 实现代码。
-- 不运行真实隧道启停、迁移接管、删除或 ECS 操作。
+- 不实现 Rust Core 业务 parity（执行器、探针、日志、迁移的真实逻辑属阶段 2）。
+- 不操作真实隧道、launchd、SSH；全部使用 fake 数据与隔离目录。
+- 不删除或收缩 Swift Core；不改变 `config.json` schema 与现有行为。
+- 不引入 Tauri/Slint 等 UI 框架。
 
 ### Step 0
 
-类型：架构迁移基线 + 行为契约快照。基线命令和输出摘要见[阶段 0 基线证据](../data-quality/tunnelpad-rust-migration-stage0-20260830.md)。当前 HEAD 为 `b6ffd2232833a2d3e6ef0d894f6cb23fa0448f48`；工作树非洁净，未提交 Swift/UI/ECS 改动必须在 Rust 实施前隔离。当前 Swift 测试 74/74，`rustc`/`cargo` 版本为 1.96.0，最新 `.app` 已通过 Release 构建、`plutil` 和 ad-hoc 签名校验。
+类型：FFI 契约原型基线。基线 = 阶段 0 复验基线（HEAD `64e126fa`，工作树干净，`swift test` 74/74，Release 构建通过）+ Rust 工具链 1.96.0。Rust 代码只存在于新增 `rust/` workspace 与新增 Swift 样本文件中，不修改既有 Swift 符号。
 
 ### 样本矩阵
 
 | # | 输入/基线 | 可执行命令或操作 | 预期结果 | 失败判定 | 输出位置 |
 |---|---|---|---|---|---|
-| 1 | 当前 Git 工作树 | `git rev-parse HEAD && git status --short` | HEAD、未提交范围可复现；明确 Swift/UI/ECS 改动不属于 Rust 实现 | 把未提交改动误当成 Rust 基线 | 阶段 0 证据 |
-| 2 | 当前 Swift target | `swift --version && sed -n '1,100p' Package.swift` | Swift 6.3.3、macOS arm64 target、Core + UI + test target 边界明确 | target 或平台边界不明 | 阶段 0 证据 |
-| 3 | 当前 Rust 工具链 | `rustc --version && cargo --version` | 工具链可执行，版本记录为 Rust 1.96.0 | 任一命令不可执行或版本无法固定 | 阶段 0 证据 |
-| 4 | 当前行为回归 | `swift test` | 74/74 通过 | 任一既有测试失败 | 测试输出/阶段 0 证据 |
-| 5 | 当前发布链路 | `swift build -c release`、`./scripts/build_app.sh --skip-tests` | Release 可链接；`.app` 的 plist、签名和 arm64 产物校验通过 | 构建、签名或产物校验失败 | 阶段 0 证据 |
-| 6 | Core/UI 边界 | `find Sources -maxdepth 2 -type f` + 计划契约核对 | 配置、执行器、探针、日志、迁移、生命周期和 UI 调用方均有归属 | 漏掉行为 owner 或重复 owner | 阶段 0 证据 |
-| 7 | 真实隧道安全 | 只读检查本计划命令与脚本；不执行 launchctl/SSH 操作 | 阶段 0 无真实隧道状态变化、无配置删除 | 产生 bootstrap/bootout/SSH 或删除副作用 | 阶段 0 证据 |
+| 1 | Rust workspace | `cargo test`（rust/ 目录） | 原型单元测试全过（DTO round-trip、错误码、所有权释放） | 任一测试失败 | cargo 输出/阶段 1 证据 |
+| 2 | Swift 兼容调用 | swiftc 编译样本链接静态库并运行 | 断言全部通过 | 任一 API 断言失败 | 阶段 1 证据 |
+| 3 | 发布链接样本 | Rust 静态库 + Release 链接脚本 + `codesign`/`plutil` 校验 | arm64 产物链接成功、签名校验通过 | 链接或签名失败 | 阶段 1 证据 |
+| 4 | 既有回归 | `swift test` | 74/74 保持通过 | 任一既有测试失败 | 测试输出 |
+| 5 | 边界隔离 | `git status`/diff 审计 | 变更只含 `rust/`、新增样本、docs；无既有 Swift 行为改动 | 出现计划外文件或行为改动 | 阶段 1 证据 |
 
 ### 验证方式
 
-阶段 0 使用只读仓库审计、Swift 回归、Rust 工具链探测、Release 产物检查和边界表；C ABI 与 sidecar 只做最小隔离原型。完成阶段 0 后，须由独立复核确认“达到待实施标准”，才可进入阶段 1。
+`cargo test` + Swift 兼容调用样本 + Release 链接/签名校验 + 既有 `swift test` 回归；证据写入 `docs/data-quality` 阶段 1 文档；完成后由独立复核确认契约冻结与阶段 2 准入。
 
 ### 完成条件
 
-- Swift 当前行为契约、UI 保留边界、Rust Core 替换范围和非目标已写入本计划。
-- Step 0 样本矩阵可复现，测试/构建/工具链/安全边界证据已落盘。
-- C ABI wrapper 与 sidecar IPC 的比较指标、失败判定和选择门槛明确；未验证的 DTO/并发/版本细节仍标为未决。
-- 当前工作树中的无关改动已被列出；Rust 实施入口要求选择性提交或干净 worktree。
-- 独立准入复核通过后，阶段 1 才可标记为待实施；本阶段不以实施者声明替代复核。
+- 「阶段 1 原型门槛与比较指标」5 项门槛全部通过并留证据。
+- DTO/错误/取消/版本契约冻结并写入本计划；并发映射方案冻结。
+- Swift 既有测试保持全过；变更边界符合隔离要求。
+- 独立复核确认阶段 1 完成且阶段 2 达到待实施标准。
+
+### 失败与回滚边界
+
+原型失败：删除 `rust/` 与样本或保留在独立分支，Swift Core 不变；任一门槛不成立即触发 sidecar 备选评估。
+
+### 阶段 1 原型门槛与比较指标（阶段 0 冻结）
+
+C ABI 最小原型在阶段 1 必须逐项证明以下门槛；任一不成立即暂停主路径，触发 sidecar IPC 备选评估：
+
+| # | 门槛 | 判定方式 | 失败判定 |
+|---|---|---|---|
+| 1 | 表达完整性 | C ABI 契约能无损表达 `TunnelConfig`、`TunnelStatus`、`ProbeResult`、错误分类和异步操作结果，且含可扩展的错误码/版本字段 | 任一类型或状态无法无损表达 |
+| 2 | 内存与所有权 | 跨边界字符串/缓冲区/句柄有明确分配方与释放方，无双重释放或泄漏；原型含对应测试 | 所有权规则无法静态说清，或测试发现泄漏/双重释放 |
+| 3 | Swift 兼容调用 | 独立 Swift 样本可加载 Rust 库、调用全部原型 API 且断言通过（不改动现有产品代码） | 任一 API 调用失败或断言不通过 |
+| 4 | 取消/退出映射 | Swift async 取消、busy 与退出清理顺序可在契约层面映射出与现有 `TunnelManager` 语义一致的方案 | 无法给出语义一致的映射方案 |
+| 5 | 发布链接样本 | Rust 静态库可链接进 arm64 Release 构建样本，ad-hoc 签名校验通过 | 链接或签名失败且无可行修复 |
+
+比较指标随阶段 1 证据落盘：契约 API 数量与规模、round-trip 测试结果、链接产物与签名校验输出。
 
 ### 阶段准入摘要
 
 | 字段 | 内容 |
 |---|---|
-| 准入状态 | 设计中，基线已执行，尚未达到待实施 |
-| Step 0 | 已固定 Swift/Rust 工具链、74 项测试、Release `.app` 和 Core/UI 边界；证据见阶段 0 基线文档 |
-| 样本矩阵 | 7 行，覆盖工作树、Swift/Rust 工具链、回归、发布链路、边界和真实隧道安全 |
-| 验证方式 | 只读审计、`swift test`、Release 构建/签名、最小 bridge/sidecar 原型和独立复核 |
-| 失败/回滚边界 | 阶段 0 不改实现；任一基线失败则不进入阶段 1；原型只在隔离目录运行 |
-| 当前阻塞项 | bridge 选型、DTO/错误/取消协议和干净实施基线尚未冻结；不阻塞本计划设计，阻塞阶段 1 实施 |
-| 最新独立准入复核 | 尚未复核；不得标记为待实施 |
+| 准入状态 | 待实施 |
+| Step 0 | 继承阶段 0 复验基线：HEAD `64e126fa`、干净工作树、`swift test` 74/74、Release 构建通过、Rust 1.96.0 |
+| 样本矩阵 | 5 行：cargo test、Swift 兼容调用、链接签名样本、既有回归、边界隔离 |
+| 验证方式 | `cargo test`、Swift 兼容调用样本、Release 链接/签名校验、`swift test` 回归与独立复核 |
+| 失败/回滚边界 | 原型失败删除 `rust/` 与样本或保留独立分支；Swift Core 不变；门槛不成立触发 sidecar 备选评估 |
+| 当前阻塞项 | 无当前阶段阻塞项；阶段 0 记录的原型/契约阻塞项即本阶段目标内容 |
+| 最新独立准入复核 | 2026-08-30 通过（阶段 0 完成复核 + 阶段 1 准入草案复核，见独立复核记录） |
 
 ## 失败策略与回滚
 
@@ -182,16 +201,20 @@ TunnelPad 当前是 SwiftUI/AppKit + SwiftPM 的 macOS 菜单栏应用。Swift U
 | 字段 | 内容 |
 |---|---|
 | 日期 | 2026-08-30 |
-| 阶段 | 阶段 0 |
-| 结论 | 待独立复核（尚未达到待实施标准） |
-| 证据 | 计划已写明迁移范围、非目标、Step 0 样本矩阵、候选连接方式、失败/回滚边界；当前 bridge 选型和干净实施基线仍待冻结 |
-| 复核者 | 待独立复核者 |
+| 阶段 | 阶段 1（含阶段 0 完成复核） |
+| 结论 | 通过：阶段 0 达到完成标准；阶段 1 达到待实施标准 |
+| 证据 | 复核者独立复跑 HEAD `64e126fa`、`swift test` 74/74、Release 构建、Swift 6.3.3 arm64、rustc/cargo 1.96.0、无 Rust 工程文件；逐条核对 5 项完成条件、AGENTS.md 6 项准入最低条件与阶段 1 草案齐备性；`plan-governance-cli check .`（含 `--strict-readiness`）通过。已知披露项（不阻塞）：`.app` 打包/签名校验记录来自首轮基线 `b6ffd22`，阶段 1 门槛 5 将重新覆盖链接与签名校验 |
+| 复核者 | 独立复核 subagent |
 
 ## 独立复核记录
 
 | 日期 | 类型 | 阶段 | 结论 | 证据 | 复核者 |
 |---|---|---|---|---|---|
 | 2026-08-30 | 计划创建与基线整理 | 阶段 0 | 待独立复核 | Swift/Rust 工具链、74 项 Swift 测试、Release `.app`、Core/UI 边界和安全边界已记录；未冻结 bridge 细节，未开始实现 | 待独立复核者 |
+| 2026-08-30 | 基线复验与暂定方案同步 | 阶段 0 | 待独立复核 | HEAD `64e126fa` 工作树干净，`swift test` 74/74 与 Release 构建复跑通过；首轮基线（HEAD `b6ffd22`、非洁净工作树）保留为历史记录；C ABI 主路径记为暂定默认，待用户确认 | 待独立复核者 |
+| 2026-08-30 | 用户确认默认 bridge 方案 | 阶段 0 | 待独立复核 | 用户确认 C ABI 主路径 + Swift Core 可回退为默认方案，sidecar IPC 为备选；阶段 0 剩余准入门槛为独立复核 | 待独立复核者 |
+| 2026-08-30 | 阶段 0 完成准入复核 | 阶段 0 | 通过 | 独立复跑 HEAD `64e126fa`（工作树仅 3 个治理文档未提交编辑、无代码改动）、`swift test` 74/74、`swift build -c release` 通过、Swift 6.3.3 arm64、rustc/cargo 1.96.0、无 Cargo.toml/.rs；5 项原型门槛表、默认 C ABI 方案确认与 DTO/并发/版本未决标记逐项核对通过；`plan-governance-cli check .`（含 `--strict-readiness`）通过 | 独立复核 subagent |
+| 2026-08-30 | 阶段 1 准入草案复核 | 阶段 1 | 达到待实施标准 | 草案目标/非目标、Step 0（FFI 契约原型基线 = 64e126fa 复验基线 + Rust 1.96.0）、5 行样本矩阵（含 74/74 回归与 git 边界审计）、验证方式、完成条件（引用阶段 0 冻结的 5 项门槛）、失败/回滚边界齐备自洽；落盘时须同步 `PLAN_MAP.md` 并提交未提交的治理文档编辑 | 独立复核 subagent |
 
 ## 关联计划、ADR、迁移、spec 或 issue
 

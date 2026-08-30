@@ -23,7 +23,7 @@
 | [ECS 动态 SSH 公网 IP 同步](plans/ecs-dynamic-ssh-ip.md) | 实施中 | 阶段 1 | 2026-08-29 | - | [阶段 0 本机预检](data-quality/ecs-dynamic-ssh-ip-stage0-local-preflight-20260829.md)；[CLI 与凭证准备](data-quality/ecs-dynamic-ssh-ip-stage0-cli-credential-prep-20260829.md)；[云端只读验证](data-quality/ecs-dynamic-ssh-ip-stage0-cloud-readonly-20260829.md)；[控制台拓扑基线](data-quality/ecs-dynamic-ssh-ip-stage0-console-topology-20260829.md)；[项目外受控实跑](data-quality/ecs-dynamic-ssh-ip-stage0-controlled-run-20260829.md)；[阶段 1 实现与验证](data-quality/ecs-dynamic-ssh-ip-stage1-implementation-20260829.md) |
 | [TunnelPad 界面优化](plans/tunnelpad-ui-refinements.md) | 已完成 | - | 2026-08-30 | tunnelpad-v1 | [阶段 1 证据](data-quality/tunnelpad-ui-refinements-stage1-20260829.md)；[阶段 2 证据](data-quality/tunnelpad-ui-refinements-stage2-20260829.md)；[阶段 3 与阶段 1 收尾证据](data-quality/tunnelpad-ui-refinements-stage3-20260830.md)；[阶段 4 证据](data-quality/tunnelpad-ui-refinements-stage4-20260830.md) |
 | [TunnelPad 代码质量重构](plans/tunnelpad-code-quality-refactor.md) | 已完成 | - | 2026-08-30 | tunnelpad-v1, tunnelpad-ui-refinements | [阶段 0 基线证据](data-quality/tunnelpad-code-quality-refactor-stage0-20260830.md)；[阶段 1 实施证据](data-quality/tunnelpad-code-quality-refactor-stage1-20260830.md)；[阶段 2–4 实施证据](data-quality/tunnelpad-code-quality-refactor-stage2-4-20260830.md)；[专项计划](plans/tunnelpad-code-quality-refactor.md) |
-| [TunnelPad Rust Core 迁移](plans/tunnelpad-rust-migration.md) | 设计中 | 阶段 0 | 2026-08-30 | tunnelpad-v1, tunnelpad-ui-refinements, tunnelpad-code-quality-refactor | [阶段 0 基线证据](data-quality/tunnelpad-rust-migration-stage0-20260830.md)；[专项计划](plans/tunnelpad-rust-migration.md) |
+| [TunnelPad Rust Core 迁移](plans/tunnelpad-rust-migration.md) | 待实施 | 阶段 1 | 2026-08-30 | tunnelpad-v1, tunnelpad-ui-refinements, tunnelpad-code-quality-refactor | [阶段 0 基线证据](data-quality/tunnelpad-rust-migration-stage0-20260830.md)；[专项计划](plans/tunnelpad-rust-migration.md) |
 
 允许状态：`候选`、`设计中`、`待实施`、`实施中`、`已完成`、`已替代`、`已合并`、`已废弃`。
 
@@ -33,7 +33,7 @@
 2. `ecs-dynamic-ssh-ip` 后续阶段按其自身独立准入复核推进。
 3. `tunnelpad-ui-refinements` 各阶段按其自身独立准入复核推进，可与 `ecs-dynamic-ssh-ip` 并行。
 4. `tunnelpad-code-quality-refactor` 先完成阶段 0 基线与兼容边界确认；实现阶段默认排在 `tunnelpad-ui-refinements` 收尾及阶段 4 独立复核之后，避免重构与 UI 行为同时修改。
-5. `tunnelpad-rust-migration` 只在 Swift 内部重构、UI 收尾和当前工作树隔离后推进；先完成阶段 0–1 的接口原型与独立准入，再决定是否进入 Rust Core parity 实施。
+5. `tunnelpad-rust-migration` 前置条件（Swift 内部重构、UI 收尾、工作树隔离）均已满足；阶段 0 已于 2026-08-30 通过独立准入复核，阶段 1 达到待实施标准，实施中保持变更隔离。
 
 ## 依赖关系
 
@@ -43,7 +43,7 @@
 | ecs-dynamic-ssh-ip | - | 用户确认可立即进行本计划的阶段 0 准备；本计划不修改 TunnelPad v1 范围，与 v1 无阶段依赖。 |
 | tunnelpad-ui-refinements | tunnelpad-v1 | 前置 v1 已完成；本计划不修改 config schema 与隧道启停语义，与 ecs-dynamic-ssh-ip 无依赖。 |
 | tunnelpad-code-quality-refactor | tunnelpad-v1, tunnelpad-ui-refinements | v1 提供现有运行契约；界面优化阶段 1–4 已完成，重构实现不与已验收 UI 行为并行修改；阶段 0–4 已完成。 |
-| tunnelpad-rust-migration | tunnelpad-v1, tunnelpad-ui-refinements, tunnelpad-code-quality-refactor | Rust 只替换内部 Core；必须先继承已验收的 Swift 行为契约，并在实施前隔离当前未提交混合工作树。 |
+| tunnelpad-rust-migration | tunnelpad-v1, tunnelpad-ui-refinements, tunnelpad-code-quality-refactor | Rust 只替换内部 Core；必须先继承已验收的 Swift 行为契约；已确认 C ABI 主路径为默认 bridge 方案，待独立准入复核通过后进入阶段 1，保持迁移变更隔离。 |
 
 ## 替代、合并和废弃
 
@@ -57,7 +57,7 @@
 |---|---|---|---|---|
 | - | - | - | 否 | 已延后 |
 | 阶段 1 实现与独立复核 | 阶段 1 已完成实现、fixture 验证和真实 ECS 只读回归；阶段 2 自动集成尚未启动，需另行准入。运行时任一双端点不一致、规则歧义、API 写入未确认或锁冲突都必须停止或保留新旧规则；Workbench 保留为恢复通道 | ecs-dynamic-ssh-ip 阶段 1 | 否 | 已通过 |
-| Rust Core bridge 选型与干净实施基线 | C ABI wrapper/sidecar 仍需最小原型比较；当前工作树含未提交 Swift/UI/ECS 混合改动，Rust 实施前需隔离 | tunnelpad-rust-migration 阶段 0 | 是（阶段 1 实施） | 设计中 |
+| Rust Core bridge 原型与阶段 0 独立复核 | 阶段 0 已通过独立复核，C ABI 主路径已确认；阶段 1 按 5 项冻结门槛实施最小原型并冻结 DTO/错误/取消/并发契约，任一门槛不成立触发 sidecar 备选评估 | tunnelpad-rust-migration 阶段 1 | 是（阶段 2 实施） | 待实施 |
 | - | - | - | 否 | 已完成 |
 
 ## 完成证据
@@ -74,3 +74,4 @@
 | tunnelpad-code-quality-refactor | 阶段 1 | [阶段 1 实施证据](data-quality/tunnelpad-code-quality-refactor-stage1-20260830.md)（Core 边界、异步取消保护及兼容切片；73 项测试与构建通过，2026-08-30） |
 | tunnelpad-code-quality-refactor | 阶段 2–3 | [阶段 2–4 实施证据](data-quality/tunnelpad-code-quality-refactor-stage2-4-20260830.md)（异步生命周期、主面板拆分、共享表单和 AX 冒烟，2026-08-30） |
 | tunnelpad-code-quality-refactor | 阶段 4 | [阶段 2–4 实施证据](data-quality/tunnelpad-code-quality-refactor-stage2-4-20260830.md)（失败注入、隔离 demo 生命周期、release 构建和治理检查通过，2026-08-30） |
+| tunnelpad-rust-migration | 阶段 0 | [阶段 0 基线与复验证据](data-quality/tunnelpad-rust-migration-stage0-20260830.md)（基线、64e126fa 复验与独立准入复核通过，2026-08-30） |
