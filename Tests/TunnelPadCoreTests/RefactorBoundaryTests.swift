@@ -85,7 +85,12 @@ final class RefactorBoundaryTests: XCTestCase {
             }
             return ProcessResult(exitCode: 0)
         }
-        let manager = TunnelManager(paths: paths, executor: LaunchCtlExecutor(runner: runner, uid: 501))
+        let manager = TunnelManager(
+            paths: paths,
+            executor: LaunchCtlExecutor(runner: runner, uid: 501),
+            configRepository: ConfigStore(paths: paths),
+            probeService: ProbeService()
+        )
 
         await manager.startAsync(tunnel.id)
 
@@ -95,26 +100,6 @@ final class RefactorBoundaryTests: XCTestCase {
         await manager.stopAsync(tunnel.id)
         XCTAssertEqual(manager.lastMessage, "「异步 A」已停止")
         XCTAssertTrue(runner.recordedCalls.contains { $0.arguments.first == "bootout" })
-    }
-
-    @MainActor
-    func testAsyncRemoveStopsAppAndCommitsConfiguration() async throws {
-        let home = FileManager.default.temporaryDirectory
-            .appendingPathComponent("tunnelpad-async-remove-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: home) }
-
-        let paths = TunnelPaths(homeDirectory: home)
-        let tunnel = TunnelConfig(id: "async-remove", name: "异步删除", command: ["/bin/sleep", "30"], executor: .app)
-        try ConfigStore(paths: paths).save(AppConfig(tunnels: [tunnel]))
-        let manager = TunnelManager(paths: paths)
-        try manager.appExecutor.start(tunnel)
-
-        await manager.removeTunnelAsync(tunnel.id)
-
-        XCTAssertTrue(manager.config.tunnels.isEmpty)
-        XCTAssertEqual(manager.appExecutor.status(id: tunnel.id), .notLoaded)
-        XCTAssertNil(manager.lastError)
     }
 
     @MainActor
@@ -138,7 +123,9 @@ final class RefactorBoundaryTests: XCTestCase {
         }
         let manager = TunnelManager(
             paths: paths,
-            executor: LaunchCtlExecutor(runner: runner, uid: 501)
+            executor: LaunchCtlExecutor(runner: runner, uid: 501),
+            configRepository: ConfigStore(paths: paths),
+            probeService: ProbeService()
         )
 
         await manager.removeTunnelAsync(tunnel.id)
@@ -169,39 +156,4 @@ final class RefactorBoundaryTests: XCTestCase {
         XCTAssertEqual(manager.lastError, "保存配置失败：SaveFailure()")
     }
 
-    @MainActor
-    func testAsyncAppLifecycleSequenceKeepsConfigAndCleansArtifacts() async throws {
-        let home = FileManager.default.temporaryDirectory
-            .appendingPathComponent("tunnelpad-async-lifecycle-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: home) }
-
-        let paths = TunnelPaths(homeDirectory: home)
-        let tunnel = TunnelConfig(
-            id: "async-lifecycle",
-            name: "异步生命周期",
-            command: ["/bin/sleep", "60"],
-            executor: .app
-        )
-        try ConfigStore(paths: paths).save(AppConfig(tunnels: [tunnel]))
-        let manager = TunnelManager(paths: paths)
-
-        await manager.refreshAsync()
-        await manager.startAsync(tunnel.id)
-        guard case .running = manager.statuses[tunnel.id] else {
-            return XCTFail("异步启动后应显示 running")
-        }
-
-        await manager.stopAsync(tunnel.id)
-        XCTAssertEqual(manager.statuses[tunnel.id], .notLoaded)
-        await manager.restartAsync(tunnel.id)
-        guard case .running = manager.statuses[tunnel.id] else {
-            return XCTFail("异步重启后应显示 running")
-        }
-
-        await manager.removeTunnelAsync(tunnel.id)
-        XCTAssertTrue(manager.config.tunnels.isEmpty)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.pidfileURL(for: tunnel).path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.logURL(for: tunnel).path))
-    }
 }

@@ -76,12 +76,8 @@ struct TunnelSettingsSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             sectionLabel("执行")
             fieldLabel("执行器")
-            Picker("", selection: $form.executor) {
-                Text("launchd").tag(ExecutorKind.launchd)
-                Text("app").tag(ExecutorKind.app)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            Text("launchd（当前阶段唯一支持的执行器）")
+                .foregroundStyle(.secondary)
 
             fieldLabel("命令（每行一个参数，首行为可执行文件路径）")
             TextEditor(text: $form.commandText)

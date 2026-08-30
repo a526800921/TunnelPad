@@ -127,34 +127,6 @@ final class TunnelManagerTests: XCTestCase {
     }
 
     @MainActor
-    func testRemoveTunnelStopsAppProcessAndCleansFiles() throws {
-        let tempHome = FileManager.default.temporaryDirectory
-            .appendingPathComponent("tunnelpad-manager-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: tempHome, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempHome) }
-
-        let paths = TunnelPaths(homeDirectory: tempHome)
-        let store = ConfigStore(paths: paths)
-        let tunnel = TunnelConfig(id: "remove-app", name: "App", command: ["/bin/sleep", "30"], executor: .app)
-        try store.save(AppConfig(tunnels: [tunnel]))
-
-        let manager = TunnelManager(paths: paths)
-        try manager.appExecutor.start(tunnel)
-        guard case .running = manager.appExecutor.status(id: "remove-app") else {
-            return XCTFail("sleep 进程应已启动")
-        }
-
-        manager.removeTunnel("remove-app")
-
-        XCTAssertEqual(manager.appExecutor.status(id: "remove-app"), .notLoaded, "删除应终止子进程")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.pidfileURL(for: tunnel).path), "pidfile 应被清理")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.logURL(for: tunnel).path), "日志文件应被删除")
-        XCTAssertTrue(manager.config.tunnels.isEmpty)
-        XCTAssertTrue(store.load().config.tunnels.isEmpty)
-        XCTAssertNil(manager.lastError)
-    }
-
-    @MainActor
     func testRemoveTunnelAbortsAndKeepsConfigWhenBootoutFails() throws {
         let tempHome = FileManager.default.temporaryDirectory
             .appendingPathComponent("tunnelpad-manager-\(UUID().uuidString)", isDirectory: true)
@@ -180,7 +152,12 @@ final class TunnelManagerTests: XCTestCase {
             return nil
         }
         let executor = LaunchCtlExecutor(runner: runner, uid: 501)
-        let manager = TunnelManager(paths: paths, executor: executor)
+        let manager = TunnelManager(
+            paths: paths,
+            executor: executor,
+            configRepository: store,
+            probeService: ProbeService()
+        )
         let plistURL = try LaunchdPlistRenderer.writePlist(for: tunnel, paths: paths)
         try FileManager.default.createDirectory(at: paths.logsDirectory, withIntermediateDirectories: true)
         try Data("debug1: keep\n".utf8).write(to: paths.logURL(for: tunnel))
@@ -231,7 +208,7 @@ final class TunnelManagerTests: XCTestCase {
         ]))
 
         let manager = TunnelManager(paths: paths)
-        manager.addTunnel(TunnelConfig(id: "new-a", name: "A", command: ["/bin/sleep", "30"], executor: .app))
+        manager.addTunnel(TunnelConfig(id: "new-a", name: "A", command: ["/bin/sleep", "30"]))
 
         XCTAssertEqual(manager.config.tunnels.map(\.id), ["base", "new-a"], "新增应追加到列表末尾")
         XCTAssertEqual(store.load().config.tunnels.map(\.id), ["base", "new-a"], "新增应持久化到 config.json")

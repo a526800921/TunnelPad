@@ -22,6 +22,7 @@ public final class TunnelManager: ObservableObject {
     private let lifecycleCoordinator: TunnelLifecycleCoordinator
     private let probeCoordinator: ProbeCoordinator
     private let rustCoreShadow: RustCoreShadow
+    private let rustCore: RustCoreClient?
     private var runtimeState = TunnelRuntimeState()
     private var probeTask: Task<Void, Never>?
     private var probeGeneration: UInt = 0
@@ -34,12 +35,21 @@ public final class TunnelManager: ObservableObject {
         paths: TunnelPaths,
         executor: LaunchCtlExecutor = LaunchCtlExecutor()
     ) {
+        let rustCore: RustCoreClient
+        do {
+            rustCore = try RustCoreClient(paths: paths)
+        } catch let error as RustCoreClient.ClientError {
+            rustCore = RustCoreClient(failure: error)
+        } catch {
+            rustCore = RustCoreClient(failure: .unavailable(String(describing: error)))
+        }
         self.init(
             paths: paths,
             executor: executor,
             configRepository: ConfigStore(paths: paths),
             probeService: ProbeService(),
-            rustCoreShadow: RustCoreShadow()
+            rustCoreShadow: RustCoreShadow(),
+            rustCore: rustCore
         )
     }
 
@@ -48,7 +58,8 @@ public final class TunnelManager: ObservableObject {
         executor: LaunchCtlExecutor,
         configRepository: any TunnelConfigRepository,
         probeService: ProbeService,
-        rustCoreShadow: RustCoreShadow = RustCoreShadow()
+        rustCoreShadow: RustCoreShadow = RustCoreShadow(),
+        rustCore: RustCoreClient? = nil
     ) {
         self.paths = paths
         self.executor = executor
@@ -65,11 +76,21 @@ public final class TunnelManager: ObservableObject {
             app: appExecutor
         )
         self.probeCoordinator = ProbeCoordinator(service: probeService)
-        let loaded = store.load()
-        self.config = loaded.config
-        self.rustCoreShadow.validateConfig(self.config)
-        if let recovered = loaded.recoveredFrom {
-            self.lastMessage = "配置文件损坏，已留档 \(recovered.lastPathComponent)，已重建空配置"
+        self.rustCore = rustCore
+        if let rustCore {
+            do {
+                self.config = try rustCore.loadConfig()
+            } catch {
+                self.config = AppConfig()
+                self.lastError = String(describing: error)
+            }
+        } else {
+            let loaded = store.load()
+            self.config = loaded.config
+            self.rustCoreShadow.validateConfig(self.config)
+            if let recovered = loaded.recoveredFrom {
+                self.lastMessage = "配置文件损坏，已留档 \(recovered.lastPathComponent)，已重建空配置"
+            }
         }
     }
 
@@ -79,6 +100,18 @@ public final class TunnelManager: ObservableObject {
 
     /// 手动编辑 config.json 后重新加载；丢弃已移除隧道的状态与探针缓存。
     public func reloadConfig() {
+        if let rustCore {
+            do {
+                config = try rustCore.loadConfig()
+                let validIDs = Set(config.tunnels.map(\.id))
+                updateRuntime { $0.prune(to: validIDs) }
+                lastMessage = "已重新加载配置，共 \(config.tunnels.count) 条隧道"
+                refresh()
+            } catch {
+                lastError = "Rust Core 重新加载配置失败：\(error)"
+            }
+            return
+        }
         let loaded = store.load()
         config = loaded.config
         let validIDs = Set(config.tunnels.map(\.id))
@@ -94,6 +127,24 @@ public final class TunnelManager: ObservableObject {
 
     /// 异步重新加载配置：文件读取在后台执行，完成后沿用同步入口的状态裁剪和提示语义。
     public func reloadConfigAsync() async {
+        if let rustCore {
+            do {
+                let loaded = try await Task.detached(priority: .utility) {
+                    try rustCore.loadConfig()
+                }.value
+                guard !Task.isCancelled else { return }
+                config = loaded
+                let validIDs = Set(config.tunnels.map(\.id))
+                updateRuntime { $0.prune(to: validIDs) }
+                lastMessage = "已重新加载配置，共 \(config.tunnels.count) 条隧道"
+                await refreshAsync()
+            } catch is CancellationError {
+                return
+            } catch {
+                lastError = "Rust Core 重新加载配置失败：\(error)"
+            }
+            return
+        }
         let snapshot = config
         let loaded = await Task.detached(priority: .utility) { [store] in
             store.load()
@@ -118,6 +169,27 @@ public final class TunnelManager: ObservableObject {
     public func updateTunnel(_ tunnel: TunnelConfig) {
         guard !runtimeState.busyIDs.contains(tunnel.id) else { return }
         guard let index = config.tunnels.firstIndex(where: { $0.id == tunnel.id }) else { return }
+        if let rustCore {
+            guard tunnel.executor == .launchd else {
+                lastError = "保存「\(tunnel.name)」失败：阶段 5 仅支持 launchd 执行器"
+                return
+            }
+            let old = config.tunnels[index]
+            config.tunnels[index] = tunnel
+            do {
+                try rustCore.saveConfig(config)
+                if tunnel.probe == nil {
+                    updateRuntime { $0.setProbeResult(nil, for: tunnel.id) }
+                }
+                lastMessage = "已保存「\(tunnel.name)」的配置；运行中的隧道在下次重启后使用新参数"
+            } catch {
+                config.tunnels[index] = old
+                lastError = "保存配置失败：\(error)"
+                return
+            }
+            refresh()
+            return
+        }
         let old = config.tunnels[index]
         config.tunnels[index] = tunnel
 
@@ -148,6 +220,32 @@ public final class TunnelManager: ObservableObject {
         guard let operation = beginOperation(for: tunnel.id) else { return }
         defer { endOperation(for: tunnel.id, generation: operation) }
         guard let index = config.tunnels.firstIndex(where: { $0.id == tunnel.id }) else { return }
+        if let rustCore {
+            guard tunnel.executor == .launchd else {
+                lastError = "保存「\(tunnel.name)」失败：阶段 5 仅支持 launchd 执行器"
+                return
+            }
+            var nextConfig = config
+            nextConfig.tunnels[index] = tunnel
+            let configToSave = nextConfig
+            do {
+                try await Task.detached(priority: .utility) {
+                    try rustCore.saveConfig(configToSave)
+                }.value
+                guard isCurrentOperation(tunnel.id, generation: operation), !Task.isCancelled else { return }
+                config = nextConfig
+                if tunnel.probe == nil {
+                    updateRuntime { $0.setProbeResult(nil, for: tunnel.id) }
+                }
+                lastMessage = "已保存「\(tunnel.name)」的配置；运行中的隧道在下次重启后使用新参数"
+                await refreshAsync()
+            } catch is CancellationError {
+                return
+            } catch {
+                lastError = "保存配置失败：\(error)"
+            }
+            return
+        }
         let old = config.tunnels[index]
 
         if old.executor != tunnel.executor {
@@ -176,6 +274,21 @@ public final class TunnelManager: ObservableObject {
         guard let tunnel = tunnel(id: id) else { return }
         guard let operation = beginOperation(for: id) else { return }
         defer { endOperation(for: id, generation: operation) }
+
+        if let rustCore {
+            do {
+                try rustCore.remove(id: id)
+                config.tunnels.removeAll { $0.id == id }
+                updateRuntime {
+                    $0.setStatus(nil, for: id)
+                    $0.setProbeResult(nil, for: id)
+                }
+                refresh()
+            } catch {
+                lastError = "删除「\(tunnel.name)」失败：\(error)"
+            }
+            return
+        }
 
         switch tunnel.executor {
         case .launchd:
@@ -234,6 +347,26 @@ public final class TunnelManager: ObservableObject {
         guard let tunnel = tunnel(id: id) else { return }
         guard let operation = beginOperation(for: id) else { return }
         defer { endOperation(for: id, generation: operation) }
+
+        if let rustCore {
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    try rustCore.remove(id: id)
+                }.value
+                guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return }
+                config.tunnels.removeAll { $0.id == id }
+                updateRuntime {
+                    $0.setStatus(nil, for: id)
+                    $0.setProbeResult(nil, for: id)
+                }
+                await refreshAsync()
+            } catch is CancellationError {
+                return
+            } catch {
+                lastError = "删除「\(tunnel.name)」失败：\(error)"
+            }
+            return
+        }
 
         if let stopError = await lifecycleCoordinator.stopForDeletion(tunnel) {
             guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return }
@@ -298,6 +431,24 @@ public final class TunnelManager: ObservableObject {
             return
         }
 
+        if let rustCore {
+            guard tunnel.executor == .launchd else {
+                lastError = "新增「\(tunnel.name)」失败：阶段 5 仅支持 launchd 执行器"
+                return
+            }
+            var nextConfig = config
+            nextConfig.tunnels.append(tunnel)
+            do {
+                try rustCore.saveConfig(nextConfig)
+                config = nextConfig
+            } catch {
+                lastError = "新增「\(tunnel.name)」失败：\(error)"
+                return
+            }
+            refresh()
+            return
+        }
+
         config.tunnels.append(tunnel)
         do {
             try store.save(config)
@@ -312,6 +463,17 @@ public final class TunnelManager: ObservableObject {
     // MARK: - 状态
 
     public func refresh() {
+        if let rustCore {
+            do {
+                let snapshot = try rustCore.snapshot()
+                config = snapshot.config
+                updateRuntime { $0.setStatuses(snapshot.statuses) }
+            } catch {
+                lastError = "Rust Core 刷新状态失败：\(error)"
+            }
+            runProbes()
+            return
+        }
         var nextStatuses = runtimeState.statuses
         for tunnel in config.tunnels {
             switch tunnel.executor {
@@ -332,6 +494,22 @@ public final class TunnelManager: ObservableObject {
     public func refreshAsync() async {
         refreshGeneration &+= 1
         let currentGeneration = refreshGeneration
+        if let rustCore {
+            do {
+                let snapshot = try await Task.detached(priority: .utility) {
+                    try rustCore.snapshot()
+                }.value
+                guard currentGeneration == refreshGeneration, !Task.isCancelled else { return }
+                config = snapshot.config
+                updateRuntime { $0.setStatuses(snapshot.statuses) }
+                runProbes()
+            } catch is CancellationError {
+                return
+            } catch {
+                lastError = "Rust Core 刷新状态失败：\(error)"
+            }
+            return
+        }
         let snapshot = config.tunnels
         let nextStatuses = await lifecycleCoordinator.statuses(for: snapshot)
         guard currentGeneration == refreshGeneration, snapshot == config.tunnels else { return }
@@ -385,6 +563,16 @@ public final class TunnelManager: ObservableObject {
         guard let tunnel = tunnel(id: id) else { return }
         guard let operation = beginOperation(for: id) else { return }
         defer { endOperation(for: id, generation: operation) }
+        if let rustCore {
+            do {
+                let status = try rustCore.start(id: id)
+                updateRuntime { $0.setStatus(status, for: id) }
+                lastMessage = "「\(tunnel.name)」已启动"
+            } catch {
+                lastError = "启动「\(tunnel.name)」失败：\(error)"
+            }
+            return
+        }
         let outcome = lifecycleCoordinator.startSync(tunnel)
         apply(outcome)
         if outcome.refresh { refresh() }
@@ -396,6 +584,23 @@ public final class TunnelManager: ObservableObject {
         guard let operation = beginOperation(for: id) else { return }
         defer { endOperation(for: id, generation: operation) }
 
+        if let rustCore {
+            do {
+                let status = try await Task.detached(priority: .userInitiated) {
+                    try rustCore.start(id: id)
+                }.value
+                guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return }
+                updateRuntime { $0.setStatus(status, for: id) }
+                lastMessage = "「\(tunnel.name)」已启动"
+                await refreshAsync()
+            } catch is CancellationError {
+                return
+            } catch {
+                lastError = "启动「\(tunnel.name)」失败：\(error)"
+            }
+            return
+        }
+
         let outcome = await lifecycleCoordinator.start(tunnel)
         guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return }
         apply(outcome)
@@ -406,6 +611,16 @@ public final class TunnelManager: ObservableObject {
         guard let tunnel = tunnel(id: id) else { return }
         guard let operation = beginOperation(for: id) else { return }
         defer { endOperation(for: id, generation: operation) }
+        if let rustCore {
+            do {
+                let status = try rustCore.stop(id: id)
+                updateRuntime { $0.setStatus(status, for: id) }
+                lastMessage = "「\(tunnel.name)」已停止"
+            } catch {
+                lastError = "停止「\(tunnel.name)」失败：\(error)"
+            }
+            return
+        }
         apply(lifecycleCoordinator.stopSync(tunnel))
         refresh()
     }
@@ -415,6 +630,23 @@ public final class TunnelManager: ObservableObject {
         guard let tunnel = tunnel(id: id) else { return }
         guard let operation = beginOperation(for: id) else { return }
         defer { endOperation(for: id, generation: operation) }
+
+        if let rustCore {
+            do {
+                let status = try await Task.detached(priority: .userInitiated) {
+                    try rustCore.stop(id: id)
+                }.value
+                guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return }
+                updateRuntime { $0.setStatus(status, for: id) }
+                lastMessage = "「\(tunnel.name)」已停止"
+                await refreshAsync()
+            } catch is CancellationError {
+                return
+            } catch {
+                lastError = "停止「\(tunnel.name)」失败：\(error)"
+            }
+            return
+        }
 
         let outcome = await lifecycleCoordinator.stop(tunnel)
         guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return }
@@ -426,6 +658,16 @@ public final class TunnelManager: ObservableObject {
         guard let tunnel = tunnel(id: id) else { return }
         guard let operation = beginOperation(for: id) else { return }
         defer { endOperation(for: id, generation: operation) }
+        if let rustCore {
+            do {
+                let status = try rustCore.restart(id: id)
+                updateRuntime { $0.setStatus(status, for: id) }
+                lastMessage = "「\(tunnel.name)」已重启"
+            } catch {
+                lastError = "重启「\(tunnel.name)」失败：\(error)"
+            }
+            return
+        }
         apply(lifecycleCoordinator.restartSync(tunnel))
         refresh()
     }
@@ -435,6 +677,23 @@ public final class TunnelManager: ObservableObject {
         guard let tunnel = tunnel(id: id) else { return }
         guard let operation = beginOperation(for: id) else { return }
         defer { endOperation(for: id, generation: operation) }
+
+        if let rustCore {
+            do {
+                let status = try await Task.detached(priority: .userInitiated) {
+                    try rustCore.restart(id: id)
+                }.value
+                guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return }
+                updateRuntime { $0.setStatus(status, for: id) }
+                lastMessage = "「\(tunnel.name)」已重启"
+                await refreshAsync()
+            } catch is CancellationError {
+                return
+            } catch {
+                lastError = "重启「\(tunnel.name)」失败：\(error)"
+            }
+            return
+        }
 
         let outcome = await lifecycleCoordinator.restart(tunnel)
         guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return }
@@ -452,6 +711,29 @@ public final class TunnelManager: ObservableObject {
         for tunnel in config.tunnels {
             stop(tunnel.id)
         }
+    }
+
+    /// 应用退出时由 Rust owner 统一停止全部受管 launchd 隧道并关闭 handle。
+    /// 注入 Swift 执行器的初始化仅供现有测试/迁移材料使用，不作为生产回退。
+    public func shutdownAsync() async {
+        probeTask?.cancel()
+        if let rustCore {
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    try rustCore.shutdown()
+                }.value
+            } catch is CancellationError {
+                return
+            } catch {
+                lastError = "Rust Core 退出清理失败：\(error)"
+            }
+            return
+        }
+
+        for tunnel in config.tunnels where tunnel.executor == .launchd {
+            _ = await lifecycleCoordinator.stop(tunnel)
+        }
+        appExecutor.shutdownAll()
     }
 
     // MARK: - 迁移

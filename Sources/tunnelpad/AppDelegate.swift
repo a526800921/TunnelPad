@@ -32,23 +32,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         false // 关闭窗口不退出，隧道管理常驻菜单栏
     }
 
-    /// 正常退出（菜单退出 / Cmd+Q / AppleScript quit）先停全部托管隧道（launchd bootout + app 子进程终止），再结束进程。
+    /// 正常退出（菜单退出 / Cmd+Q / AppleScript quit）先由 Rust owner 停止全部受管 launchd 隧道，再结束进程。
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !isTerminating else { return .terminateNow }
         isTerminating = true
 
-        let tunnels = manager.config.tunnels
-        let executor = manager.executor
-        let appExecutor = manager.appExecutor
-
-        DispatchQueue.global().async {
-            for tunnel in tunnels where tunnel.executor == .launchd {
-                _ = try? executor.bootout(label: tunnel.launchdLabel)
-            }
-            appExecutor.shutdownAll() // app 执行器子进程（含配置外仍在托管中的）
-            DispatchQueue.main.async {
-                sender.reply(toApplicationShouldTerminate: true)
-            }
+        Task { @MainActor in
+            await manager.shutdownAsync()
+            sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
     }

@@ -36,7 +36,8 @@ struct TunnelFormState: Equatable {
     init(tunnel: TunnelConfig) {
         name = tunnel.name
         commandText = tunnel.command.joined(separator: "\n")
-        executor = tunnel.executor
+        // 阶段 5 当前只允许 launchd；旧 app 配置不会进入生产 owner。
+        executor = .launchd
         keepAlive = tunnel.keepAlive
         throttleInterval = tunnel.throttleInterval
         probeEnabled = tunnel.probe != nil

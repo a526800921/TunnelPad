@@ -85,12 +85,8 @@ struct NewTunnelSheet: View {
                 .foregroundStyle(.secondary)
             Text("执行器")
                 .font(.callout)
-            Picker("", selection: $form.executor) {
-                Text("launchd").tag(ExecutorKind.launchd)
-                Text("app").tag(ExecutorKind.app)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            Text("launchd（当前阶段唯一支持的执行器）")
+                .foregroundStyle(.secondary)
 
             Text("命令（每行一个参数，首行为可执行文件路径）")
                 .font(.callout)

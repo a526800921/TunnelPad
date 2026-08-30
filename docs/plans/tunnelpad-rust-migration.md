@@ -1,11 +1,11 @@
 # 计划：TunnelPad Rust Core 迁移
 
-- 状态：已完成
-- 当前阶段：-
+- 状态：实施中
+- 当前阶段：阶段 5
 - 最后更新：2026-08-30
-- 前置：`tunnelpad-v1`、`tunnelpad-ui-refinements` 与 `tunnelpad-code-quality-refactor` 已完成；本计划只在现有 Swift 行为基线上设计 Rust Core 的渐进替换
+- 前置：`tunnelpad-v1`、`tunnelpad-ui-refinements` 与 `tunnelpad-code-quality-refactor` 已完成；阶段 0–4 已完成，阶段 5 已进入 owner 切换实施
 
-当前说明：用户已确认迁移边界为“保留 SwiftUI/AppKit 菜单栏与窗口 UI，逐步用 Rust 替换 `TunnelPadCore`”，并确认以“C ABI 主路径 + Swift Core 可回退”作为默认 bridge 方案（sidecar IPC 为备选）。阶段 0–4 已通过实现/功能复核、独立准入复核与治理同步检查；阶段 4 采用进程内 shadow bridge：Rust 只读校验配置，Swift 继续作为唯一生命周期 owner，缺失/不兼容/失败时回退 Swift。本计划不改变用户可见行为，不接管真实用户隧道。
+当前说明：用户已确认保留 SwiftUI/AppKit 菜单栏与窗口 UI，Rust 通过进程内 C ABI 成为唯一 Core owner。阶段 4 的 shadow bridge 已完成；阶段 5 将先覆盖 `launchd` 和 `config.json` owner，隐藏并移除当前 `app` 执行器路径。验证完成后删除旧 Swift Core，不保留同一 App 内的 Swift fallback；真实验证按用户授权的隧道逐条进行。
 
 ## 背景
 
@@ -15,7 +15,7 @@ TunnelPad 当前是 SwiftUI/AppKit + SwiftPM 的 macOS 菜单栏应用。Swift U
 
 - 保留现有 SwiftUI/AppKit UI、菜单栏入口、可观察状态和用户操作方式。
 - 分阶段用 Rust 替换 `TunnelPadCore` 的内部实现，首轮不改变配置格式、隧道启停、删除、迁移接管、探针、日志和退出即停语义。
-- 建立稳定、可测试的 Swift↔Rust 内部边界；迁移期间保留可独立回滚的 Swift 实现。
+- 建立稳定、可测试的 Swift↔Rust 内部边界；迁移期间允许旧 Swift 代码暂存到验证完成，但最终删除，不作为运行时回滚路径。
 - 用 fake executor、隔离 demo 隧道和差分测试证明 Rust 实现与当前 Swift Core 的行为等价，再考虑接入真实 App。
 - 保持 macOS `.app` 打包、`LSUIElement` 菜单栏常驻和现有发布流程可复现。
 
@@ -23,17 +23,17 @@ TunnelPad 当前是 SwiftUI/AppKit + SwiftPM 的 macOS 菜单栏应用。Swift U
 
 - 第一轮不重写 SwiftUI/AppKit UI，不引入 Tauri、Slint 或其他 Rust UI 框架。
 - 不修改 `config.json` schema、launchd label、日志/pidfile 路径、SSH 命令参数、探针状态语义或退出即停语义。
-- 不在阶段 0–3 自动操作 `admin-tunnel`、`reverse-ssh` 或其他真实用户隧道。
+- 阶段 0–4 不自动操作真实用户隧道；阶段 5 仅在用户明确授权后对指定隧道做受控验证。
 - 不把 Rust 迁移与 ECS 动态 SSH 公网 IP 同步计划合并。
-- 不在没有差分证据和独立准入复核的情况下删除 Swift Core 或切换真实生产路径。
+- 不在阶段 5 自身 Step 0、差分证据和独立准入复核完成前删除 Swift Core 或切换真实生产路径。
 
 ## 需求探索
 
 ### 已确认事实（2026-08-30 查证）
 
 - 用户确认采用“保留 SwiftUI/AppKit，只替换 `TunnelPadCore`”的迁移范围。
-- 用户确认采用“C ABI 主路径 + Swift Core 可回退”的默认 bridge 方案；sidecar IPC 仅作为 C ABI 原型不满足安全或契约门槛时的备选。
-- 当前仓库没有 `Cargo.toml`、Rust 源码或 Rust target；现有产品目标见 [Package.swift](../../Package.swift)。
+- 阶段 0–4 用户确认并验证“C ABI 主路径 + Swift Core 可回退”；阶段 5 用户确认继续采用进程内 C ABI，但验证完成后不保留 Swift fallback，sidecar 不纳入本次实施。
+- 阶段 0 的历史快照曾记录仓库没有 `Cargo.toml`、Rust 源码或 Rust target；该事实已被阶段 1–4 的 Rust 产物取代，现有 Swift 产品目标仍见 [Package.swift](../../Package.swift)。
 - 当前 Swift Core 已完成内部职责拆分；现有行为契约由 [TunnelPad v1 计划](tunnelpad-v1.md)、[界面优化计划](tunnelpad-ui-refinements.md) 和 [代码质量重构计划](tunnelpad-code-quality-refactor.md) 共同约束。
 - 阶段 0 的历史自动化基线为 `swift test` 74/74；Debug/Release 构建和 `.app` 签名校验已通过，且已在 HEAD `64e126fa` 复验（见阶段 0 基线证据）。阶段 4 增加 shadow bridge 测试后，当前 `swift test` 门禁为 80/80。
 - 本机已安装 `rustc 1.96.0` 与 `cargo 1.96.0`；当前 Swift 为 Apple Swift 6.3.3，目标为 arm64 macOS。
@@ -46,7 +46,20 @@ TunnelPad 当前是 SwiftUI/AppKit + SwiftPM 的 macOS 菜单栏应用。Swift U
 | 首轮替换范围 | Rust 逐步替换 `TunnelPadCore` 的配置、执行器、探针、日志、迁移和生命周期实现 |
 | 兼容要求 | 外部功能和可观察行为保持正常；任何行为变化另开计划，不以迁移名义静默改变 |
 | 真实隧道边界 | 阶段 0–3 只读审计、fake/fixture 和隔离 demo；真实隧道需用户明确授权并单独记录 |
-| 默认 bridge 方案 | C ABI 进程内 bridge 为主路径，Swift Core 保留为可切换回退；sidecar IPC 作为失败时的备选（2026-08-30 用户确认） |
+| 默认 bridge 方案 | 阶段 0–4 使用进程内 C ABI + Swift Core 回退；阶段 5 已确认继续使用进程内 C ABI，但验证完成后删除 Swift Core，sidecar 不纳入本次实施 |
+
+### 阶段 5 用户确认的决策（2026-08-30）
+
+| 决策点 | 结论 |
+|---|---|
+| 最终架构 | SwiftUI/AppKit 作为 UI 外壳；Rust Core 作为唯一生命周期 owner；Swift 只保留 UI、表单临时状态、FFI 适配和状态展示 |
+| 进程边界 | 继续使用进程内 C ABI，不引入 Rust sidecar；跨边界使用 UTF-8 JSON 和 opaque Rust handle |
+| 配置 owner | Rust 负责 `config.json` 的读取、解析、保存和 schema 校验；Swift 不再作为持久化事实源 |
+| 状态与并发 | Rust handle 持有运行时状态和后台任务；同隧道串行、不同隧道可并行；Swift 只读取状态快照 |
+| 生命周期范围 | 本阶段只实现 `launchd`；`app` 执行器入口、实现和配置分支移除，未来需要时另立计划 |
+| App 退出 | 退出 TunnelPad 时由 Rust 停止全部受管 `launchd` 隧道；关闭窗口不停止；退出后取消全部 Rust 任务 |
+| 回滚 | 不保留同一 App 内的 Swift fallback，也不把旧版本运行时回滚作为本计划要求；验证失败直接修复 Rust |
+| 真实验证 | 已授权先验证 `admin-tunnel`，再验证其他当前配置中的 `launchd` 隧道；每次只操作明确目标 |
 
 ### 候选连接方式与取舍
 
@@ -70,11 +83,12 @@ TunnelPad 当前是 SwiftUI/AppKit + SwiftPM 的 macOS 菜单栏应用。Swift U
 | 问题 | 影响 | 计划处理阶段 | 状态 |
 |---|---|---|---|
 | C ABI 原型是否满足安全、契约和发布门槛 | 决定是否继续主路径或启用 sidecar 备选 | 阶段 0–1 | 已验证：5 项门槛全部通过（见阶段 1 证据），sidecar 未触发 |
-| Rust Core 的并发模型与 Swift async 映射 | 影响取消、busy、状态顺序和退出清理 | 阶段 1 | 已冻结（Swift 拥有并发，见「阶段 1 契约冻结」） |
+| Rust Core 的并发模型与 Swift async 映射 | 影响取消、busy、状态顺序和退出清理 | 阶段 1/5 | 阶段 1–4 历史契约为 Swift 并发；阶段 5 已确认改为 Rust handle owner，具体 API 待 Step 0 冻结 |
 | FFI/IPC DTO、错误码和版本策略 | 影响兼容性与回滚 | 阶段 1 | 已冻结（ABI v1，见「阶段 1 契约冻结」） |
 | Rust 最低工具链、静态链接和 arm64 发布矩阵 | 影响 CI/本机发布 | 阶段 1/4 | 工具链与静态链接已固定（1.96.0 / aarch64-apple-darwin / staticlib）；CI 与发布矩阵留阶段 4 |
 | Rust 时间戳与 Swift 本地时区语义 | 影响损坏配置留档、迁移备份文件名和 app 日志时间 | 阶段 4 Step 0 | 用户已确认 Rust 跟随 Swift 的本地时区；实现完成并由固定 UTC/CST/PST-PDT 样本复核 |
-| Swift Core 保留窗口和最终删除条件 | 影响回滚与维护成本 | 阶段 4/5 | 未冻结 |
+| Swift Core 保留窗口和最终删除条件 | 影响回滚与维护成本 | 阶段 5 | 已确认：验证完成后删除，不保留 App 内 fallback |
+| 阶段 5 owner API 与状态快照的具体函数列表 | 影响 ABI 版本、线程安全和 Swift 适配层 | 阶段 5 Step 0 | 原型已冻结，生产适配与独立复核待完成 |
 
 ## 不变量与安全边界
 
@@ -112,60 +126,73 @@ TunnelPad 当前是 SwiftUI/AppKit + SwiftPM 的 macOS 菜单栏应用。Swift U
 | 阶段 1 | 最小 bridge/sidecar 原型与 DTO/错误/取消契约 | 阶段 0 独立准入复核通过 | FFI/IPC 原型、Swift 兼容调用、发布链接样本 | 已完成 |
 | 阶段 2 | Rust Core 组件 parity：配置、ID、命令、执行器、探针、日志、迁移、退出 | 阶段 1 契约冻结 | fake executor、故障注入、差分测试 | 已完成 |
 | 阶段 3 | 隔离 demo 生命周期与 shadow/differential 回归 | 阶段 2 组件 parity 通过 | demo 启停/重启/删除/退出、取消竞态、产物清理 | 已完成 |
-| 阶段 4 | SwiftUI App 可选接入 Rust Core，保持一键回退 Swift | 阶段 3 独立复核通过 | Release `.app`、AX 冒烟、demo 实机与回滚 | 已完成 |
-| 阶段 5 | 观察窗口、Swift Core 收缩或删除（可选） | 阶段 4 用户验收与独立复核通过 | 真实隧道经明确授权的分批验证、发布和回滚 | 粗粒度 |
+| 阶段 4 | SwiftUI App shadow 接入 Rust Core，保持 Swift 回退 | 阶段 3 独立复核通过 | Release `.app`、AX 冒烟、demo 实机与回退 | 已完成 |
+| 阶段 5 | `launchd` Rust Core owner 切换、配置 owner 切换、Swift Core 删除 | 用户确认阶段 5 架构；阶段 5 自身 Step 0 和独立准入复核 | fake/差分、真实 `admin-tunnel` 首条验证、其他 `launchd` 隧道、Release/AX、退出清理 | 实施中 |
 
 ## 当前阶段
 
-阶段 4（SwiftUI App 可选接入 Rust Core 的 shadow bridge）已完成。阶段 0–4 均已通过独立复核；阶段 4 采用进程内 C ABI 动态加载，Rust 只读校验 `AppConfig`，Swift `TunnelManager` 继续拥有全部生命周期操作。阶段 4 Step 0 的本地时区对齐证据见[阶段 4 Step 0 证据](../data-quality/tunnelpad-rust-migration-stage4-step0-20260830.md)。
+阶段 5（Rust Core owner 切换）目前处于实施中。最终形态是 SwiftUI/AppKit UI 外壳 + 进程内 Rust Core；Rust 负责配置、状态、`launchd` 生命周期、并发和后台任务，Swift 只负责 UI/FFI 适配。阶段 5 当前只覆盖 `launchd`，`app` 执行器未来另立计划。
 
 ### 目标与范围
 
-- 新增 `RustCoreShadow` Swift 适配层，按 ABI 版本检查加载 app bundle 内的 `libtunnelpad_core.dylib`。
-- 在配置加载/刷新后，将 Swift `AppConfig` 送入 `tp_config_parse` 做非权威影子校验；校验结果不改变 Swift 配置、状态或用户提示。
-- Rust 动态库缺失、ABI 不兼容、输入失败或加载失败时，shadow bridge 关闭并继续使用 Swift Core；不得阻断 App 启动或隧道操作。
-- `scripts/build_app.sh` 在 Release `.app` 中构建并复制 Rust 动态库，签名覆盖该产物；SwiftPM 测试环境无需预装 Rust 库即可走回退路径。
+- 扩展现有 C ABI 为长期 Rust Core handle、JSON 命令、JSON 状态快照和明确错误结果。
+- Rust 负责 `config.json` 的读取、解析、保存和 schema 校验；保留 version 1 磁盘格式，不自动迁移用户配置。
+- Rust 负责当前阶段的 `launchd` 启动、停止、重启、删除、状态查询、配置刷新和退出清理。
+- Rust handle 持有运行时状态和后台任务；同一隧道的命令串行，不同隧道可并行；过期任务不得回写状态或重新启动实例。
+- Swift `TunnelManager` 收缩为 `ObservableObject` UI 门面：提交命令、读取快照、展示错误，不再拥有生命周期或持久化事实。
+- 隐藏并移除当前 `app` 执行器入口、实现和配置分支；未来需要 `app` 时另立计划。
+- 在用户授权下先验证 `admin-tunnel`，再验证其他当前配置中的 `launchd` 隧道；验证完成后删除旧 Swift Core。
 
 ### 非目标
 
-- 不让 Rust 执行 start、stop、restart、remove、takeover、shutdown-all、launchctl、SSH 或 pidfile 操作。
-- 不修改 `TunnelManager` 的生命周期 owner、`config.json` schema、用户可见文案、UI/AX 行为或真实隧道行为。
-- 不在本阶段扩展生命周期 C ABI；完整 Rust owner 切换另立阶段/准入记录。
-- 不把 shadow 校验失败解释为用户配置损坏，不自动修改或回滚用户配置。
+- 不引入 Rust sidecar，不改为 Unix Socket/IPC 架构。
+- 不保留同一 App 内的 Swift fallback；阶段 5 完成后不维护旧 Swift Core。
+- 不实现 `app` 执行器；不保留 `ExecutorKind.app` 的当前运行路径，不自动把 app 配置转换成 `launchd`。
+- 不改变 `config.json` version=1、隧道 ID、launchd label、日志/pidfile 路径、SSH 命令参数和“退出即停”语义。
+- 不在本阶段实现备注字段、健康恢复策略或日志事件流；这些计划在 Rust owner 完成后按各自准入推进。
+- 不进行未经用户明确授权的真实隧道批量操作、远端配置修改或凭证变更。
 
 ### Step 0 证据
 
-类型：进程内可回退 bridge 的兼容基线。基线 = 阶段 3 完成态（demo 生命周期、takeover、generation 竞态、差分全绿）+ 阶段 4 时间戳对齐证据 + 当前 Swift `TunnelManager`/`TunnelLifecycleCoordinator` 唯一生命周期 owner 事实。决策基线：用户确认采用 Rust 本地时区和 shadow bridge 边界。
+类型：行为迁移与架构 owner 切换基线。阶段 4 已完成的 ABI/动态库/Release/AX 证据作为 Rust 产物基线；本阶段新增本机配置、真实 `launchd` 状态和受控启停证据见[阶段 5 Step 0 证据](../data-quality/tunnelpad-rust-migration-stage5-step0-20260830.md)。
+
+已确认的本机基线：当前配置包含 `admin-tunnel` 和 `reverse-ssh` 两条隧道，均为 `launchd`；没有 `app` 配置。对 `admin-tunnel` 的一次受控 bootout/bootstrap 闭环成功，旧 PID 已退出，新 PID 正常运行，`reverse-ssh` 保持运行；配置的 HTTP 探针当次返回连接失败，需要在 Rust owner 切换前完成原因分类或明确记录为已知基线。
+
+已完成的 Step 0 证据：owner ABI/配置/并发隔离原型、Swift FFI 适配、Rust/Swift smoke、42 个 Rust 单测 + 1 个差分测试、Swift 79/79、Release `.app` 构建与签名；细节见[阶段 5 Step 0 证据](../data-quality/tunnelpad-rust-migration-stage5-step0-20260830.md)。尚缺完整 launchd 故障矩阵、取消/过期任务、隐藏 app 入口后的 UI/AX 回归、真实 Rust owner 验证、退出路径复核和阶段 5 独立准入复核。
 
 ### 样本矩阵
 
 | # | 输入/基线 | 可执行命令或操作 | 预期结果 | 失败判定 | 输出位置 |
 |---|---|---|---|---|---|
-| 1 | Rust C ABI v1、动态库与 ABI v2 fixture | `cargo build --release --manifest-path rust/Cargo.toml` | 生成可供 App bundle 加载的 arm64 Rust 动态库，以及真实不兼容 ABI fixture | 构建失败或任一产物缺失 | cargo 输出 |
-| 2 | Swift Core 既有回归 | `swift test` | 既有测试与 shadow bridge 测试全过；无 Rust 库时走回退 | 任一失败或 Swift 行为改变 | Swift 输出 |
-| 3 | Release App 构建链路 | `./scripts/build_app.sh` | `.app` 含 Rust 动态库，ad-hoc 签名和校验通过 | 复制、签名或校验失败 | build_app 输出 |
-| 4 | shadow 成功样本 | 构建 Rust 动态库后运行 bridge 集成测试/隔离 App | ABI v1 通过，配置解析成功，Swift 仍为权威结果 | 未加载、解析失败或改变 Swift 结果 | bridge 测试输出 |
-| 5 | shadow 回退样本 | bridge 测试使用缺失库、真实 ABI v2 fixture 和解析失败 | shadow 关闭，Swift 配置/启停继续可用，不产生生命周期调用 | 阻断启动、修改配置或调用生命周期 | bridge 测试输出 |
-| 6 | 发布与 UI 边界 | Release `.app` + AX 冒烟 + `git diff` 审计 | UI/菜单栏保持可用，Rust 仅影子校验，无真实隧道操作 | AX 回归或计划外 owner 变化 | 阶段 4 证据 |
+| 1 | 现有 ABI v1、阶段 4 动态库与 Release 打包基线 | `cargo test --manifest-path rust/Cargo.toml`；`swift test`；`./scripts/build_app.sh` | 阶段 4 产物和回归门禁保持通过 | 任一现有门禁失败或产物缺失 | cargo/Swift/build 输出 |
+| 2 | 当前 version=1 配置、缺省字段、非法 JSON/版本和无 `app` 配置样本 | Rust 配置 owner 隔离 fixture；与现有 JSON 做语义差分 | Rust 读写保持 version=1 语义，错误 fail-closed，不改写非法输入 | 字段丢失、静默降级或 Swift/Rust 语义不一致 | 阶段 5 config fixture |
+| 3 | fake `launchd` 的 start/stop/restart/remove/status/shutdown 命令序列 | Rust Core handle 集成测试 | 每条命令只产生预期 launchctl 调用、结果和状态快照 | 重复调用、错误吞掉、状态先于系统结果提交 | 阶段 5 lifecycle fixture |
+| 4 | 同隧道并发命令、取消和迟到任务；不同隧道并行 | Rust 并发/代次 fixture | 同隧道串行、跨隧道隔离、过期任务不回写 | 双重生命周期调用、状态倒灌或其他隧道受影响 | 阶段 5 concurrency fixture |
+| 5 | 用户已授权的 `admin-tunnel` 当前 launchd 实例 | 记录状态 → bootout → 确认旧 PID 消失 → bootstrap → 查询状态/探针 | 目标隧道安全收敛并恢复运行，其他隧道不受影响 | 未卸载、旧 PID 残留、启动失败或业务基线未分类 | 阶段 5 真实验证记录 |
+| 6 | 用户配置中的其他 `launchd` 隧道 | 每条隧道单独状态查询和受控重启 | 每条隧道只有一个 owner，状态和命令结果一致 | 非目标隧道被操作、状态错误或异常未报告 | 阶段 5 真实验证记录 |
+| 7 | Swift UI 门面、隐藏 app 入口、App 退出 | `swift test`、Release `.app`、AX 冒烟、受控退出 | UI 可用，Swift 不直接读写配置/调用 launchctl，退出停止全部受管隧道 | UI 回归、计划外 Swift 生命周期调用或退出遗留任务 | Swift/AX/阶段 5 证据 |
+| 8 | Rust owner 验收后的源码树 | `rg`/GitNexus 反向引用审计、构建和治理检查 | 旧 Swift Core 与 app 执行器代码已删除，无调用方残留 | 仍有旧 owner、死分支或计划外行为路径 | Git diff/治理输出 |
 
 ### 验证方式
 
-`cargo build --release`、`swift test`、shadow 成功/回退测试、`./scripts/build_app.sh`、Release `.app` AX 冒烟和治理检查；阶段完成时由独立复核确认阶段 4 已达到完成标准。
+先完成隔离 Rust Core handle 与 fake `launchd` fixture，再运行 Rust/Swift 差分和现有回归；随后按授权顺序验证 `admin-tunnel` 与其他 `launchd` 隧道，最后进行 Release/AX/退出清理验证。每次代码修改前运行目标符号的 GitNexus upstream impact；提交前运行 `detect_changes()` 和 `plan-governance-cli check .`。
 
 ### 测试覆盖率
 
-阶段 4 的可执行覆盖证据为：Rust workspace 38 个单测 + 1 个差分测试通过；Swift 全量 `swift test` 80/80 通过，其中 `RustCoreShadowTests` 5/5 且真实 ABI v1、ABI v2、缺失库和解析失败路径均未跳过；`differential.sh`、`smoke.sh`、Release `.app` 构建、签名、arm64、`@rpath` 和 AX 只读检查均通过。当前未引入行覆盖率工具，因此以样本矩阵和分支测试结果作为覆盖率证据。
+阶段 5 以 Rust Core handle、配置 owner、`launchd` 命令矩阵、错误/取消/并发、状态快照、退出清理、Swift UI 适配和真实单隧道验证作为覆盖口径。当前已有 Rust 42 个单测 + 1 个差分测试、Swift 79/79、真实 release FFI owner 2 项测试、`rust/scripts/smoke.sh` 和 `build_app.sh` 证据；阶段 5 的取消/过期任务、完整故障矩阵、真实 Rust owner 和 AX/退出操作仍未完成。
 
 ### 完成条件
 
-- Rust 动态库可由现有 Release `.app` 构建链路复制、加载和签名校验。
-- shadow 成功、缺失库、ABI 不匹配和解析失败均有可复现测试；所有失败都安全回退 Swift。
-- Swift 继续是唯一生命周期 owner；现有 `swift test`、差分测试和 UI/AX 行为保持通过。
-- 不修改真实隧道；独立复核确认阶段 4 完成后，才讨论下一阶段的完整生命周期 ABI/owner 切换。
+- Rust owner ABI、配置读写、`launchd` 生命周期、状态快照、并发和退出清理均有隔离测试和差分证据。
+- Swift `TunnelManager` 不再作为配置或生命周期事实源；UI/AX 行为保持通过。
+- `app` 入口、实现和配置分支已删除，当前配置与启动路径只使用 `launchd`。
+- `admin-tunnel` 及其余授权 `launchd` 隧道完成逐条受控验证，HTTP 探针失败基线已分类或修复。
+- Release `.app` 构建、签名、启动、启停、退出清理和治理检查通过。
+- 独立复核确认阶段 5 完成后，删除旧 Swift Core，不保留 App 内 fallback。
 
 ### 失败与回滚边界
 
-Rust 动态库构建、加载、ABI、解析或签名失败 → 禁用 shadow 并继续 Swift Core；若发现任何生命周期调用重复、Swift 结果变化、App 启动失败或 `.app` 签名问题，立即移除 shadow 接入并保留上一个 Swift-only `.app`。不执行真实 launchd、SSH 或用户隧道验证。
+阶段 5 不提供 App 内 Swift fallback，也不要求旧版本运行时回滚。Step 0 或实现验证失败时停止扩大真实隧道范围，直接修复 Rust 并重复隔离测试；在所有完成条件满足、独立复核通过前不得删除 Swift Core。删除完成后，Rust owner 的错误按普通缺陷修复，不通过保留 Swift 代码恢复。
 
 ### 阶段准入摘要
 
@@ -173,14 +200,20 @@ Rust 动态库构建、加载、ABI、解析或签名失败 → 禁用 shadow �
 |---|---|
 | 准入状态 | 实施中 |
 | 阶段状态 | 实施中 |
-| Step 0 | Rust UTC → 系统本地时区对齐已实现并完成 cargo/Swift/差分/smoke 验证；证据见阶段 4 Step 0 文档 |
-| 样本矩阵 | 6 行（6 列）：Rust 动态库、Swift 回归、Release App、shadow 成功/回退、UI/AX 边界 |
-| 验证方式 | cargo build、swift test、shadow bridge 测试、build_app、AX 冒烟、治理检查和独立复核 |
-| 失败/回滚边界 | shadow 失败即关闭并回退 Swift；禁止重复生命周期 owner；保留 Swift-only `.app` |
-| 当前阻塞项 | 无；阶段 4 实现、回退样本、Release/AX 验证和独立准入复核均已完成；阶段 5 保持可选，不扩展生命周期 C ABI |
-| 最新独立准入复核 | 2026-08-30 通过（动态库依赖、真实 ABI v2 fixture、固定时区/DST、回退路径、Release/AX 和生命周期 owner 均复核通过） |
+| Step 0 | 当前配置/状态基线、`admin-tunnel` 受控 launchd 闭环、Rust owner/配置/并发隔离原型、Swift FFI 适配和 Release 构建已完成；完整故障/取消矩阵与真实 Rust owner 验证尚未完成 |
+| 样本矩阵 | 8 行（6 列）：现有回归、配置 owner、fake launchd、并发、admin-tunnel、其他 launchd、UI/退出、旧 owner 删除审计 |
+| 验证方式 | cargo/swift 回归、Rust/Swift 差分、fake launchd、并发/退出 fixture、真实隧道逐条验证、Release/AX 和治理检查 |
+| 失败/回滚边界 | 不保留 App 内 Swift fallback；验证失败停止扩大范围并修复 Rust；独立复核通过前不得删除 Swift Core |
+| 当前阻塞项 | HTTP 探针连接失败尚未分类；完整故障/取消矩阵、app 入口删除后的 UI/AX 回归、真实 Rust owner 验证、退出路径复核和独立准入复核尚未完成 |
+| 最新独立准入复核 | 阶段 4 于 2026-08-30 通过；阶段 5 尚无独立准入复核 |
 
-## 契约冻结记录（阶段 1 冻结，阶段 2+ 事实源）
+## 阶段 4 完成摘要
+
+阶段 4 的进程内 shadow bridge、动态库自包含、固定时区、Release/AX 和回退路径证据保留在[阶段 4 Step 0 证据](../data-quality/tunnelpad-rust-migration-stage4-step0-20260830.md)及历史独立复核记录中。阶段 4 的 Swift 唯一 owner 和 fallback 是历史基线，不是阶段 5 的最终架构。
+
+## 历史契约冻结记录（阶段 1–4）
+
+以下契约记录阶段 1–4 的 shadow/parity 边界。阶段 5 的 owner 契约以本计划“阶段 5 目标契约”和后续 Step 0 冻结结果为准；其中 Swift 并发 owner、无跨调用 Rust 状态和 `launchd|app` 双执行器范围不再适用于阶段 5。
 
 ### 阶段 1 原型门槛与比较指标（阶段 0 冻结）
 
@@ -215,7 +248,7 @@ C ABI 最小原型在阶段 1 必须逐项证明以下门槛；任一不成立�
 
 **错误码（只允许追加）**：0 OK；1 INVALID_JSON（JSON 非法或必填字段缺失）；2 SCHEMA_VERSION（version != 1）；3 INVALID_ID（id 不满足 `^[a-z0-9-]+$`）；4 INVALID_COMMAND（command 为空或首元素为空）；5 INVALID_ARGUMENT（FFI 参数非法：NULL/非 UTF-8/未知 case）。
 
-**DTO 与序列化**：`AppConfig`（version=1 + tunnels）、`TunnelConfig`（id/name/command/executor/keepAlive/throttleInterval/probe）、`ProbeConfig`（url/expectedStatuses，缺省 `[200]`）、`ExecutorKind`（launchd|app）。serde 键序与 Swift `CodingKeys` 声明顺序一致；缺省值语义对齐 Swift 解码器（executor=launchd、keepAlive=true、throttleInterval=10、probe 缺省省略）；`TunnelStatus`/`ProbeResult` 以 tagged JSON（`"case"`）跨边界表达，pid 可空（has_pid 标志）。
+**DTO 与序列化**：阶段 1–4 的 `AppConfig`/`TunnelConfig`/`ProbeConfig`/`ExecutorKind` parity 作为历史基线；阶段 5 保持 version=1 磁盘格式并收缩当前有效执行器为 `launchd`。serde 键序与 Swift `CodingKeys` 声明顺序一致；缺省值语义对齐历史 Swift 解码器；`TunnelStatus`/`ProbeResult` 以 tagged JSON（`"case"`）跨边界表达，pid 可空（has_pid 标志）。
 
 **所有权与错误传递**：`tp_*` 返回的 `char*` 由 Rust 分配、只能由 `tp_string_free` 释放一次、禁止 `free()`；调用方字符串仅借用；返回 NULL 表示失败并伴随 last-error；成功调用清除错误。
 
@@ -229,12 +262,27 @@ C ABI 最小原型在阶段 1 必须逐项证明以下门槛；任一不成立�
 
 **工具链与链接**：Rust 1.96.0（rustc/cargo），target `aarch64-apple-darwin`（本机 arm64）；`staticlib` 产物经 swiftc 直链 + ad-hoc 签名校验；`Cargo.lock` 随仓提交。CI 与发布矩阵（x86_64、universal2）留阶段 4。
 
+## 阶段 5 目标契约
+
+**Core handle**：Rust 提供长期存在的 opaque handle；handle 持有配置、运行时状态、每隧道操作代次和后台任务。Swift 不保存第二份可执行 Core 状态。
+
+**C ABI 数据形态**：命令参数、配置结果、状态快照和错误使用合法 UTF-8 JSON；返回字符串继续由 Rust 分配、由 `tp_string_free` 释放。owner API 的函数集合、ABI 版本和错误码扩展必须在阶段 5 Step 0 的隔离原型中冻结，不得直接把阶段 1 的无状态函数当成完整 owner API。
+
+**状态同步**：Rust 不向 Swift 注册回调；Swift 通过命令结果和状态快照读取 Rust 状态。Swift 的轮询只更新 UI，不拥有重试、生命周期或取消语义。
+
+**配置事实源**：Rust 负责 `config.json` 的读取、解析、保存和 schema 校验；version=1 磁盘格式保持不变，阶段 5 只接受 `launchd` 执行器。配置文件中出现 `app` 时不自动转换，当前阶段不提供 app 执行能力。
+
+**并发与退出**：同隧道命令由 Rust 串行化，不同隧道允许并行；过期命令不得改变状态或发起系统调用。用户退出 TunnelPad 时由 Rust 停止全部受管 `launchd` 隧道并取消后台任务；窗口关闭不触发退出。
+
+**安全边界**：Rust 只对配置中明确存在的 `launchd` label 执行操作；不记录私钥、AccessKey、完整命令敏感参数或环境变量。真实隧道验证按用户授权的单条目标执行，禁止无目标批量操作。
+
 ## 失败策略与回滚
 
-- 阶段 0/1 原型失败：删除隔离原型或保留在独立分支，Swift Core 不变。
-- 差分测试不一致：暂停 Rust 接入，定位状态顺序、错误分类、取消或资源清理差异，回退到 Swift 实现。
-- Release 链接或签名失败：不替换 `.app`，保留上一个可运行包；修复构建链路后重新准入。
-- 真实隧道验证若经用户授权仍失败：立即停止扩大范围，恢复 Swift owner；不得用迁移脚本批量修复现场。
+- 阶段 5 Step 0 或隔离原型失败：停止真实隧道扩大，修复 Rust 契约/实现后重新验证；不把 sidecar 或 Swift fallback 自动引入本阶段。
+- 差分测试不一致：暂停 owner 切换，定位状态顺序、错误分类、取消或资源清理差异；Swift 旧代码在删除前只作为未启用的迁移材料，不作为运行时双 owner。
+- Release 链接、签名或启动失败：不删除 Swift Core，不进入真实 owner 验证；修复 Rust 构建链路后重新准入。
+- 真实隧道验证失败：只停止当前受控范围，记录失败原因并直接修复 Rust；不批量修改远端配置、不修改凭证、不自动转换执行器。
+- 阶段 5 所有完成条件和独立复核通过后删除旧 Swift Core；删除后不保留 App 内 fallback，后续缺陷按 Rust 正常修复。
 
 ## 验证与测试覆盖口径
 
@@ -242,7 +290,7 @@ C ABI 最小原型在阶段 1 必须逐项证明以下门槛；任一不成立�
 - Rust 单元/集成门禁：配置 round-trip、ID/命令解析、状态映射、错误/取消、fake executor、探针和日志 tail。
 - 差分门禁：同一 fixture 输入下，Swift 与 Rust 的状态序列、错误类别、文件副作用和退出结果一致。
 - 发布门禁：arm64 Release `.app`、`Info.plist`、ad-hoc 签名、AX 窗口冒烟和隔离 demo 生命周期。
-- 真实隧道不是阶段 0–4 的自动门禁；阶段 4 明确保持 Swift 生命周期 owner，只有阶段 5 经用户授权、另行设计和独立复核后才建立真实隧道证据。
+- 真实隧道不是阶段 0–4 的自动门禁；阶段 5 已获得用户授权，但必须先完成自身 Step 0、隔离验证和独立准入，再按单条隧道建立真实证据。
 
 ## 最新独立准入复核
 
@@ -280,4 +328,5 @@ C ABI 最小原型在阶段 1 必须逐项证明以下门槛；任一不成立�
 - [TunnelPad v1](tunnelpad-v1.md)：配置、执行器、迁移接管和退出语义的现有行为事实源。
 - [TunnelPad 界面优化](tunnelpad-ui-refinements.md)：当前 SwiftUI/AppKit 用户操作与 UI/AX 契约。
 - [TunnelPad 代码质量重构](tunnelpad-code-quality-refactor.md)：Rust 迁移的前置内部边界与测试基线。
-- 当前没有需要新增的 ADR 或磁盘迁移；若 bridge 协议、并发模型或 schema 发生持久决策变化，再单独增加 ADR/migration。
+- [ADR-0001：Rust Core 作为唯一生命周期 owner](../adr/0001-rust-core-single-owner.md)
+- [Rust Core owner 切换迁移说明](../migrations/tunnelpad-rust-owner-cutover.md)

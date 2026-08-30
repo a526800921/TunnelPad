@@ -329,7 +329,10 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
         for tunnel in &config.tunnels {
             let lock = self.lock_for(&tunnel.id);
             let _guard = lock.lock().expect("owner tunnel mutex 不应中毒");
-            statuses.insert(tunnel.id.clone(), self.launchd.status(&tunnel.launchd_label()));
+            statuses.insert(
+                tunnel.id.clone(),
+                self.launchd.status(&tunnel.launchd_label()),
+            );
         }
         Ok(OwnerSnapshot {
             config,
@@ -364,12 +367,14 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
         let mut stopped = 0;
         for id in ids {
             let tunnel = self.tunnel(&id)?;
-            if self
-                .launchd
-                .bootout(&tunnel.launchd_label())
-                .map_err(|error| executor_error("退出清理", error))?
-            {
-                stopped += 1;
+            if self.launchd.status(&tunnel.launchd_label()) != TunnelStatus::NotLoaded {
+                if self
+                    .launchd
+                    .bootout(&tunnel.launchd_label())
+                    .map_err(|error| executor_error("退出清理", error))?
+                {
+                    stopped += 1;
+                }
             }
         }
         Ok(json!({ "operation": "shutdown", "stopped": stopped }))
@@ -561,6 +566,69 @@ mod tests {
             serde_json::from_str::<Value>(&after).unwrap()["error"]["code"],
             error_code::OWNER_CLOSED
         );
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn shutdown_skips_unloaded_services() {
+        #[derive(Clone)]
+        struct UnloadedRunner {
+            calls: Arc<Mutex<Vec<Vec<String>>>>,
+        }
+
+        impl ProcessRunning for UnloadedRunner {
+            fn run(
+                &self,
+                _executable_path: &str,
+                arguments: &[String],
+            ) -> Result<ProcessResult, String> {
+                self.calls.lock().unwrap().push(arguments.to_vec());
+                if arguments.first().map(String::as_str) == Some("print") {
+                    return Ok(ProcessResult {
+                        exit_code: 3,
+                        stdout: String::new(),
+                        stderr: "Could not find service".into(),
+                    });
+                }
+                Ok(ProcessResult {
+                    exit_code: 0,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                })
+            }
+        }
+
+        let home = temp_home("shutdown-unloaded");
+        let paths = TunnelPaths::new(&home);
+        ConfigStore::new(paths.clone())
+            .save(&config(&["admin-tunnel", "reverse-ssh"]))
+            .unwrap();
+        let calls = Arc::new(Mutex::new(vec![]));
+        let owner = CoreOwner::new(
+            paths,
+            LaunchCtlExecutor::new(
+                UnloadedRunner {
+                    calls: calls.clone(),
+                },
+                501,
+            ),
+        )
+        .unwrap();
+
+        let response = owner.shutdown().unwrap();
+
+        assert_eq!(response["stopped"], 0);
+        let calls = calls.lock().unwrap();
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|arguments| arguments.first().map(String::as_str) == Some("print"))
+                .count(),
+            2
+        );
+        assert!(!calls
+            .iter()
+            .any(|arguments| arguments.first().map(String::as_str) == Some("bootout")));
         let _ = fs::remove_dir_all(home);
     }
 
