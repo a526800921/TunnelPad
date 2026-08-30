@@ -138,7 +138,7 @@ enum TunnelDisplay {
     }
 
     static func executorBadge(_ kind: ExecutorKind) -> some View {
-        Text(kind == .launchd ? "launchd" : "app")
+        Text(kind.rawValue)
             .font(.caption2)
             .padding(.horizontal, 5)
             .padding(.vertical, 1)

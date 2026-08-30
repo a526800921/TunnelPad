@@ -62,8 +62,8 @@ nodes:
         ref: Sources/TunnelPadCore/TunnelManager.swift
         locator: "TunnelManager.start/stop/restart/removeTunnel"
       - kind: code
-        ref: Sources/TunnelPadCore/TunnelLifecycleCoordinator.swift
-        locator: "TunnelLifecycleCoordinator.start/stop/restart"
+        ref: rust/tunnelpad-core/src/owner.rs
+        locator: "CoreOwner.start/stop/restart/remove_with_generation"
       - kind: test
         ref: Tests/TunnelPadCoreTests/RefactorBoundaryTests.swift
         locator: "异步生命周期与失败注入测试"
@@ -81,20 +81,6 @@ nodes:
       - kind: test
         ref: Tests/TunnelPadCoreTests/LaunchCtlExecutorTests.swift
         locator: "launchctl 状态解析与 bootout 测试"
-
-  - id: function.app.executor
-    type: function
-    name: app 子进程执行器
-    evidence:
-      - kind: code
-        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
-        locator: "AppProcessExecutor.start/stop/handleTermination/shutdownAll"
-      - kind: code
-        ref: Sources/TunnelPadCore/Shutdown.swift
-        locator: "Shutdown.killByPidfile"
-      - kind: test
-        ref: Tests/TunnelPadCoreTests/AppProcessExecutorTests.swift
-        locator: "进程生命周期、keepAlive 与 pidfile 测试"
 
   - id: function.health.probe
     type: function
@@ -115,8 +101,8 @@ nodes:
     name: 日志写入、尾部读取与日志面板
     evidence:
       - kind: code
-        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
-        locator: "AppProcessExecutor stdout/stderr 日志写入"
+        ref: rust/tunnelpad-core/src/paths.rs
+        locator: "TunnelPaths.log_url"
       - kind: code
         ref: Sources/tunnelpad/LogView.swift
         locator: "LogView.load/LogTextView.updateNSView"
@@ -215,8 +201,8 @@ nodes:
         ref: Sources/TunnelPadCore/TunnelManager.swift
         locator: "startAsync/start"
       - kind: code
-        ref: Sources/TunnelPadCore/TunnelLifecycleCoordinator.swift
-        locator: "startSync"
+        ref: rust/tunnelpad-core/src/owner.rs
+        locator: "CoreOwner.start_with_generation"
 
   - id: process.tunnel.stop
     type: process
@@ -226,8 +212,8 @@ nodes:
         ref: Sources/TunnelPadCore/TunnelManager.swift
         locator: "stopAsync/stop"
       - kind: code
-        ref: Sources/TunnelPadCore/TunnelLifecycleCoordinator.swift
-        locator: "stopSync"
+        ref: rust/tunnelpad-core/src/owner.rs
+        locator: "CoreOwner.stop_with_generation"
 
   - id: process.tunnel.restart
     type: process
@@ -237,8 +223,8 @@ nodes:
         ref: Sources/TunnelPadCore/TunnelManager.swift
         locator: "restartAsync/restart"
       - kind: code
-        ref: Sources/TunnelPadCore/TunnelLifecycleCoordinator.swift
-        locator: "restartSync"
+        ref: rust/tunnelpad-core/src/owner.rs
+        locator: "CoreOwner.restart_with_generation"
 
   - id: process.tunnel.remove
     type: process
@@ -328,35 +314,13 @@ nodes:
         ref: Sources/TunnelPadCore/LaunchdPlistRenderer.swift
         locator: "生成 plist"
 
-  - id: external.app.process
-    type: external_workflow
-    name: TunnelPad 托管的 app 子进程
-    evidence:
-      - kind: code
-        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
-        locator: "Process/terminationHandler"
-      - kind: code
-        ref: Sources/TunnelPadCore/Shutdown.swift
-        locator: "killByPidfile"
-
-  - id: external.app.pidfiles
-    type: external_workflow
-    name: app 执行器 pidfile
-    evidence:
-      - kind: code
-        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
-        locator: "writePidfile/removePidfile"
-      - kind: code
-        ref: Sources/TunnelPadCore/TunnelPaths.swift
-        locator: "pidfileURL"
-
   - id: external.log.files
     type: external_workflow
     name: 隧道日志文件
     evidence:
       - kind: code
-        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
-        locator: "LogWriter 与 stdout/stderr"
+        ref: rust/tunnelpad-core/src/plist_render.rs
+        locator: "plist_xml 的 StandardOutPath/StandardErrorPath"
       - kind: code
         ref: Sources/TunnelPadCore/LogTail.swift
         locator: "日志尾部读取"
@@ -419,13 +383,6 @@ relations:
       - kind: code
         ref: Sources/TunnelPadCore/LaunchCtlExecutor.swift
         locator: "launchd 执行器"
-  - from: business.tunnelpad
-    to: function.app.executor
-    type: contains
-    evidence:
-      - kind: code
-        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
-        locator: "app 执行器"
   - from: business.tunnelpad
     to: function.health.probe
     type: contains
@@ -490,14 +447,6 @@ relations:
       - kind: code
         ref: Sources/tunnelpad/AppDelegate.swift
         locator: "正常退出 bootout"
-  - from: function.app.lifecycle
-    to: external.app.pidfiles
-    type: consumes
-    evidence:
-      - kind: code
-        ref: Sources/TunnelPadCore/Shutdown.swift
-        locator: "信号退出 pidfile 清理"
-
   - from: function.config.management
     to: process.config.reload
     type: orchestrates
@@ -561,15 +510,8 @@ relations:
     type: depends_on
     evidence:
       - kind: code
-        ref: Sources/TunnelPadCore/TunnelLifecycleCoordinator.swift
-        locator: "launchd 生命周期分派"
-  - from: function.tunnel.lifecycle
-    to: function.app.executor
-    type: depends_on
-    evidence:
-      - kind: code
-        ref: Sources/TunnelPadCore/TunnelLifecycleCoordinator.swift
-        locator: "app 生命周期分派"
+        ref: rust/tunnelpad-core/src/owner.rs
+        locator: "CoreOwner launchd 生命周期"
   - from: function.tunnel.lifecycle
     to: function.runtime.coordination
     type: depends_on
@@ -585,28 +527,6 @@ relations:
       - kind: code
         ref: Sources/TunnelPadCore/LaunchCtlExecutor.swift
         locator: "launchctl 调用"
-  - from: function.app.executor
-    to: external.app.process
-    type: consumes
-    evidence:
-      - kind: code
-        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
-        locator: "spawn/terminate"
-  - from: function.app.executor
-    to: external.app.pidfiles
-    type: consumes
-    evidence:
-      - kind: code
-        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
-        locator: "pidfile 写入与删除"
-  - from: function.app.executor
-    to: external.log.files
-    type: consumes
-    evidence:
-      - kind: code
-        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
-        locator: "stdout/stderr 日志写入"
-
   - from: function.health.probe
     to: process.health.refresh
     type: orchestrates
@@ -711,13 +631,6 @@ relations:
       - kind: code
         ref: Sources/tunnelpad/AppDelegate.swift
         locator: "逐条 bootout"
-  - from: process.app.terminate
-    to: external.app.process
-    type: consumes
-    evidence:
-      - kind: code
-        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
-        locator: "shutdownAll"
   - from: process.config.reload
     to: external.config.file
     type: consumes
@@ -730,43 +643,22 @@ relations:
     type: consumes
     evidence:
       - kind: code
-        ref: Sources/TunnelPadCore/TunnelLifecycleCoordinator.swift
-        locator: "launchd bootstrap"
-  - from: process.tunnel.start
-    to: external.app.process
-    type: consumes
-    evidence:
-      - kind: code
-        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
-        locator: "app start"
+        ref: rust/tunnelpad-core/src/owner.rs
+        locator: "CoreOwner.start_with_generation"
   - from: process.tunnel.stop
     to: external.launchd.service
     type: consumes
     evidence:
       - kind: code
-        ref: Sources/TunnelPadCore/TunnelLifecycleCoordinator.swift
-        locator: "launchd bootout"
-  - from: process.tunnel.stop
-    to: external.app.process
-    type: consumes
-    evidence:
-      - kind: code
-        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
-        locator: "app stop"
+        ref: rust/tunnelpad-core/src/owner.rs
+        locator: "CoreOwner.stop_with_generation"
   - from: process.tunnel.restart
     to: external.launchd.service
     type: consumes
     evidence:
       - kind: code
-        ref: Sources/TunnelPadCore/TunnelLifecycleCoordinator.swift
-        locator: "launchd bootout/bootstrap"
-  - from: process.tunnel.restart
-    to: external.app.process
-    type: consumes
-    evidence:
-      - kind: code
-        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
-        locator: "app restart"
+        ref: rust/tunnelpad-core/src/owner.rs
+        locator: "CoreOwner.restart_with_generation"
   - from: process.tunnel.remove
     to: external.config.file
     type: consumes
@@ -788,13 +680,6 @@ relations:
       - kind: code
         ref: Sources/TunnelPadCore/LaunchCtlExecutor.swift
         locator: "status/print"
-  - from: process.status.refresh
-    to: external.app.process
-    type: consumes
-    evidence:
-      - kind: code
-        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
-        locator: "内存 contexts status"
   - from: process.health.refresh
     to: external.http.endpoint
     type: consumes

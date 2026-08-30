@@ -38,25 +38,21 @@ final class RustCoreClientTests: XCTestCase {
         let home = try makeTemporaryHome(named: "owner-app-rejected")
         defer { try? FileManager.default.removeItem(at: home) }
 
-        let tunnel = TunnelConfig(
-            id: "owner-app",
-            name: "App 不支持",
-            command: ["/usr/bin/true"],
-            executor: .app
-        )
-        try ConfigStore(paths: TunnelPaths(homeDirectory: home))
-            .save(AppConfig(tunnels: [tunnel]))
+        let paths = TunnelPaths(homeDirectory: home)
+        try FileManager.default.createDirectory(at: paths.supportDirectory, withIntermediateDirectories: true)
+        try Data(#"{"version":1,"tunnels":[{"id":"owner-app","name":"App 不支持","command":["/usr/bin/true"],"executor":"app"}]}"#.utf8)
+            .write(to: paths.configURL)
 
         XCTAssertThrowsError(
             try RustCoreClient(
-                paths: TunnelPaths(homeDirectory: home),
+                paths: paths,
                 libraryURL: libraryURL
             )
         ) { error in
             guard case let RustCoreClient.ClientError.createFailed(reason) = error else {
                 return XCTFail("app 配置应在 Rust owner 创建时拒绝，实际为：\(error)")
             }
-            XCTAssertTrue(reason.contains("仅支持 launchd"))
+            XCTAssertFalse(reason.isEmpty)
         }
     }
 

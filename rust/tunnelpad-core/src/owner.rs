@@ -112,7 +112,7 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
     /// 读取并校验 Rust owner 的初始配置。现阶段遇到 `app` 配置直接拒绝，
     /// 不自动转换为 `launchd`。
     pub fn new(paths: TunnelPaths, launchd: L) -> Result<Self, TpError> {
-        let config = ConfigStore::new(paths.clone()).load().config;
+        let config = load_owner_config(&paths)?;
         validate_launchd_config(&config)?;
         Ok(Self {
             paths,
@@ -178,7 +178,7 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
 
     fn load_config(&self) -> Result<AppConfig, TpError> {
         self.ensure_open()?;
-        let config = ConfigStore::new(self.paths.clone()).load().config;
+        let config = load_owner_config(&self.paths)?;
         validate_launchd_config(&config)?;
         *self.config.lock().expect("owner config mutex 不应中毒") = config.clone();
         Ok(config)
@@ -584,6 +584,29 @@ fn validate_launchd_config(config: &AppConfig) -> Result<(), TpError> {
     Ok(())
 }
 
+/// owner 读取必须 fail-closed：`ConfigStore` 的历史损坏恢复语义会把非法
+/// config 改名后返回空配置，适合旧 UI 启动恢复，但不适合作为唯一 owner 的
+/// 初始状态。这里直接读取并解析，保留 schema/id/command 的具体错误码。
+fn load_owner_config(paths: &TunnelPaths) -> Result<AppConfig, TpError> {
+    let url = paths.config_url();
+    if !url.exists() {
+        return Ok(AppConfig::default_config());
+    }
+    let bytes = fs::read(&url).map_err(|error| {
+        TpError::new(
+            error_code::CONFIG_IO,
+            format!("读取 config.json 失败：{error}"),
+        )
+    })?;
+    let input = std::str::from_utf8(&bytes).map_err(|error| {
+        TpError::new(
+            error_code::INVALID_JSON,
+            format!("config.json 不是合法 UTF-8：{error}"),
+        )
+    })?;
+    crate::parse_config_envelope(input)
+}
+
 fn executor_error(operation: &str, error: ExecutorError) -> TpError {
     let cancelled = matches!(&error, ExecutorError::Cancelled);
     let message = match error {
@@ -886,7 +909,7 @@ mod tests {
     }
 
     #[test]
-    fn config_owner_reads_writes_and_rejects_app() {
+    fn config_owner_reads_and_rejects_app_executor_json() {
         let home = temp_home("config");
         let owner = owner(&home, &["admin-tunnel"]);
         let response = owner.execute_json(r#"{"op":"loadConfig"}"#).unwrap();
@@ -895,10 +918,11 @@ mod tests {
             true
         );
 
-        let mut app_config = config(&["bad-app"]);
-        app_config.tunnels[0].executor = ExecutorKind::App;
-        let error = owner.save_config(app_config).unwrap_err();
-        assert_eq!(error.code, error_code::UNSUPPORTED_EXECUTOR);
+        let error = crate::parse_config_envelope(
+            r#"{"version":1,"tunnels":[{"id":"bad-app","name":"bad-app","command":["/bin/true"],"executor":"app"}]}"#,
+        )
+        .unwrap_err();
+        assert_eq!(error.code, error_code::INVALID_JSON);
         let _ = fs::remove_dir_all(home);
     }
 

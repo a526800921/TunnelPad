@@ -1,19 +1,17 @@
 //! demo 生命周期编排（阶段 3）：对隔离 demo 配置（`demo-` 前缀 ID、独立 home）
 //! 执行完整生命周期序列。编排以 Swift 事实源为准：
-//! - start/stop/restart：`TunnelLifecycleCoordinator` 同步入口语义
+//! - start/stop/restart：launchd 同步入口语义
 //! - remove：`TunnelManager.removeTunnel` 序列（停实例 → 清 plist → 删日志尽力 →
 //!   配置移除与落盘失败回滚）
-//! - shutdown-all：`Shutdown.stopAllManagedTunnels`（launchd bootout + killByPidfile）
+//! - shutdown-all：`Shutdown.stopAllManagedTunnels`（launchd bootout）
 //!
 //! 并发所有权在 Swift（契约冻结章节）：本模块只提供同步编排，供差分与测试驱动。
 
+use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use serde::Serialize;
-
-use crate::app_executor::AppProcessExecutor;
 use crate::config_store::system_timestamp;
 use crate::config_store::ConfigStore;
 use crate::launchctl::TunnelStatus;
@@ -22,7 +20,6 @@ use crate::legacy::{self, LegacyAgent};
 use crate::migration::{MigrationOutcome, TakeoverError};
 use crate::paths::TunnelPaths;
 use crate::plist_render::{plist_xml, write_plist};
-use crate::shutdown;
 use crate::{AppConfig, TunnelConfig};
 
 /// 编排错误：只保留错误类别（错误文案文本不作跨语言等价判定）。
@@ -46,17 +43,11 @@ pub enum DemoOpError {
 pub struct DemoLifecycle<L: LaunchdExecuting> {
     pub paths: TunnelPaths,
     pub launchd: L,
-    pub app: AppProcessExecutor,
 }
 
 impl<L: LaunchdExecuting> DemoLifecycle<L> {
     pub fn new(paths: TunnelPaths, launchd: L) -> Self {
-        let app = AppProcessExecutor::new(paths.clone());
-        DemoLifecycle {
-            paths,
-            launchd,
-            app,
-        }
+        DemoLifecycle { paths, launchd }
     }
 
     fn validate_demo_id(&self, id: &str) -> Result<(), DemoOpError> {
@@ -84,9 +75,7 @@ impl<L: LaunchdExecuting> DemoLifecycle<L> {
             .save(&config)
             .map_err(|_| DemoOpError::ConfigSaveFailed)?;
         for tunnel in tunnels {
-            if tunnel.executor == crate::ExecutorKind::Launchd {
-                write_plist(tunnel, &self.paths).map_err(|_| DemoOpError::PlistCleanupFailed)?;
-            }
+            write_plist(tunnel, &self.paths).map_err(|_| DemoOpError::PlistCleanupFailed)?;
         }
         Ok(tunnels.iter().map(|t| t.id.clone()).collect())
     }
@@ -104,77 +93,46 @@ impl<L: LaunchdExecuting> DemoLifecycle<L> {
     /// start（TunnelLifecycleCoordinator.startSync 语义）。
     pub fn start(&self, id: &str) -> Result<&'static str, DemoOpError> {
         let tunnel = self.load_tunnel(id)?;
-        match tunnel.executor {
-            crate::ExecutorKind::Launchd => {
-                // startSync：已运行则 no-op（不重写 plist）
-                if matches!(
-                    self.launchd.status(&tunnel.launchd_label()),
-                    TunnelStatus::Running { .. }
-                ) {
-                    return Ok("noop");
-                }
-                let plist = write_plist(&tunnel, &self.paths)
-                    .map_err(|_| DemoOpError::PlistCleanupFailed)?;
-                self.launchd
-                    .bootstrap(&tunnel.launchd_label(), &plist)
-                    .map_err(|_| DemoOpError::StopFailed)?;
-                Ok("ok")
-            }
-            crate::ExecutorKind::App => {
-                self.app
-                    .start(&tunnel)
-                    .map_err(|_| DemoOpError::StopFailed)?;
-                Ok("ok")
-            }
+        // startSync：已运行则 no-op（不重写 plist）
+        if matches!(
+            self.launchd.status(&tunnel.launchd_label()),
+            TunnelStatus::Running { .. }
+        ) {
+            return Ok("noop");
         }
+        let plist =
+            write_plist(&tunnel, &self.paths).map_err(|_| DemoOpError::PlistCleanupFailed)?;
+        self.launchd
+            .bootstrap(&tunnel.launchd_label(), &plist)
+            .map_err(|_| DemoOpError::StopFailed)?;
+        Ok("ok")
     }
 
     /// stop（TunnelLifecycleCoordinator.stopSync 语义）。
     pub fn stop(&self, id: &str) -> Result<&'static str, DemoOpError> {
         let tunnel = self.load_tunnel(id)?;
-        match tunnel.executor {
-            crate::ExecutorKind::Launchd => {
-                self.launchd
-                    .bootout(&tunnel.launchd_label())
-                    .map_err(|_| DemoOpError::StopFailed)?;
-                Ok("ok")
-            }
-            crate::ExecutorKind::App => {
-                self.app.stop(&tunnel);
-                Ok("ok")
-            }
-        }
+        self.launchd
+            .bootout(&tunnel.launchd_label())
+            .map_err(|_| DemoOpError::StopFailed)?;
+        Ok("ok")
     }
 
     /// restart（TunnelLifecycleCoordinator.restartSync 语义）。
     pub fn restart(&self, id: &str) -> Result<&'static str, DemoOpError> {
         let tunnel = self.load_tunnel(id)?;
-        match tunnel.executor {
-            crate::ExecutorKind::Launchd => {
-                // restartSync：try? bootout（未加载不算错误）→ 重写 plist → bootstrap
-                let _ = self.launchd.bootout(&tunnel.launchd_label());
-                let plist = write_plist(&tunnel, &self.paths)
-                    .map_err(|_| DemoOpError::PlistCleanupFailed)?;
-                self.launchd
-                    .bootstrap(&tunnel.launchd_label(), &plist)
-                    .map_err(|_| DemoOpError::StopFailed)?;
-                Ok("ok")
-            }
-            crate::ExecutorKind::App => {
-                self.app
-                    .restart(&tunnel)
-                    .map_err(|_| DemoOpError::StopFailed)?;
-                Ok("ok")
-            }
-        }
+        // restartSync：try? bootout（未加载不算错误）→ 重写 plist → bootstrap
+        let _ = self.launchd.bootout(&tunnel.launchd_label());
+        let plist =
+            write_plist(&tunnel, &self.paths).map_err(|_| DemoOpError::PlistCleanupFailed)?;
+        self.launchd
+            .bootstrap(&tunnel.launchd_label(), &plist)
+            .map_err(|_| DemoOpError::StopFailed)?;
+        Ok("ok")
     }
 
     pub fn status(&self, id: &str) -> Result<TunnelStatus, DemoOpError> {
         let tunnel = self.load_tunnel(id)?;
-        Ok(match tunnel.executor {
-            crate::ExecutorKind::Launchd => self.launchd.status(&tunnel.launchd_label()),
-            crate::ExecutorKind::App => self.app.status(&tunnel.id),
-        })
+        Ok(self.launchd.status(&tunnel.launchd_label()))
     }
 
     /// takeover：复用 MigrationService 的备份→bootout→bootstrap→验证语义，
@@ -201,24 +159,17 @@ impl<L: LaunchdExecuting> DemoLifecycle<L> {
     /// 返回 ("ok", logWarning?)；日志清理失败仅告警不中断。
     pub fn remove(&self, id: &str) -> Result<(&'static str, bool), DemoOpError> {
         let tunnel = self.load_tunnel(id)?;
-        match tunnel.executor {
-            crate::ExecutorKind::Launchd => {
-                if self.launchd.status(&tunnel.launchd_label()) != TunnelStatus::NotLoaded {
-                    self.launchd
-                        .bootout(&tunnel.launchd_label())
-                        .map_err(|_| DemoOpError::StopFailed)?;
-                    if self.launchd.status(&tunnel.launchd_label()) != TunnelStatus::NotLoaded {
-                        return Err(DemoOpError::StillRunning);
-                    }
-                }
-                let plist = self.paths.launchd_plist_url(&tunnel);
-                if plist.exists() {
-                    fs::remove_file(&plist).map_err(|_| DemoOpError::PlistCleanupFailed)?;
-                }
+        if self.launchd.status(&tunnel.launchd_label()) != TunnelStatus::NotLoaded {
+            self.launchd
+                .bootout(&tunnel.launchd_label())
+                .map_err(|_| DemoOpError::StopFailed)?;
+            if self.launchd.status(&tunnel.launchd_label()) != TunnelStatus::NotLoaded {
+                return Err(DemoOpError::StillRunning);
             }
-            crate::ExecutorKind::App => {
-                self.app.stop(&tunnel);
-            }
+        }
+        let plist = self.paths.launchd_plist_url(&tunnel);
+        if plist.exists() {
+            fs::remove_file(&plist).map_err(|_| DemoOpError::PlistCleanupFailed)?;
         }
 
         // 日志清理：尽力而为，失败仅告警
@@ -246,38 +197,17 @@ impl<L: LaunchdExecuting> DemoLifecycle<L> {
         }
     }
 
-    /// shutdown-all（Shutdown.stopAllManagedTunnels 语义）：launchd bootout +
-    /// app executor 正常退出；未被当前 owner 管理的 pidfile 才走 fallback。
+    /// shutdown-all（Shutdown.stopAllManagedTunnels 语义）：停止全部 launchd 隧道。
     pub fn shutdown_all(&self) -> usize {
         let config = self.store().load().config;
         let mut stopped = 0;
-        let managed_app_ids = self.app.managed_ids();
-        // 先走 app executor 的正常退出路径：除终止子进程外，它还会推进
-        // generation，使已排队的 keepAlive 重启计划失效。
-        self.app.shutdown_all();
         for tunnel in &config.tunnels {
-            match tunnel.executor {
-                crate::ExecutorKind::Launchd => {
-                    if self
-                        .launchd
-                        .bootout(&tunnel.launchd_label())
-                        .unwrap_or(false)
-                    {
-                        stopped += 1;
-                    }
-                }
-                crate::ExecutorKind::App => {
-                    if managed_app_ids.iter().any(|id| id == &tunnel.id) {
-                        stopped += 1;
-                    } else if shutdown::kill_by_pidfile(
-                        &self.paths.pidfile_url(tunnel),
-                        libc::SIGTERM,
-                    ) {
-                        // 兼容 demo owner 之外留下的 pidfile；没有对应 app
-                        // context 时不存在可推进的 generation。
-                        stopped += 1;
-                    }
-                }
+            if self
+                .launchd
+                .bootout(&tunnel.launchd_label())
+                .unwrap_or(false)
+            {
+                stopped += 1;
             }
         }
         stopped
@@ -290,7 +220,6 @@ impl<L: LaunchdExecuting> DemoLifecycle<L> {
             "op": "fs-snapshot",
             "configIds": config.tunnels.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
             "launchdFiles": sorted_files(&self.paths.launchd_directory()),
-            "runFiles": sorted_files(&self.paths.run_directory()),
             "logFiles": sorted_files(&self.paths.logs_directory()),
             "backupFiles": sorted_files(&self.paths.migration_backup_directory()),
         })
@@ -451,7 +380,6 @@ mod tests {
 
         assert!(lifecycle.store().load().config.tunnels.is_empty());
         assert!(!paths.launchd_plist_url(&tunnel).exists());
-        assert_eq!(lifecycle.fs_snapshot()["runFiles"], json!([]));
         fs::remove_dir_all(home).ok();
     }
 
@@ -473,41 +401,6 @@ mod tests {
             Err(crate::migration::TakeoverError::InvalidAgent { .. })
         ));
         assert!(!lifecycle.paths.migration_backup_directory().exists());
-        fs::remove_dir_all(home).ok();
-    }
-
-    #[test]
-    fn shutdown_all_invalidates_app_restart_plan() {
-        let home = temp_home();
-        let paths = TunnelPaths::new(&home);
-        let lifecycle = DemoLifecycle::new(paths, FakeLaunchd::new());
-        let tunnel: TunnelConfig = serde_json::from_value(json!({
-            "id": "demo-race-unit",
-            "name": "demo-race-unit",
-            "command": ["/usr/bin/true"],
-            "executor": "app",
-            "keepAlive": true,
-            "throttleInterval": 1
-        }))
-        .unwrap();
-        lifecycle.install(&[tunnel.clone()]).unwrap();
-        lifecycle.app.start(&tunnel).unwrap();
-
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        let plan = loop {
-            if let Some(plan) = lifecycle.app.handle_exits().into_iter().next() {
-                break plan;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "应观察到 app 迟到重启计划"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        };
-
-        lifecycle.shutdown_all();
-        assert!(!lifecycle.app.restart_if_current(&plan).unwrap());
-        assert_eq!(lifecycle.app.status(&tunnel.id), TunnelStatus::NotLoaded);
         fs::remove_dir_all(home).ok();
     }
 }

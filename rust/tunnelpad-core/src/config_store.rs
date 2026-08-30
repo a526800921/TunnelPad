@@ -97,7 +97,7 @@ pub fn system_timestamp() -> String {
     config_timestamp_at(now_secs())
 }
 
-/// 与 Swift `AppProcessExecutor.timestamp` 同格式（yyyy-MM-dd HH:mm:ss），使用系统本地时区。
+/// 与 Swift 旧 Core 的时间戳格式一致（yyyy-MM-dd HH:mm:ss），使用系统本地时区。
 pub fn local_log_timestamp() -> String {
     log_timestamp_at(now_secs())
 }

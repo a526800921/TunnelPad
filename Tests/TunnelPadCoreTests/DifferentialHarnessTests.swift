@@ -1,7 +1,7 @@
 // 阶段 2 差分 harness（Swift 侧）：读取 rust/differential/fixtures/ 的场景，
 // 用真实 Swift Core API 执行并产出事件流，写入 rust/target/differential/swift-events.json。
 // 对比由 Rust 侧 tests/differential.rs 完成（语义等价比较）。
-// 全程 fake 数据 + 隔离临时目录；app-executor 场景只 spawn /bin/sleep，不触碰真实隧道。
+// 全程 fake 数据 + 隔离临时目录；不触碰真实隧道。
 
 import Foundation
 import XCTest
@@ -147,44 +147,60 @@ private func demoSnapshot(paths: TunnelPaths) -> [String: Any] {
         "op": "fs-snapshot",
         "configIds": config.tunnels.map(\.id),
         "launchdFiles": sortedFiles(in: paths.launchdDirectory),
-        "runFiles": sortedFiles(in: paths.runDirectory),
         "logFiles": sortedFiles(in: paths.logsDirectory),
         "backupFiles": normalizeArtifactNames(sortedFiles(in: paths.migrationBackupDirectory)),
     ]
 }
 
-private func demoOutcome(_ op: String, _ outcome: TunnelOperationOutcome) -> [String: Any] {
-    if let error = outcome.error {
-        return ["op": op, "error": error]
+private func demoLifecycleOutcome(
+    _ op: String,
+    tunnel: TunnelConfig,
+    paths: TunnelPaths,
+    launchd: LaunchCtlExecutor
+) -> [String: Any] {
+    do {
+        switch op {
+        case "start":
+            if case .running = launchd.status(label: tunnel.launchdLabel) {
+                return ["op": op, "result": "noop"]
+            }
+            let plistURL = try LaunchdPlistRenderer.writePlist(for: tunnel, paths: paths)
+            try launchd.bootstrap(label: tunnel.launchdLabel, plistURL: plistURL)
+        case "stop":
+            try launchd.bootout(label: tunnel.launchdLabel)
+        case "restart":
+            _ = try? launchd.bootout(label: tunnel.launchdLabel)
+            let plistURL = try LaunchdPlistRenderer.writePlist(for: tunnel, paths: paths)
+            try launchd.bootstrap(label: tunnel.launchdLabel, plistURL: plistURL)
+        default:
+            throw HarnessSpawnError(message: "不支持的生命周期操作：\(op)")
+        }
+        return ["op": op, "result": "ok"]
+    } catch {
+        let verb = ["start": "启动", "stop": "停止", "restart": "重启"][op] ?? op
+        return ["op": op, "error": "\(verb)「\(tunnel.name)」失败：\(error)"]
     }
-    return ["op": op, "result": outcome.refresh ? "ok" : "noop"]
 }
 
 private func removeDemoTunnel(
     _ id: String,
     paths: TunnelPaths,
-    launchd: LaunchCtlExecutor,
-    app: AppProcessExecutor
+    launchd: LaunchCtlExecutor
 ) throws -> Bool {
     let store = ConfigStore(paths: paths)
     guard let tunnel = store.load().config.tunnels.first(where: { $0.id == id }) else {
         return false
     }
 
-    switch tunnel.executor {
-    case .launchd:
+    if launchd.status(label: tunnel.launchdLabel) != .notLoaded {
+        _ = try launchd.bootout(label: tunnel.launchdLabel)
         if launchd.status(label: tunnel.launchdLabel) != .notLoaded {
-            _ = try launchd.bootout(label: tunnel.launchdLabel)
-            if launchd.status(label: tunnel.launchdLabel) != .notLoaded {
-                throw HarnessSpawnError(message: "实例未成功停止")
-            }
+            throw HarnessSpawnError(message: "实例未成功停止")
         }
-        let plistURL = paths.launchdPlistURL(for: tunnel)
-        if FileManager.default.fileExists(atPath: plistURL.path) {
-            try FileManager.default.removeItem(at: plistURL)
-        }
-    case .app:
-        app.stop(tunnel)
+    }
+    let plistURL = paths.launchdPlistURL(for: tunnel)
+    if FileManager.default.fileExists(atPath: plistURL.path) {
+        try FileManager.default.removeItem(at: plistURL)
     }
 
     let logURL = paths.logURL(for: tunnel)
@@ -208,6 +224,17 @@ private func removeDemoTunnel(
     return logWarning
 }
 
+private func stopAllDemoTunnels(paths: TunnelPaths, launchd: LaunchCtlExecutor) -> Int {
+    let config = ConfigStore(paths: paths).load().config
+    var stopped = 0
+    for tunnel in config.tunnels {
+        if (try? launchd.bootout(label: tunnel.launchdLabel)) == true {
+            stopped += 1
+        }
+    }
+    return stopped
+}
+
 private func runDemoLifecycle(_ fixture: [String: Any], home: URL) throws -> [[String: Any]] {
     let specs = fixture["tunnels"] as? [[String: Any]] ?? []
     let tunnels = try specs.map(decodeTunnel)
@@ -227,10 +254,7 @@ private func runDemoLifecycle(_ fixture: [String: Any], home: URL) throws -> [[S
     let paths = TunnelPaths(homeDirectory: home)
     let runner = ScriptedRunner(script: script)
     let launchd = LaunchCtlExecutor(runner: runner, uid: uid_t(getuid()))
-    let app = AppProcessExecutor(paths: paths)
-    let coordinator = TunnelLifecycleCoordinator(paths: paths, launchd: launchd, app: app)
     let store = ConfigStore(paths: paths)
-    defer { app.shutdownAll() }
 
     var events: [[String: Any]] = []
     let operations = fixture["ops"] as? [[String: Any]] ?? []
@@ -265,16 +289,16 @@ private func runDemoLifecycle(_ fixture: [String: Any], home: URL) throws -> [[S
                 "content": content.map { normalize($0, home: home) } ?? NSNull(),
             ])
         case "start":
-            events.append(demoOutcome(op, coordinator.startSync(tunnel)))
+            events.append(demoLifecycleOutcome(op, tunnel: tunnel, paths: paths, launchd: launchd))
         case "stop":
-            events.append(demoOutcome(op, coordinator.stopSync(tunnel)))
+            events.append(demoLifecycleOutcome(op, tunnel: tunnel, paths: paths, launchd: launchd))
         case "restart":
-            events.append(demoOutcome(op, coordinator.restartSync(tunnel)))
+            events.append(demoLifecycleOutcome(op, tunnel: tunnel, paths: paths, launchd: launchd))
         case "status":
-            let status = coordinator.statusesSync(for: [tunnel])[tunnel.id] ?? .notLoaded
+            let status = launchd.status(label: tunnel.launchdLabel)
             events.append(["op": "status", "status": normalizeStatusDict(TunnelStatusEvent.dict(status))])
         case "remove":
-            let logWarning = try removeDemoTunnel(tunnel.id, paths: paths, launchd: launchd, app: app)
+            let logWarning = try removeDemoTunnel(tunnel.id, paths: paths, launchd: launchd)
             events.append(["op": "remove", "result": "ok", "logWarning": logWarning])
         case "takeover":
             guard let legacy = fixture["legacy"] as? [String: Any],
@@ -306,7 +330,7 @@ private func runDemoLifecycle(_ fixture: [String: Any], home: URL) throws -> [[S
                 "label": outcome.tunnel.launchdLabel,
             ])
         case "shutdown-all":
-            let stopped = Shutdown.stopAllManagedTunnelsForLegacyDifferential(paths: paths)
+            let stopped = stopAllDemoTunnels(paths: paths, launchd: launchd)
             events.append(["op": "shutdown-all", "stopped": stopped])
         default:
             throw HarnessSpawnError(message: "demo-lifecycle 不支持操作 \(op)")
@@ -327,118 +351,12 @@ private func runDemoLifecycle(_ fixture: [String: Any], home: URL) throws -> [[S
     return events
 }
 
-private func waitForNotLoaded(_ app: AppProcessExecutor, id: String, timeout: TimeInterval = 2) -> Bool {
-    let deadline = Date().addingTimeInterval(timeout)
-    while Date() < deadline {
-        if app.status(id: id) == .notLoaded { return true }
-        Thread.sleep(forTimeInterval: 0.02)
-    }
-    return app.status(id: id) == .notLoaded
-}
-
-private func runDemoRace(_ fixture: [String: Any]) throws -> [[String: Any]] {
-    let scenarios = fixture["scenarios"] as? [[String: Any]] ?? []
-    let delay = (fixture["restartDelay"] as? NSNumber)?.doubleValue ?? 1
-    var events: [[String: Any]] = []
-
-    for scenario in scenarios {
-        guard let name = scenario["name"] as? String,
-              let id = scenario["id"] as? String,
-              let action = scenario["action"] as? String else {
-            throw HarnessSpawnError(message: "demo-race fixture 缺 scenario 字段")
-        }
-        let scenarioHome = makeTempHome("race-\(name)")
-        defer { try? FileManager.default.removeItem(at: scenarioHome) }
-        let paths = TunnelPaths(homeDirectory: scenarioHome)
-        let tunnel = TunnelConfig(
-            id: id,
-            name: id,
-            command: ["/bin/sleep", "2"],
-            executor: .app,
-            keepAlive: true,
-            throttleInterval: 1
-        )
-        let app = AppProcessExecutor(paths: paths, restartDelayOverride: delay)
-        let launchd = LaunchCtlExecutor(runner: ScriptedRunner(script: []), uid: uid_t(getuid()))
-        let store = ConfigStore(paths: paths)
-        try store.save(AppConfig(version: 1, tunnels: [tunnel]))
-        try app.start(tunnel)
-        guard case .running(let initialPID?) = app.status(id: id) else {
-            throw HarnessSpawnError(message: "demo-race 初始进程未运行")
-        }
-        guard kill(initialPID, SIGKILL) == 0 else {
-            throw HarnessSpawnError(message: "demo-race 无法注入异常退出")
-        }
-        guard waitForNotLoaded(app, id: id) else {
-            throw HarnessSpawnError(message: "demo-race 等待进程退出超时")
-        }
-        let logURL = paths.logURL(for: tunnel)
-        let logDeadline = Date().addingTimeInterval(2)
-        var restartScheduled = false
-        while Date() < logDeadline {
-            let log = (try? String(contentsOf: logURL, encoding: .utf8)) ?? ""
-            if log.contains("process exited unexpectedly") {
-                restartScheduled = true
-                break
-            }
-            Thread.sleep(forTimeInterval: 0.02)
-        }
-        guard restartScheduled else {
-            throw HarnessSpawnError(message: "demo-race 未观察到 termination handler 的迟到重启计划")
-        }
-
-        var restartObserved = false
-        if action == "allow-restart" {
-            let restartDeadline = Date().addingTimeInterval(delay + 2)
-            while Date() < restartDeadline {
-                if case .running(let pid?) = app.status(id: id), pid != initialPID {
-                    restartObserved = true
-                    break
-                }
-                Thread.sleep(forTimeInterval: 0.02)
-            }
-            guard restartObserved else {
-                throw HarnessSpawnError(message: "demo-race 未观察到 keepAlive 延迟重启")
-            }
-            app.stop(tunnel)
-        } else if action == "remove" {
-            _ = try removeDemoTunnel(id, paths: paths, launchd: launchd, app: app)
-        } else if action == "stop" {
-            app.stop(tunnel)
-        } else if action == "shutdown-all" {
-            app.shutdownAll()
-        } else {
-            throw HarnessSpawnError(message: "demo-race 不支持动作 \(action)")
-        }
-        if !restartObserved {
-            Thread.sleep(forTimeInterval: delay + 0.3)
-        }
-
-        let status = normalizeStatusDict(TunnelStatusEvent.dict(app.status(id: id)))
-        var snapshot = demoSnapshot(paths: paths)
-        snapshot["op"] = "fs-snapshot"
-        events.append([
-            "scenario": name,
-            "restartBlocked": !restartObserved,
-            "restartScheduled": restartScheduled,
-            "restartObserved": restartObserved,
-            "status": status,
-            "snapshot": snapshot,
-        ])
-        app.shutdownAll()
-    }
-    return events
-}
-
 private func runComponent(_ component: String, fixture: [String: Any], home: URL) async throws -> [[String: Any]] {
     let fileManager = FileManager.default
 
     switch component {
     case "demo-lifecycle":
         return try runDemoLifecycle(fixture, home: home)
-
-    case "demo-race":
-        return try runDemoRace(fixture)
 
     case "config-store":
         let cases = fixture["cases"] as? [[String: Any]] ?? []
@@ -747,44 +665,6 @@ private func runComponent(_ component: String, fixture: [String: Any], home: URL
             events.append(event)
         }
         return events
-
-    case "app-executor":
-        guard let command = fixture["command"] as? [String] else { return [] }
-        let executorHome = makeTempHome("app-\(UUID().uuidString)")
-        defer { try? fileManager.removeItem(at: executorHome) }
-        let executorPaths = TunnelPaths(homeDirectory: executorHome)
-        let executor = AppProcessExecutor(paths: executorPaths)
-        let tunnel = TunnelConfig(
-            id: "diff-app",
-            name: "diff-app",
-            command: command,
-            executor: .app,
-            keepAlive: false,
-            throttleInterval: 10,
-            probe: nil
-        )
-
-        try executor.start(tunnel)
-        let statusAfterStart = normalizeStatusDict(TunnelStatusEvent.dict(executor.status(id: tunnel.id)))
-        let pidfileURL = executorPaths.pidfileURL(for: tunnel)
-        let pidfileAfterStart: Any = fileManager.fileExists(atPath: pidfileURL.path) ? "<pid>" : NSNull()
-        let logContent = (try? String(contentsOf: executorPaths.logURL(for: tunnel), encoding: .utf8)) ?? ""
-        let spawnedLine: Any = logContent.split(separator: "\n").first.map {
-            normalize(String($0), home: executorHome)
-        } ?? NSNull()
-
-        executor.stop(tunnel)
-        let statusAfterStop = TunnelStatusEvent.dict(executor.status(id: tunnel.id))
-        let pidfileAfterStop: Any = fileManager.fileExists(atPath: pidfileURL.path) ? "EXISTS" : NSNull()
-
-        return [[
-            "statusAfterStart": statusAfterStart,
-            "pidfileAfterStart": pidfileAfterStart,
-            "spawnedLine": spawnedLine,
-            "statusAfterStop": statusAfterStop,
-            "pidfileAfterStop": pidfileAfterStop,
-            "managedIds": executor.managedIDs(),
-        ] as [String: Any]]
 
     default:
         return [["unsupported": component]]

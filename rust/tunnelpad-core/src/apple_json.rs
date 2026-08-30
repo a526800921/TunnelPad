@@ -26,10 +26,7 @@ fn render_tunnel(tunnel: &TunnelConfig) -> String {
     ));
     out.push_str(&format!(
         "      \"executor\" : {},\n",
-        render_string(match tunnel.executor {
-            crate::ExecutorKind::Launchd => "launchd",
-            crate::ExecutorKind::App => "app",
-        })
+        render_string("launchd")
     ));
     out.push_str(&format!("      \"id\" : {},\n", render_string(&tunnel.id)));
     out.push_str(&format!("      \"keepAlive\" : {},\n", tunnel.keep_alive));

@@ -3,7 +3,7 @@
 - 日期：2026-08-30
 - 阶段：阶段 5
 - 类型：行为迁移与真实 `launchd` 受控基线
-- 结论：Step 0 尚未达到待实施标准
+- 结论：Step 0 已达到待实施标准；旧 Swift Core/app 实现已删除，阶段 5 完成仍取决于删除后回归与最终反向引用审计
 - 关联计划：[TunnelPad Rust Core 迁移](../plans/tunnelpad-rust-migration.md)
 
 ## 当前配置基线
@@ -45,7 +45,7 @@ opaque handle、UTF-8 JSON 命令、配置 owner、launchd 生命周期和并发
 - `swift test`：80/80 通过；新增 `RustCoreClientTests` 3 项，覆盖真实 release dylib 的 snapshot、shutdown 后 owner closed、`app` 配置 fail-closed 和取消 generation 后不触发 launchd。
 - `./scripts/build_app.sh`：Rust release、Swift 测试、Swift release、动态库复制、`@rpath`、ad-hoc 签名和 `Info.plist` 校验全部通过。
 - Rust shutdown 已修复：未加载的 launchd 服务先由 owner 判定为 `notLoaded`，不再把真实 `launchctl` 的 `No such process` 误报为退出失败。
-- 生产退出路径已切换：`TunnelManager` 暴露绑定同一 Rust handle 的 `Shutdown.OwnerHandle`，`AppDelegate` 将其交给 SIGTERM/SIGINT handler；默认无 owner 的工具入口也只创建 Rust owner，旧 Swift executor 仅保留在 DEBUG 历史差分 fixture 中。
+- 生产退出路径已切换：`TunnelManager` 暴露绑定同一 Rust handle 的 `Shutdown.OwnerHandle`，`AppDelegate` 将其交给 SIGTERM/SIGINT handler；默认无 owner 的工具入口也只创建 Rust owner。旧 Swift 生命周期/app 执行器已从生产代码和差分 fixture 删除，`MigrationService` 使用的 `LaunchCtlExecutor` 仅保留迁移接管兼容路径。
 - Rust FFI shutdown 现在返回并校验实际停止数量；Swift manager 关闭路径和信号句柄共用该结果通道。
 - fixture 明确验证：version=1 配置读写、`app` 配置拒绝且不自动转换、JSON 生命周期结果、同隧道串行、不同隧道并行，以及 shutdown 后拒绝新命令。
 
@@ -64,22 +64,45 @@ opaque handle、UTF-8 JSON 命令、配置 owner、launchd 生命周期和并发
 
 随后对当前唯一其他真实隧道 `reverse-ssh` 做同样的单目标验证：Rust owner 读取初始状态为 `running`、PID `23915`；直接重启返回成功，启动瞬态为 `xpcproxy`；约 1 秒后 Rust owner 与 `launchctl` 均稳定为 `running`，新 PID `9573`。复查时 `admin-tunnel` 仍为 `running`、PID `9390`，TunnelPad App 进程仍存活。
 
-该结果证明 Rust owner 已对当前两条真实 `launchd` 隧道完成状态读取和重启闭环，并对 `admin-tunnel` 完成业务探针闭环；仍不代表阶段 5 已完成。当前仍缺少 app 入口删除后的 UI/AX 回归、隔离 app/AX/退出操作复核和阶段 5 独立准入复核。
+该结果证明 Rust owner 已对当前两条真实 `launchd` 隧道完成状态读取和重启闭环，并对 `admin-tunnel` 完成业务探针闭环；阶段 5 独立准入复核已通过，删除后的全量回归与最终反向引用审计仍需完成。
 
 ## Release App AX 只读复核（2026-08-30）
 
 对当前运行中的 Release App 执行了只读 AX 树检查，未点击控件、未退出 App、未停止或重启隧道。AX 树可见主窗口、`admin-tunnel`/`reverse-ssh` 列表项、`launchd` 标签、运行中 PID、启动/停止/重启按钮、日志区域、滚动区域及自动滚动控件；这证明当前 UI 门面仍可被辅助功能树观察到。
 
-该检查不是隔离环境的启动/退出操作，也不能替代隐藏 app 入口后的 UI/AX 回归；隔离 App 的 AX 启动、退出清理和残留进程复核仍待完成。
+该检查不是隔离环境的启动/退出操作，也不能替代隐藏 app 入口后的 UI/AX 回归；隔离 App 的 AX 启动、退出清理和残留进程复核见下节。
 
 ## 真实 Release App 退出清理验证（2026-08-30）
 
 对当前 Release App 发送一次受控 `SIGTERM` 后，TunnelPad 进程退出；随后只读检查两个受管 `launchd` label 均已不存在。该结果验证了真实 Release App 的信号退出路径复用 Rust owner shutdown，并按既定契约停止全部受管隧道；不涉及远端配置或凭证变更。
 
-该验证使用真实用户 home 和真实受管 label，不能替代隔离 App 的启动/AX/退出复核。
+该验证使用真实用户 home 和真实受管 label，不能替代隔离 App 的启动/AX/退出复核；隔离复核见下节。
 
-## Step 0 尚缺证据
+## 隔离 App AX 与退出复核（2026-08-30）
 
-- 隐藏/删除 app 执行器入口后的 UI/AX 回归；
-- 隔离 app 环境的 UI/AX 启动、退出清理和残留进程复核；
-- 阶段 5 独立准入复核。
+为验证隔离路径，临时加入了仅 DEBUG 编译可见的 `--tunnelpad-home <temp-home>` 参数解析，未使用环境变量；验证结束后已删除该 hook。临时 App 使用唯一 bundle ID、唯一可执行文件名和独立临时 home 构建，未覆盖 `dist/TunnelPad.app`。
+
+最终计入证据的实例：
+
+- 构建：`swift build -c debug --product tunnelpad`；Rust 动态库复制到临时 App 的 `Contents/Frameworks/` 后执行 ad-hoc 签名和 `codesign --verify --deep --strict`。
+- 启动：`open -n /tmp/tunnelpad-stage5.B34x7h/TunnelPadStage5Isolated-v3.app --args --tunnelpad-home /tmp/tunnelpad-stage5.B34x7h/home`。
+- 隔离配置：仅含一条 `stage5-isolated-b34x7h`，执行器为 `launchd`，唯一 label 为 `com.jafish.tunnelpad.stage5-isolated-b34x7h`，command 为无副作用的 `/usr/bin/true`；未执行启动/停止/重启操作。
+- AX 树：通过 bundle ID `com.jafish.tunnelpad.stage5isolated.v3` 读取；可见主窗口、`Stage 5 isolated` 列表项、唯一隔离 label、启动/停止/重启按钮、日志区域、滚动控件，以及隔离日志路径 `/tmp/tunnelpad-stage5.B34x7h/home/Library/Logs/TunnelPad/stage5-isolated-b34x7h.log`；未出现真实 `admin-tunnel`、`reverse-ssh` 或真实日志路径。
+- app 入口隐藏回归：静态核对 `TunnelSettingsSheet.swift`、`NewTunnelSheet.swift` 只显示 `launchd（当前阶段唯一支持的执行器）`，`TunnelFormState` 将表单执行器固定为 `.launchd`；同一 AX 树只出现 `launchd`，未出现 app 执行器选择或入口。
+- 退出：通过 Computer Use 向该实例发送 `super+q`；随后进程已消失，`gui/501/com.jafish.tunnelpad.stage5-isolated-b34x7h` 不存在，隔离 home 只剩初始 `config.json`，没有 launchd plist、日志或孤儿进程。
+
+排除性说明：前两次尝试使用相同 bundle ID 的临时实例，AX 工具选中了较早实例，因此未计入证据；最终 V3 实例使用唯一 bundle ID/可执行文件名并完成了上述复核。
+
+## 阶段 5 删除后收尾
+
+- 已完成旧 Swift Core、app 执行器实现、`ExecutorKind.app` 配置分支、app/pidfile 差分 fixture 及其测试删除。
+
+删除后回归与审计结果：
+
+- `cargo test --manifest-path rust/Cargo.toml`：Rust 49 个单测、1 个差分测试通过；`rust/scripts/smoke.sh` 全部通过。
+- `xcodebuildmcp swift-package test --package-path . --configuration debug --output text`：Swift 64/64 通过；`rust/scripts/differential.sh` 重新生成事件流并通过。
+- `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`、`git diff --check`、`scripts/build_app.sh --skip-tests` 均通过；`.app` 的 arm64、动态库、签名和 `Info.plist` 校验通过。
+- `node .gitnexus/run.cjs analyze` 重新索引后，旧执行器和差分 fixture 不再出现在有效源码定义中；功能图谱所有 `ref` 均指向现存文件。
+- `plan-governance-cli check .` 与 `plan-governance-cli check . --strict-readiness` 均通过；仅保留既有跨计划影响目标 WARNING。
+
+上述结果代表删除实施和删除后验证已完成；阶段 5 的独立收尾复核仍应基于当前仓库与这些可复现命令单独确认。

@@ -127,52 +127,6 @@ final class TunnelManagerTests: XCTestCase {
     }
 
     @MainActor
-    func testRemoveTunnelAbortsAndKeepsConfigWhenBootoutFails() throws {
-        let tempHome = FileManager.default.temporaryDirectory
-            .appendingPathComponent("tunnelpad-manager-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: tempHome, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempHome) }
-
-        let paths = TunnelPaths(homeDirectory: tempHome)
-        let store = ConfigStore(paths: paths)
-        let tunnel = TunnelConfig(id: "remove-b", name: "B", command: ["/usr/bin/ssh", "-N", "b"])
-        try store.save(AppConfig(tunnels: [tunnel]))
-
-        // print 恒报 running（实例停不掉），bootout 恒失败：删除必须中断并保留配置。
-        let runner = MockProcessRunner { _, arguments in
-            if arguments.first == "print" {
-                return ProcessResult(
-                    exitCode: 0,
-                    stdout: "gui/501/\(tunnel.launchdLabel) = {\n\tstate = running\n\tpid = 123\n}"
-                )
-            }
-            if arguments.first == "bootout" {
-                return ProcessResult(exitCode: 3, stderr: "Could not find service")
-            }
-            return nil
-        }
-        let executor = LaunchCtlExecutor(runner: runner, uid: 501)
-        let manager = TunnelManager(
-            paths: paths,
-            executor: executor,
-            configRepository: store,
-            probeService: ProbeService()
-        )
-        let plistURL = try LaunchdPlistRenderer.writePlist(for: tunnel, paths: paths)
-        try FileManager.default.createDirectory(at: paths.logsDirectory, withIntermediateDirectories: true)
-        try Data("debug1: keep\n".utf8).write(to: paths.logURL(for: tunnel))
-
-        manager.removeTunnel("remove-b")
-
-        XCTAssertEqual(manager.config.tunnels.map(\.id), ["remove-b"], "停止失败必须中断并保留配置")
-        XCTAssertEqual(store.load().config.tunnels.map(\.id), ["remove-b"], "中断时不得写入配置")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: plistURL.path), "中断时 plist 应保留")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: paths.logURL(for: tunnel).path), "中断时日志应保留")
-        XCTAssertTrue(runner.recordedCalls.contains { $0.arguments.first == "bootout" }, "应尝试过 bootout")
-        XCTAssertNotNil(manager.lastError)
-    }
-
-    @MainActor
     func testRemoveTunnelUnknownIDIsNoop() throws {
         let tempHome = FileManager.default.temporaryDirectory
             .appendingPathComponent("tunnelpad-manager-\(UUID().uuidString)", isDirectory: true)

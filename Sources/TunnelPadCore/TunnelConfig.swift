@@ -1,9 +1,8 @@
 import Foundation
 
-/// 执行器类型。v1 阶段仅实现 launchd；app 执行器在阶段 2 落地。
+/// 执行器类型。阶段 5 当前只支持 launchd；app 执行器另立计划。
 public enum ExecutorKind: String, Codable, Sendable, CaseIterable {
     case launchd
-    case app
 }
 
 /// 可选状态探针配置（schema v1 追加的可选字段，向后兼容）。
@@ -35,7 +34,7 @@ public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
     public var command: [String]
     public var executor: ExecutorKind
     public var keepAlive: Bool
-    /// 秒。写入生成 plist 的 ThrottleInterval；app 执行器用作意外退出后的重启延迟。
+    /// 秒。写入生成 plist 的 ThrottleInterval。
     public var throttleInterval: Int
     /// 可选状态探针；缺省不探测。
     public var probe: ProbeConfig?

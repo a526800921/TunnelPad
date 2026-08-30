@@ -9,7 +9,6 @@
 //! 契约版本：[`ABI_VERSION`] = 1。演进规则（阶段 1 冻结）：
 //! 只允许追加新函数与追加错误码；任何破坏性变化必须递增 ABI 版本。
 
-pub mod app_executor;
 pub mod apple_json;
 pub mod config_store;
 pub mod demo;
@@ -74,8 +73,6 @@ pub enum ExecutorKind {
     #[default]
     #[serde(rename = "launchd")]
     Launchd,
-    #[serde(rename = "app")]
-    App,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -350,12 +347,11 @@ mod tests {
 
     #[test]
     fn launchd_label_matches_swift_prefix() {
-        let mut config: TunnelConfig = serde_json::from_value(
+        let config: TunnelConfig = serde_json::from_value(
             serde_json::json!({"id":"a1","name":"n","command":["/bin/true"]}),
         )
         .unwrap();
         assert_eq!(config.launchd_label(), "com.jafish.tunnelpad.a1");
-        config.executor = ExecutorKind::App;
         assert_eq!(config.launchd_label(), "com.jafish.tunnelpad.a1");
     }
 

@@ -2,8 +2,8 @@ import Foundation
 import Darwin
 
 /// 退出清理路径（SIGTERM/SIGINT：logout、shutdown、kill）。
-/// 与正常退出同语义：退出 = 停止全部托管隧道（launchd bootout + app 子进程终止）。
-/// 直接读 config.json 与 pidfile，不依赖 UI 层对象，可从任意线程调用。
+/// 与正常退出同语义：退出 = 停止全部托管 launchd 隧道。
+/// 直接通过 Rust owner 句柄执行，不依赖 UI 层对象，可从任意线程调用。
 /// 注意：信号安装与处理必须保持 nonisolated——闭包若继承 @MainActor 隔离，
 /// 会在全局队列触发时被 dispatch_assert_queue 断言崩溃。
 public enum Shutdown {
@@ -59,47 +59,4 @@ public enum Shutdown {
         exit(code)
     }
 
-#if DEBUG
-    /// 仅供阶段 1–4 历史差分 fixture 使用；正式 app 和生产退出路径不再
-    /// 调用 Swift executor。旧差分 fixture 含 app 执行器，待旧 Core 删除时
-    /// 与对应历史 fixture 一并移除。
-    @discardableResult
-    static func stopAllManagedTunnelsForLegacyDifferential(paths: TunnelPaths) -> Int {
-        let executor = LaunchCtlExecutor()
-        let config = ConfigStore(paths: paths).load().config
-        var stopped = 0
-        for tunnel in config.tunnels {
-            switch tunnel.executor {
-            case .launchd:
-                if (try? executor.bootout(label: tunnel.launchdLabel)) == true {
-                    stopped += 1
-                }
-            case .app:
-                if killByPidfile(at: paths.pidfileURL(for: tunnel)) {
-                    stopped += 1
-                }
-            }
-        }
-        return stopped
-    }
-#endif
-
-    /// 按 pidfile 终止进程（SIGTERM）；进程已不存在时清理 pidfile。
-    @discardableResult
-    public static func killByPidfile(at url: URL, signalNumber: Int32 = SIGTERM) -> Bool {
-        let fileManager = FileManager.default
-        guard let data = try? Data(contentsOf: url),
-              let pid = Int32(String(data: data, encoding: .utf8)?
-                  .trimmingCharacters(in: .whitespacesAndNewlines) ?? "") else {
-            try? fileManager.removeItem(at: url)
-            return false
-        }
-        guard kill(pid, 0) == 0 else {
-            try? fileManager.removeItem(at: url)
-            return false
-        }
-        kill(pid, signalNumber)
-        try? fileManager.removeItem(at: url)
-        return true
-    }
 }

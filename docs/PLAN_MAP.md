@@ -83,7 +83,7 @@
 |---|---|---|---|---|
 | - | - | - | 否 | 已延后 |
 | 阶段 1 实现与独立复核 | 阶段 1 已完成实现、fixture 验证和真实 ECS 只读回归；阶段 2 自动集成尚未启动，需另行准入。运行时任一双端点不一致、规则歧义、API 写入未确认或锁冲突都必须停止或保留新旧规则；Workbench 保留为恢复通道 | ecs-dynamic-ssh-ip 阶段 1 | 否 | 已通过 |
-| Rust Core 阶段 5 owner 切换准入 | 阶段 5 Step 0、owner ABI/配置 fixture、fake `launchd`、当前两条真实隧道的 Rust owner 验证、隔离 App/AX/退出复核和独立复核通过后再删除 Swift Core | tunnelpad-rust-migration 阶段 5 | 是（阶段 5 实施） | 进行中 |
+| Rust Core 阶段 5 owner 切换准入 | 阶段 5 Step 0、owner ABI/配置 fixture、fake `launchd`、当前两条真实隧道的 Rust owner 验证、隔离 App/AX/退出复核、app 入口隐藏回归和独立准入复核已通过；旧 Swift Core/app 实现已删除，删除后回归与最终反向引用审计已完成，待独立收尾复核 | tunnelpad-rust-migration 阶段 5 | 否（准入已通过，待独立收尾复核） | 已通过准入 |
 | TunnelPad 稳定性实现前置 | 等待 Rust Core 迁移阶段 5 完成；继续推进本计划阶段 0，阶段 1 实施仍需本计划自身独立准入 | tunnelpad-stability 阶段 1–3 | 否（阻塞阶段 1） | 进行中 |
 | TunnelPad 日志事件流实现前置 | 等待 Rust Core 迁移阶段 5 完成；继续推进本计划阶段 0，阶段 1 实施仍需本计划自身独立准入，并与稳定性共享模块改动串行 | tunnelpad-log-streaming 阶段 1–3 | 否（阻塞阶段 1） | 进行中 |
 | TunnelPad 隧道备注实现前置 | 等待 Rust Core 迁移阶段 5 完成并确定 Rust 配置事实源；继续推进本计划阶段 0，阶段 1 实施仍需本计划自身独立准入 | tunnelpad-tunnel-remarks 阶段 1–3 | 否（阻塞阶段 1） | 进行中 |

@@ -1,6 +1,6 @@
 import Foundation
 
-/// 日志尾部读取。日志文件量级小（launchd 直写 / app 执行器追加），
+/// 日志尾部读取。日志文件量级小（launchd 直写），
 /// 采用整文件读入后取尾部。
 public enum LogTail {
     /// 返回文件末 `maxLines` 行；文件不存在或不可读返回 nil。

@@ -35,15 +35,6 @@ impl TunnelPaths {
         self.support_directory().join("migration-backup")
     }
 
-    /// app 执行器子进程的 pidfile 目录。
-    pub fn run_directory(&self) -> PathBuf {
-        self.support_directory().join("run")
-    }
-
-    pub fn pidfile_url(&self, tunnel: &TunnelConfig) -> PathBuf {
-        self.run_directory().join(format!("{}.pid", tunnel.id))
-    }
-
     /// 日志放 `~/Library/Logs/TunnelPad`。
     pub fn logs_directory(&self) -> PathBuf {
         self.home_directory.join("Library/Logs/TunnelPad")

@@ -1,6 +1,6 @@
 #!/bin/sh
 # 阶段 2 差分门禁：Swift harness 产出事件流 → Rust 侧同 fixture 执行并对比。
-# 全程 fake 数据 + 隔离临时目录；app-executor 场景只 spawn /bin/sleep。
+# 全程 fake 数据 + 隔离临时目录。
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
