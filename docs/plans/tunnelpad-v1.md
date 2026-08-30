@@ -197,7 +197,7 @@ v1 引入 TunnelPad 自身的配置文件 schema（config.json v1，定义见"�
 
 #### 打包约定
 
-- `App/Resources/Info.plist`：`CFBundleIdentifier=com.jafish.tunnelpad`、`CFBundleExecutable=tunnelpad`、`LSUIElement=true`、`LSMinimumSystemVersion=14.0`。
+- `App/Resources/Info.plist`：`CFBundleIdentifier=com.jafish.tunnelpad.app`（2026-08-30 由 `com.jafish.tunnelpad` 迁移：系统菜单栏服务对该旧 ID 累积的宿主记录损坏且无法清除——`killall ControlCenter`、LaunchServices 重注册、重启 Mac、autosave 换版本均无效，而任意新 bundle ID 立即可见图标；launchd 标签前缀 `com.jafish.tunnelpad.<tunnel-id>` 不受影响）、`CFBundleExecutable=tunnelpad`、`LSUIElement=true`、`LSMinimumSystemVersion=14.0`。
 - 图标：`scripts/make_icon.swift`（AppKit 绘制 1024px → sips 生成 iconset → iconutil 合成）产出 `App/Resources/TunnelPad.icns`，产物入库保证可复现构建。
 - `scripts/build_app.sh`（参照 ModelPad 同名脚本）：`swift test`（`--skip-tests` 可跳）→ `swift build -c release --product tunnelpad` → 组装 `dist/TunnelPad.app` → ad-hoc 签名 → `plutil -lint` 校验。
 

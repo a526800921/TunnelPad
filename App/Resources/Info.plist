@@ -7,7 +7,7 @@
     <key>CFBundleExecutable</key>
     <string>tunnelpad</string>
     <key>CFBundleIdentifier</key>
-    <string>com.jafish.tunnelpad</string>
+    <string>com.jafish.tunnelpad.app</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
