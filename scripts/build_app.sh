@@ -36,7 +36,17 @@ done
 echo "==> 项目: $PROJECT_ROOT"
 echo "==> 架构: $ARCH"
 
-# Step 1: 测试
+# Step 1: 构建 Rust Core 动态库
+echo "==> Rust Core 构建 (release)..."
+cd "$PROJECT_ROOT"
+cargo build --release --manifest-path "$PROJECT_ROOT/rust/Cargo.toml"
+RUST_DYLIB_SRC="$PROJECT_ROOT/rust/target/release/libtunnelpad_core.dylib"
+test -f "$RUST_DYLIB_SRC"
+# Cargo 默认把 cdylib 的 install name 写成工作树绝对路径；发布包必须自包含。
+install_name_tool -id "@rpath/libtunnelpad_core.dylib" "$RUST_DYLIB_SRC"
+echo "✓ Rust 动态库: $RUST_DYLIB_SRC"
+
+# Step 2: 测试
 if $SKIP_TESTS; then
     echo "==> 跳过测试"
 else
@@ -46,31 +56,35 @@ else
     echo "✓ 测试通过"
 fi
 
-# Step 2: Release 构建
+# Step 3: Swift Release 构建
 echo "==> SwiftPM 构建 (release)..."
 cd "$PROJECT_ROOT"
 swift build -c release --product "$EXECUTABLE_NAME"
 echo "✓ 构建完成"
 
-# Step 3: 准备 .app 目录结构
+# Step 4: 准备 .app 目录结构
 echo "==> 生成 $APP_BUNDLE..."
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
+mkdir -p "$APP_BUNDLE/Contents/Frameworks"
 
-# Step 4: 复制二进制
+# Step 5: 复制二进制与 Rust 动态库
 BINARY_SRC="$PROJECT_ROOT/.build/$BUILD_TRIPLE/release/$EXECUTABLE_NAME"
 cp "$BINARY_SRC" "$APP_BUNDLE/Contents/MacOS/"
 chmod +x "$APP_BUNDLE/Contents/MacOS/$EXECUTABLE_NAME"
 echo "  ✓ 二进制: $BINARY_SRC → Contents/MacOS/"
+cp "$RUST_DYLIB_SRC" "$APP_BUNDLE/Contents/Frameworks/"
+chmod +x "$APP_BUNDLE/Contents/Frameworks/libtunnelpad_core.dylib"
+echo "  ✓ Rust 动态库: $RUST_DYLIB_SRC → Contents/Frameworks/"
 
-# Step 5: 复制 Info.plist 与图标
+# Step 6: 复制 Info.plist 与图标
 cp "$INFO_PLIST_SRC" "$APP_BUNDLE/Contents/Info.plist"
 echo "  ✓ Info.plist (LSUIElement)"
 cp "$ICON_SRC" "$APP_BUNDLE/Contents/Resources/$APP_NAME.icns"
 echo "  ✓ 应用图标"
 
-# Step 6: PkgInfo + ad-hoc 签名 + 校验
+# Step 7: PkgInfo + ad-hoc 签名 + 校验
 echo -n "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
 echo "  ✓ PkgInfo"
 

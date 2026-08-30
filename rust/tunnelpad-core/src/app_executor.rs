@@ -65,7 +65,7 @@ impl AppProcessExecutor {
             paths,
             restart_delay_override: None,
             inner: Mutex::new(Inner::default()),
-            log_timestamp: Arc::new(crate::config_store::utc_log_timestamp),
+            log_timestamp: Arc::new(crate::config_store::local_log_timestamp),
         }
     }
 

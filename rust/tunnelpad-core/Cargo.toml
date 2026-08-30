@@ -6,7 +6,7 @@ publish = false
 
 [lib]
 name = "tunnelpad_core"
-crate-type = ["staticlib", "rlib"]
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

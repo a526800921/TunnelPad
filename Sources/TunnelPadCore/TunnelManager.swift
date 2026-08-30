@@ -21,6 +21,7 @@ public final class TunnelManager: ObservableObject {
     private let appRuntime: any AppExecuting
     private let lifecycleCoordinator: TunnelLifecycleCoordinator
     private let probeCoordinator: ProbeCoordinator
+    private let rustCoreShadow: RustCoreShadow
     private var runtimeState = TunnelRuntimeState()
     private var probeTask: Task<Void, Never>?
     private var probeGeneration: UInt = 0
@@ -37,7 +38,8 @@ public final class TunnelManager: ObservableObject {
             paths: paths,
             executor: executor,
             configRepository: ConfigStore(paths: paths),
-            probeService: ProbeService()
+            probeService: ProbeService(),
+            rustCoreShadow: RustCoreShadow()
         )
     }
 
@@ -45,12 +47,14 @@ public final class TunnelManager: ObservableObject {
         paths: TunnelPaths,
         executor: LaunchCtlExecutor,
         configRepository: any TunnelConfigRepository,
-        probeService: ProbeService
+        probeService: ProbeService,
+        rustCoreShadow: RustCoreShadow = RustCoreShadow()
     ) {
         self.paths = paths
         self.executor = executor
         let appExecutor = AppProcessExecutor(paths: paths)
         self.appExecutor = appExecutor
+        self.rustCoreShadow = rustCoreShadow
         self.migrationService = MigrationService(paths: paths, executor: executor)
         self.store = configRepository
         self.launchdRuntime = executor
@@ -63,6 +67,7 @@ public final class TunnelManager: ObservableObject {
         self.probeCoordinator = ProbeCoordinator(service: probeService)
         let loaded = store.load()
         self.config = loaded.config
+        self.rustCoreShadow.validateConfig(self.config)
         if let recovered = loaded.recoveredFrom {
             self.lastMessage = "配置文件损坏，已留档 \(recovered.lastPathComponent)，已重建空配置"
         }
@@ -78,6 +83,7 @@ public final class TunnelManager: ObservableObject {
         config = loaded.config
         let validIDs = Set(config.tunnels.map(\.id))
         updateRuntime { $0.prune(to: validIDs) }
+        rustCoreShadow.validateConfig(config)
         if let recovered = loaded.recoveredFrom {
             lastMessage = "配置文件损坏，已留档 \(recovered.lastPathComponent)，已重建空配置"
         } else {
@@ -98,6 +104,7 @@ public final class TunnelManager: ObservableObject {
         config = loaded.config
         let validIDs = Set(config.tunnels.map(\.id))
         updateRuntime { $0.prune(to: validIDs) }
+        rustCoreShadow.validateConfig(config)
         if let recovered = loaded.recoveredFrom {
             lastMessage = "配置文件损坏，已留档 \(recovered.lastPathComponent)，已重建空配置"
         } else {

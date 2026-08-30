@@ -1,0 +1,9 @@
+[package]
+name = "tunnelpad-core-incompatible"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "tunnelpad_core_incompatible"
+crate-type = ["cdylib"]
