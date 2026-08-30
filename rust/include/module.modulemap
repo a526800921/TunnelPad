@@ -1,0 +1,4 @@
+module CTunnelpadCore {
+    header "tunnelpad_core.h"
+    export *
+}
