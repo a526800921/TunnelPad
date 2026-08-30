@@ -6,3 +6,4 @@ dist/
 .swiftpm/
 CLAUDE.md
 AGENTS.md
+.claude

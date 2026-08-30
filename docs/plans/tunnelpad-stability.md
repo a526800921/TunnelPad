@@ -3,7 +3,7 @@
 - 状态：设计中
 - 当前阶段：阶段 0
 - 最后更新：2026-08-30
-- 前置：`tunnelpad-v1`、`tunnelpad-code-quality-refactor` 和 `tunnelpad-rust-migration` 阶段 5 完成；本计划阶段 1 实施仍需自身阶段 0 独立准入
+- 前置：`tunnelpad-v1`、`tunnelpad-code-quality-refactor` 和 `tunnelpad-rust-migration` 阶段 5 已完成实现，待独立收尾复核；本计划阶段 1 实施仍需自身阶段 0 独立准入
 
 本计划独立处理 TunnelPad 的运行稳定性，不回写 v1 已冻结的探针展示语义，也不与 Rust Core 迁移阶段 5 并行修改执行器、生命周期或探针模块。当前稳定性实现范围先限定为阶段 5 已确认的 `launchd`；未来 `app` 执行器重新开发后，另行补充对应稳定性范围。阶段 0 可以先完成基线和准入设计；本计划阶段 1 实施前仍需完成自身的准入复核。
 
@@ -11,7 +11,7 @@
 
 当前 TunnelPad 的 `keepAlive` 能处理“受管进程退出后重新拉起”，但探针只在刷新或启停动作中执行，且只更新界面展示。当 SSH 进程仍显示运行、而 TCP 转发或本机映射的 HTTP 服务已经不可用时，现有逻辑不会由探针触发恢复；主窗口隐藏时也没有独立的后台健康监测。
 
-此外，TunnelPad 崩溃后重新启动时，当前启动路径只加载配置并刷新状态。阶段 5 当前只迁移 `launchd`，其系统托管状态可以被重新查询；`app` 执行器及其 pidfile 收敛留待未来 app 计划，不作为本阶段稳定性实现入口。
+此外，TunnelPad 崩溃后重新启动时，当前启动路径只加载配置并刷新状态。阶段 5 已将当前运行路径收敛为 `launchd`，其系统托管状态可以被重新查询；历史 `app` 执行器及其 pidfile 收敛留待未来 app 计划，不作为本阶段稳定性实现入口。
 
 功能图谱审计又发现，配置损坏/半写入、执行器切换停止失败、正常退出与信号退出资源发现不一致，以及 launchd 重启吞掉 `bootout` 错误，都会让配置、状态和实际托管实例分叉。这些问题与稳定性计划共同指向“运行时状态最终必须安全收敛”，本次并入本计划阶段 0 的基线和后续回归矩阵；app `keepAlive` 和 pidfile 语义留待未来 app 计划。
 
@@ -31,7 +31,7 @@
 
 - 不新增 TCP 探测、额外 SSH 探测或第二套凭证/连接通道；健康信号只使用现有 HTTP 探针。
 - 不把远端业务服务自身不可用、HTTP 鉴权失败或错误的探针 URL 自动解释成 SSH 网络故障；它们只按探针失败参与本计划的恢复策略。
-- 不修改 `config.json` Schema、现有 `probe` 字段含义、`keepAlive` 字段含义、launchd label、日志路径或 pidfile 路径。
+- 不修改 `config.json` Schema、现有 `probe` 字段含义、`keepAlive` 字段含义、launchd label 或日志路径；不恢复历史 app pidfile 路径，未来 app 计划另行定义。
 - 不增加用户可配置的监测周期、失败阈值、退避序列或最大次数；本计划 v1 固定这些策略，未来开放配置需另立计划。
 - 不因单条隧道失败而停止、重启或修改其他隧道。
 - 不在本计划阶段 0 独立准入前修改稳定性实现，也不在真实用户隧道上做未经批准的故障注入。
@@ -46,14 +46,14 @@
 - 当前 `ProbeService` 对配置 URL 执行 HTTP GET，默认超时 3 秒，按期望状态码返回满足、不满足或失败三态；它本身不执行启停。[ProbeService.swift](../../Sources/TunnelPadCore/ProbeService.swift)
 - 当前 `TunnelManager.runProbes()` 由同步/异步刷新路径调用，结果只写入运行时展示状态；现有阶段证据明确登记“探针只影响展示、无后台轮询”。[TunnelManager.swift](../../Sources/TunnelPadCore/TunnelManager.swift)；[v1 阶段 2 证据](../data-quality/tunnelpad-v1-stage2-features-20260829.md)
 - 当前主窗口的状态刷新任务每 5 秒运行一次，但只在主窗口可见时运行；这不能作为常驻稳定性监测的所有者。[MainPanelView.swift](../../Sources/tunnelpad/MainPanelView.swift)
-- `AppDelegate.applicationDidFinishLaunching` 只安装信号处理、创建菜单栏控制器并显示窗口；`TunnelManager.init` 只加载配置，当前启动路径没有调用 `Shutdown.killByPidfile` 或等价的 app 孤儿收敛流程。[AppDelegate.swift](../../Sources/tunnelpad/AppDelegate.swift)；[Shutdown.swift](../../Sources/TunnelPadCore/Shutdown.swift)
-- `AppProcessExecutor` 的 `status` 只查询当前进程内存中的 `contexts`，新建的执行器不会从 pidfile 恢复上下文或识别旧子进程。[AppProcessExecutor.swift](../../Sources/TunnelPadCore/AppProcessExecutor.swift)
-- `launchd` 执行器将 `keepAlive` 写入 plist，由 launchd 观察受管进程生命周期；`app` 执行器在 termination handler 收到非手动退出后，按 `throttleInterval` 延迟重启。[LaunchdPlistRenderer.swift](../../Sources/TunnelPadCore/LaunchdPlistRenderer.swift)；[AppProcessExecutor.swift](../../Sources/TunnelPadCore/AppProcessExecutor.swift)
+- 阶段 5 删除前，`AppDelegate.applicationDidFinishLaunching` 只安装信号处理、创建菜单栏控制器并显示窗口；`TunnelManager.init` 只加载配置，历史启动路径没有调用 `Shutdown.killByPidfile` 或等价的 app 孤儿收敛流程。当前运行路径不再提供 app pidfile 收敛。[AppDelegate.swift](../../Sources/tunnelpad/AppDelegate.swift)；[Shutdown.swift](../../Sources/TunnelPadCore/Shutdown.swift)
+- 阶段 5 删除前，v1 的 app 执行器 `status` 只查询进程内存中的 `contexts`，不会从 pidfile 恢复上下文；该问题已移出当前 `launchd` 稳定性范围，未来 app 计划重新定义。
+- `launchd` 执行器将 `keepAlive` 写入 plist，由 launchd 观察受管进程生命周期；历史 app 的 termination handler/`throttleInterval` 语义保留在 v1 计划，未来 app 计划重新定义。[LaunchdPlistRenderer.swift](../../Sources/TunnelPadCore/LaunchdPlistRenderer.swift)；[TunnelPad v1 计划](tunnelpad-v1.md#app-执行器语义)
 - `reloadConfigAsync()` 会直接接受 `ConfigStore.load()` 的结果并裁剪运行时状态；配置损坏时 `ConfigStore.load()` 会留档原文件并返回空配置。该恢复语义尚未证明适合运行中的配置刷新。[ConfigStore.swift](../../Sources/TunnelPadCore/ConfigStore.swift)；[TunnelManager.swift](../../Sources/TunnelPadCore/TunnelManager.swift)
-- `updateTunnelAsync()` 在执行器改变时等待旧实例停止，但当前未根据 `TunnelOperationOutcome` 阻止后续新配置保存；`restartSync()` 对 launchd 的 `bootout` 使用 `try?`。这些是本计划新增的失败注入基线。[TunnelManager.swift](../../Sources/TunnelPadCore/TunnelManager.swift)；[TunnelLifecycleCoordinator.swift](../../Sources/TunnelPadCore/TunnelLifecycleCoordinator.swift)
-- 正常退出由应用内存中的 app executor 清理，信号退出由磁盘配置和 pidfile 清理；两条路径的资源发现与身份验证边界不同。[AppDelegate.swift](../../Sources/tunnelpad/AppDelegate.swift)；[Shutdown.swift](../../Sources/TunnelPadCore/Shutdown.swift)
+- 阶段 5 删除前，`updateTunnelAsync()` 的执行器切换和 `restartSync()` 的停止结果曾是本计划的失败注入基线；当前实现已由 Rust owner 统一生命周期边界，本计划阶段 0 需基于现有代码重新冻结失败分类。[TunnelManager.swift](../../Sources/TunnelPadCore/TunnelManager.swift)；[Rust owner](../../rust/tunnelpad-core/src/owner.rs)
+- 阶段 5 删除前，正常退出与信号退出使用不同的 app/pidfile 资源发现路径；当前运行路径统一由 Rust owner 按配置中的 `launchd` label 清理，历史差异只保留为迁移背景。[AppDelegate.swift](../../Sources/tunnelpad/AppDelegate.swift)；[Shutdown.swift](../../Sources/TunnelPadCore/Shutdown.swift)
 - 现有 v1 和代码质量重构计划已冻结手动停止、删除、退出清理、过期任务保护和探针展示兼容边界；本计划是行为增强，不替代这些事实源。[TunnelPad v1 计划](tunnelpad-v1.md)；[代码质量重构计划](tunnelpad-code-quality-refactor.md)
-- 当前工作树存在 Rust Core 阶段 5 的计划文档改动和阶段 4 已验证代码；本计划不覆盖 owner 切换实现。阶段 1 实施前仍须按本计划自身的准入门禁重新核对共享生命周期模块影响面。
+- Rust Core 阶段 5 已完成实现并已提交；本计划不覆盖 owner 切换实现。阶段 1 实施前仍须按本计划自身的准入门禁重新核对共享生命周期模块影响面，并等待阶段 5 独立收尾复核完成。
 
 ### 暂定假设与验证方式
 
@@ -133,12 +133,10 @@
 - `Sources/TunnelPadCore/ProbeService.swift`
 - `Sources/TunnelPadCore/ProbeCoordinator.swift`
 - `Sources/TunnelPadCore/TunnelManager.swift`
-- `Sources/TunnelPadCore/TunnelLifecycleCoordinator.swift`
-- `Sources/TunnelPadCore/AppProcessExecutor.swift`
 - `Sources/TunnelPadCore/LaunchCtlExecutor.swift`
 - `Sources/TunnelPadCore/LaunchdPlistRenderer.swift`
 - `Sources/TunnelPadCore/Shutdown.swift`
-- `Sources/TunnelPadCore/TunnelPaths.swift`
+- `Sources/TunnelPadCore/TunnelPaths.swift`（保持当前日志路径派生；不恢复历史 pidfile 路径）
 - `Sources/TunnelPadCore/TunnelRuntimeState.swift`
 - `Sources/tunnelpad/AppDelegate.swift`
 - `Sources/tunnelpad/MainPanelView.swift`
@@ -152,7 +150,7 @@
 
 ## 公共契约变化
 
-当前计划不新增公共 API、HTTP API、`config.json` 字段或迁移文件。`probe`、`expectedStatuses`、`keepAlive` 和 `throttleInterval` 的既有序列化与兼容语义保持不变。启动时的 pidfile 收敛属于内部生命周期行为，保持现有 pidfile 路径；若实现需要改变 pidfile 格式，必须另行记录兼容和迁移边界。
+当前计划不新增公共 API、HTTP API、`config.json` 字段或迁移文件。`probe`、`expectedStatuses` 和 `keepAlive` 的现有序列化与兼容语义保持不变；历史 app 的 `throttleInterval`/pidfile 语义不属于当前实现，未来 app 计划需重新冻结兼容和身份校验边界。
 
 新增的失败计数、退避级别、恢复尝试次数、熔断状态和取消令牌均属于运行时内部状态，不落盘、不跨进程持久化。若后续需要让用户配置这些策略，必须另立计划并重新进行 Schema、UI、兼容性和回滚评估。
 
@@ -180,7 +178,7 @@
 | 样本矩阵 | 11 行，覆盖现有探针/刷新边界、配置异常、`launchd` 生命周期失败、进程保活、假死复现、失败状态机、单隧道隔离和治理检查；app 范围留待未来计划 |
 | 验证方式 | 只读源码核对、隔离 fixture、现有测试清单、后续失败回归测试和 `plan-governance-cli check . --strict-readiness` |
 | 失败/回滚边界 | 阶段 0 不改变运行状态；实现阶段按独立提交回滚，不覆盖当前 Rust 阶段 3 未提交改动；任何真实隧道误操作立即停止该场景 |
-| 当前阻塞项 | Rust Core 阶段 5 尚未完成，阻塞本计划阶段 1 实施；本计划阶段 0 自身的 Step 0 证据和独立准入也尚未完成，但不阻塞本阶段继续补齐基线 |
+| 当前阻塞项 | Rust Core 阶段 5 已完成实现但独立收尾复核待完成，仍阻塞本计划阶段 1 实施；本计划阶段 0 自身的 Step 0 证据和独立准入也尚未完成，但不阻塞本阶段继续补齐基线 |
 | 最新独立准入复核 | 尚未进行；阶段 0 尚未达到“待实施”标准 |
 
 ### 实施步骤
@@ -204,7 +202,7 @@
 |---|---|---|---|---|---|
 | 1 | 当前工作树与 Rust 阶段 3 未提交改动 | `git rev-parse HEAD && git status --short && git diff --stat` | 记录 HEAD、既有未提交文件和稳定性计划边界；不把 Rust 改动归入本计划 | 输出缺失、误覆盖既有 diff 或出现未声明的稳定性代码改动 | 阶段 0 证据文档 |
 | 2 | 现有探针与刷新实现 | `rg -n 'runProbes|ProbeService|Task\.sleep|isMainWindowVisible' Sources Tests --glob '*.swift'`；只读核对 v1 阶段 2 证据 | 复现“探针只展示、刷新受窗口可见性限制、无健康恢复调用”的现状 | 找不到事实源、源码与证据矛盾或出现未登记行为变化 | 阶段 0 证据文档 |
-| 3 | 进程退出保活基线 | `swift test --filter AppProcessExecutorTests`（Rust 迁移前后分别记录适用结果） | 现有意外退出、手动停止和延迟重启契约可复现 | 既有 keepAlive 语义失败或测试触碰真实用户隧道 | 阶段 0 证据文档 |
+| 3 | launchd 进程退出保活基线 | `cargo test --manifest-path rust/Cargo.toml`；静态核对 `LaunchdPlistRenderer.swift` 与 Rust owner | 当前 `launchd` keepAlive 和状态查询边界可复现；历史 app keepAlive 不纳入当前范围 | 测试触碰真实用户隧道、出现旧 app 执行器路径或当前 launchd 语义不一致 | 阶段 0 证据文档 |
 | 4 | 隔离假死最小复现 | 新增仅使用 fake executor + 注入式 ProbeService 的测试；命令：`swift test --filter StabilityBaselineTests` | 进程状态保持 running、探针连续失败 3 次；基线版本不触发自动恢复，明确缺口 | 测试无法稳定复现、触发真实 launchctl/SSH，或结果依赖主窗口 | 阶段 0 证据文档与测试文件 |
 | 5 | 状态机候选契约 | 失败序列 `[fail, fail, fail, success]`、十次失败序列、手动 stop/start、删除和退出取消序列 | 明确计数、退避、成功清零、第 10 次熔断和迟到任务失效边界 | 计数漂移、成功不清零、熔断后仍拉起、其他隧道被修改 | 阶段 0 证据文档；阶段 1 契约测试 |
 | 6 | `launchd` 生命周期隔离 | fake `launchd` 注入 bootstrap/bootout 结果；不调用真实 `launchctl` 或 SSH | `launchd` 遵守生命周期边界，其他隧道不受影响 | 出现真实外部副作用、跨隧道操作或迟到任务 | 阶段 0 证据文档；阶段 1–2 契约测试 |
@@ -269,7 +267,7 @@
 | 日期 | 尚未进行 |
 | 阶段 | 阶段 0 |
 | 结论 | 尚未达到待实施标准 |
-| 证据 | Step 0 隔离假死复现和样本矩阵尚待执行；Rust Core 迁移阶段 5 尚未完成，当前等待 Rust owner 与本计划自身证据 |
+| 证据 | Step 0 隔离假死复现和样本矩阵尚待执行；Rust Core 迁移阶段 5 已完成实现但独立收尾复核待完成，当前仍等待该复核与本计划自身证据 |
 | 复核者 | 尚未指定 |
 
 ## 独立复核记录
@@ -282,7 +280,7 @@
 
 | 问题 | 推荐方案 | 是否阻塞当前阶段 | 状态 |
 |---|---|---|---|
-| 稳定性实现何时开始 | Rust Core 迁移阶段 5 完成后，本计划阶段 0 继续补基线和准入证据，通过本计划自身准入后再进入阶段 1 | 是（阶段 1 实施） | 顺序已确认，等待 Rust owner 与本计划证据 |
+| 稳定性实现何时开始 | Rust Core 迁移阶段 5 独立收尾复核完成后，本计划阶段 0 继续补基线和准入证据，通过本计划自身准入后再进入阶段 1 | 是（阶段 1 实施） | 顺序已确认，等待阶段 5 收尾复核与本计划证据 |
 
 ## 风险和回滚
 
