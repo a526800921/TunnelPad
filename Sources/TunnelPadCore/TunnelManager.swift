@@ -165,13 +165,18 @@ public final class TunnelManager: ObservableObject {
     // MARK: - 状态
 
     public func refresh() {
+        var nextStatuses = statuses
         for tunnel in config.tunnels {
             switch tunnel.executor {
             case .launchd:
-                statuses[tunnel.id] = executor.status(label: tunnel.launchdLabel)
+                nextStatuses[tunnel.id] = executor.status(label: tunnel.launchdLabel)
             case .app:
-                statuses[tunnel.id] = appExecutor.status(id: tunnel.id)
+                nextStatuses[tunnel.id] = appExecutor.status(id: tunnel.id)
             }
+        }
+        // 避免状态未变化时重复发布，减少 SwiftUI 无意义的重建。
+        if nextStatuses != statuses {
+            statuses = nextStatuses
         }
         runProbes()
     }
@@ -191,7 +196,9 @@ public final class TunnelManager: ObservableObject {
                 await MainActor.run {
                     // 隧道可能已被移除或探针配置已变化，仅按 id 写回
                     if self.config.tunnels.contains(where: { $0.id == id && $0.probe != nil }) {
-                        self.probeResults[id] = result
+                        if self.probeResults[id] != result {
+                            self.probeResults[id] = result
+                        }
                     }
                 }
             }

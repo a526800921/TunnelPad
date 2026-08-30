@@ -3,14 +3,15 @@ import SwiftUI
 import TunnelPadCore
 
 /// 内嵌日志面板：显示隧道日志文件末 500 行。
-/// 滚动交互与 ModelPad 同款：LazyVStack 按行渲染 + 显式「自动滚动」开关（默认开），
-/// 开=刷新后自动滚到最新一行；关=自由回看历史，刷新不改变滚动位置。
-/// 刷新是静默的：行内容与行数均无变化时不写状态、不重绘。
+/// 使用 AppKit 原生文本视图渲染日志，避免 macOS SwiftUI ScrollView 在动态尺寸
+/// 与自动滚动同时存在时反复触发布局计算。显式「自动滚动」开关默认开启：
+/// 开=刷新后自动滚到最新内容；关=自由回看历史，刷新不改变滚动位置。
+/// 刷新是静默的：内容未变化时不写 @State，避免每个刷新周期都触发重绘。
 struct LogView: View {
     let tunnel: TunnelConfig
     @EnvironmentObject private var manager: TunnelManager
 
-    @State private var lines: [String] = []
+    @State private var text = ""
     @State private var fileMissing = false
     @State private var autoScroll = true
 
@@ -31,38 +32,13 @@ struct LogView: View {
                 }
                 Button {
                     NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
+                    NSPasteboard.general.setString(text, forType: .string)
                 } label: {
                     Label("复制", systemImage: "doc.on.doc")
                 }
             }
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        if fileMissing {
-                            Text("日志文件尚未生成（隧道启动后写入）")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                        }
-                        ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                            Text(line)
-                                .font(.system(size: 11, design: .monospaced))
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-                .frame(maxHeight: .infinity)
-                .onChange(of: lines) { _, newLines in
-                    guard autoScroll, !newLines.isEmpty else { return }
-                    proxy.scrollTo(newLines.count - 1, anchor: .bottom)
-                }
-                .onAppear {
-                    guard !lines.isEmpty else { return }
-                    proxy.scrollTo(lines.count - 1, anchor: .bottom)
-                }
-            }
+            LogTextView(text: logText, autoScroll: autoScroll)
+                .frame(minHeight: 160)
             Text(manager.paths.logURL(for: tunnel).path)
                 .font(.caption2.monospaced())
                 .foregroundStyle(.secondary)
@@ -76,18 +52,63 @@ struct LogView: View {
         }
     }
 
-    /// 静默读取日志尾部：行数与内容均未变化时不写 @State，避免每个刷新周期都触发重绘。
+    private var logText: String {
+        if fileMissing {
+            return "日志文件尚未生成（隧道启动后写入）"
+        }
+        return text.isEmpty ? " " : text
+    }
+
+    /// 静默读取日志尾部：内容未变化时不写 @State，避免每个刷新周期都触发重绘。
     private func load() {
         let url = manager.paths.logURL(for: tunnel)
         if let tail = LogTail.lastLines(of: url, maxLines: 500) {
-            let newLines = tail.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-            guard newLines != lines || fileMissing else { return }
-            lines = newLines
+            guard tail != text || fileMissing else { return }
+            text = tail
             fileMissing = false
         } else {
-            guard !lines.isEmpty || !fileMissing else { return }
-            lines = []
+            guard !text.isEmpty || !fileMissing else { return }
+            text = ""
             fileMissing = true
+        }
+    }
+}
+
+/// 原生 NSTextView 负责滚动与文本排版，避免 SwiftUI ScrollView 的尺寸反馈环。
+private struct LogTextView: NSViewRepresentable {
+    let text: String
+    let autoScroll: Bool
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .bezelBorder
+
+        let textView = NSTextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        textView.textColor = NSColor.labelColor
+        textView.backgroundColor = NSColor.textBackgroundColor
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = true
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.lineFragmentPadding = 4
+        scrollView.documentView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? NSTextView else { return }
+        guard textView.string != text else { return }
+        textView.string = text
+        if autoScroll {
+            DispatchQueue.main.async {
+                textView.scrollToEndOfDocument(nil)
+            }
         }
     }
 }

@@ -3,16 +3,14 @@ import SwiftUI
 import TunnelPadCore
 
 /// 主面板：左侧固定隧道列表，右侧详情（操作 + 内嵌日志），详情标题栏右上角是设置入口。
-/// 不用 NavigationSplitView：它自带的侧栏折叠控件与"固定侧栏"的产品约定相悖，改用 HSplitView 保留拖拽调宽。
+/// 不用 NavigationSplitView：它自带的侧栏折叠控件与"固定侧栏"的产品约定相悖，
+/// 改用 HSplitView 保留拖拽调宽。
 struct MainPanelView: View {
     @EnvironmentObject private var manager: TunnelManager
     @State private var selectedID: String?
     @State private var settingsTunnel: TunnelConfig?
     @State private var showNewTunnel = false
     @State private var legacyAgents: [LegacyAgent] = []
-
-    /// 周期刷新状态与探针，避免启动瞬间的过期红标一直挂着。
-    private let refreshTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
     var body: some View {
         HSplitView {
@@ -28,8 +26,18 @@ struct MainPanelView: View {
                 selectedID = manager.config.tunnels.first?.id
             }
         }
-        .onReceive(refreshTimer) { _ in
-            manager.refresh()
+        // 用与视图生命周期绑定的可取消任务刷新，避免 onReceive 在状态发布后
+        // 重建 Timer 订阅，导致 refresh -> @Published -> 重建订阅的反馈环。
+        .task {
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 5_000_000_000)
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else { return }
+                manager.refresh()
+            }
         }
         .onChange(of: manager.config.tunnels) { _, tunnels in
             if !tunnels.contains(where: { $0.id == selectedID }) {
