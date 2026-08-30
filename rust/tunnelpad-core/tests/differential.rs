@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 
 use tunnelpad_core::app_executor::AppProcessExecutor;
 use tunnelpad_core::config_store::ConfigStore;
+use tunnelpad_core::demo::DemoLifecycle;
 use tunnelpad_core::launchctl::{ExecutorError, LaunchCtlExecutor, ProcessRunning, ProcessResult, TunnelStatus};
 use tunnelpad_core::legacy::{self, LegacyAgent};
 use tunnelpad_core::log_tail::last_lines;
@@ -154,6 +155,10 @@ impl ScriptedRunner {
         }
         ScriptedRunner { script: Mutex::new(script), invocations: Mutex::new(vec![]) }
     }
+
+    fn remaining(&self) -> usize {
+        self.script.lock().unwrap().len()
+    }
 }
 
 impl ProcessRunning for ScriptedRunner {
@@ -199,9 +204,214 @@ fn tunnel_from_fixture(spec: &Value) -> TunnelConfig {
     serde_json::from_value(spec.clone()).expect("fixture tunnel 应可解码")
 }
 
+fn demo_outcome(
+    op: &str,
+    outcome: Result<&'static str, tunnelpad_core::demo::DemoOpError>,
+) -> Value {
+    match outcome {
+        Ok(result) => json!({"op": op, "result": result}),
+        Err(error) => json!({"op": op, "error": serde_json::to_value(error).unwrap()}),
+    }
+}
+
 fn run_component(component: &str, fixture: &Value, home: &Path) -> Vec<Value> {
 
     match component {
+        "demo-lifecycle" => {
+            let tunnels: Vec<TunnelConfig> = fixture["tunnels"]
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or(&[])
+                .iter()
+                .map(tunnel_from_fixture)
+                .collect();
+            let first_tunnel = tunnels.first().expect("demo-lifecycle fixture 缺 tunnels");
+            let runner = ScriptedRunner::from_fixture(
+                fixture["runnerScript"].as_array().map(Vec::as_slice).unwrap_or(&[]),
+            );
+            let executor = LaunchCtlExecutor::new(runner_invocations_alias(&runner), tunnelpad_core::launchctl::current_uid());
+            let paths = TunnelPaths::new(home);
+            let lifecycle = DemoLifecycle::new(paths.clone(), executor);
+            let operations = fixture["ops"].as_array().cloned().unwrap_or_default();
+            let mut events = vec![];
+
+            for operation in &operations {
+                let op = operation["op"].as_str().expect("demo-lifecycle fixture 缺 op");
+                let tunnel = operation
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .and_then(|id| tunnels.iter().find(|item| item.id == id))
+                    .unwrap_or(first_tunnel);
+                match op {
+                    "install" => {
+                        let ids = lifecycle.install(&tunnels).expect("demo install 应成功");
+                        events.push(json!({"op": "install", "ids": ids}));
+                    }
+                    "snapshot" => {
+                        let mut snapshot = lifecycle.fs_snapshot();
+                        normalize_value(&mut snapshot, home);
+                        events.push(snapshot);
+                    }
+                    "plist" => events.push(json!({
+                        "op": "plist",
+                        "content": lifecycle.plist_content(&tunnel.id).map(|content| normalize_text(&content, home)),
+                    })),
+                    "start" => events.push(demo_outcome(op, lifecycle.start(&tunnel.id))),
+                    "stop" => events.push(demo_outcome(op, lifecycle.stop(&tunnel.id))),
+                    "restart" => events.push(demo_outcome(op, lifecycle.restart(&tunnel.id))),
+                    "status" => events.push(json!({
+                        "op": "status",
+                        "status": normalize_status(&lifecycle.status(&tunnel.id).expect("demo status 应成功")),
+                    })),
+                    "remove" => match lifecycle.remove(&tunnel.id) {
+                        Ok((result, log_warning)) => events.push(json!({
+                            "op": "remove", "result": result, "logWarning": log_warning
+                        })),
+                        Err(error) => events.push(json!({
+                            "op": "remove", "error": serde_json::to_value(error).unwrap()
+                        })),
+                    },
+                    "takeover" => {
+                        let legacy = fixture["legacy"].as_object().expect("takeover fixture 缺 legacy");
+                        let label = legacy["agentLabel"].as_str().expect("takeover fixture 缺 agentLabel");
+                        let plist = legacy["agentPlist"].as_str().expect("takeover fixture 缺 agentPlist");
+                        let launch_agents = paths.launch_agents_directory();
+                        fs::create_dir_all(&launch_agents).expect("demo takeover 应创建 LaunchAgents");
+                        let agent_path = launch_agents.join(format!("{label}.plist"));
+                        fs::write(&agent_path, plist).expect("demo takeover 应写入 legacy plist");
+                        let agent = tunnelpad_core::legacy::parse_plist_file(&agent_path)
+                            .expect("demo takeover legacy plist 应可解析");
+                        match lifecycle.takeover(&agent) {
+                            Ok(outcome) => {
+                                let store = lifecycle.store();
+                                let mut config = store.load().config;
+                                config.tunnels.push(outcome.tunnel.clone());
+                                store.save(&config).expect("demo takeover 应保存配置");
+                                events.push(json!({
+                                    "op": "takeover",
+                                    "result": "ok",
+                                    "rolledBack": outcome.rolled_back,
+                                    "tunnelId": outcome.tunnel.id,
+                                    "label": outcome.tunnel.launchd_label(),
+                                }));
+                            }
+                            Err(tunnelpad_core::migration::TakeoverError::InvalidAgent { .. }) => {
+                                events.push(json!({"op": "takeover", "errorCase": "invalidDemoID"}));
+                            }
+                            Err(error) => panic!("demo takeover 失败: {error:?}"),
+                        }
+                    }
+                    "shutdown-all" => events.push(json!({
+                        "op": "shutdown-all", "stopped": lifecycle.shutdown_all()
+                    })),
+                    _ => panic!("demo-lifecycle 不支持操作 {op}"),
+                }
+            }
+
+            assert_eq!(runner.remaining(), 0, "demo-lifecycle runnerScript 未完全消费");
+            let invocations = runner.invocations.lock().unwrap().clone();
+            events.push(json!({
+                "op": "runner",
+                "invocations": invocations.iter().map(|args| json!({
+                    "args": args.iter().map(|arg| normalize_text(arg, home)).collect::<Vec<_>>()
+                })).collect::<Vec<_>>(),
+                "remaining": runner.remaining(),
+            }));
+            lifecycle.app.shutdown_all();
+            events
+        }
+
+        "demo-race" => {
+            let scenarios = fixture["scenarios"].as_array().cloned().unwrap_or_default();
+            let delay = fixture["restartDelay"].as_u64().unwrap_or(1);
+            let mut events = vec![];
+            for scenario in scenarios {
+                let name = scenario["name"].as_str().expect("demo-race scenario 缺 name");
+                let id = scenario["id"].as_str().expect("demo-race scenario 缺 id");
+                let action = scenario["action"].as_str().expect("demo-race scenario 缺 action");
+                let scenario_home = temp_home(&format!("race-{name}"));
+                let paths = TunnelPaths::new(&scenario_home);
+                let runner = ScriptedRunner::from_fixture(&[]);
+                let launchd = LaunchCtlExecutor::new(runner_invocations_alias(&runner), tunnelpad_core::launchctl::current_uid());
+                let tunnel = tunnel_from_fixture(&json!({
+                    "id": id, "name": id, "command": ["/bin/sleep", "2"],
+                    "executor": "app", "keepAlive": true, "throttleInterval": 1
+                }));
+                let app = AppProcessExecutor::with_options(
+                    paths.clone(),
+                    Some(delay),
+                    Arc::new(|| "2026-08-30 00:00:00".to_string()),
+                );
+                let lifecycle = DemoLifecycle { paths: paths.clone(), launchd, app };
+                lifecycle.install(&[tunnel.clone()]).expect("demo race install 应成功");
+                lifecycle.app.start(&tunnel).expect("demo race start 应成功");
+                let initial_pid = match lifecycle.app.status(id) {
+                    TunnelStatus::Running { pid: Some(pid) } => pid,
+                    status => panic!("demo-race 初始进程未运行: {status:?}"),
+                };
+                assert_eq!(unsafe { libc::kill(initial_pid, libc::SIGKILL) }, 0, "无法注入异常退出");
+
+                let plan = {
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+                    loop {
+                        let plans = lifecycle.app.handle_exits();
+                        if let Some(plan) = plans.into_iter().next() {
+                            break plan;
+                        }
+                        assert!(std::time::Instant::now() < deadline, "demo-race 等待重启计划超时");
+                        std::thread::sleep(std::time::Duration::from_millis(20));
+                    }
+                };
+
+                let mut restart_observed = false;
+                match action {
+                    "allow-restart" => {
+                        std::thread::sleep(std::time::Duration::from_secs(plan.delay_secs));
+                        assert!(lifecycle.app.restart_if_current(&plan).expect("keepAlive 重启不应报错"));
+                        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+                        while std::time::Instant::now() < deadline {
+                            if let TunnelStatus::Running { pid: Some(pid) } = lifecycle.app.status(id) {
+                                if pid != initial_pid {
+                                    restart_observed = true;
+                                    break;
+                                }
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(20));
+                        }
+                        assert!(restart_observed, "demo-race 未观察到 keepAlive 延迟重启");
+                        lifecycle.app.stop(&tunnel);
+                    }
+                    "stop" => lifecycle.app.stop(&tunnel),
+                    "remove" => {
+                        lifecycle.remove(id).expect("demo race remove 应成功");
+                    }
+                    "shutdown-all" => {
+                        lifecycle.shutdown_all();
+                    }
+                    _ => panic!("demo-race 不支持动作 {action}"),
+                }
+                let restart_blocked = if restart_observed {
+                    false
+                } else {
+                    !lifecycle.app.restart_if_current(&plan).expect("stale restart 校验不应报错")
+                };
+                let status = normalize_status(&lifecycle.app.status(id));
+                let mut snapshot = lifecycle.fs_snapshot();
+                normalize_value(&mut snapshot, home);
+                events.push(json!({
+                    "scenario": name,
+                    "restartBlocked": restart_blocked,
+                    "restartScheduled": true,
+                    "restartObserved": restart_observed,
+                    "status": status,
+                    "snapshot": snapshot,
+                }));
+                lifecycle.app.shutdown_all();
+                fs::remove_dir_all(&scenario_home).ok();
+            }
+            events
+        }
+
         "config-store" => {
             let mut events = vec![];
             for test_case in fixture["cases"].as_array().unwrap() {

@@ -17,13 +17,26 @@
 
 ## 计划索引
 
+### 未完成
+
+| 计划 | 状态 | 当前阶段 | 最后更新 | 依赖 | 证据 |
+|---|---|---|---|---|---|
+| [ECS 动态 SSH 公网 IP 同步](plans/ecs-dynamic-ssh-ip.md) | 实施中 | 阶段 1 | 2026-08-29 | - | [阶段 0 本机预检](data-quality/ecs-dynamic-ssh-ip-stage0-local-preflight-20260829.md)；[CLI 与凭证准备](data-quality/ecs-dynamic-ssh-ip-stage0-cli-credential-prep-20260829.md)；[云端只读验证](data-quality/ecs-dynamic-ssh-ip-stage0-cloud-readonly-20260829.md)；[控制台拓扑基线](data-quality/ecs-dynamic-ssh-ip-stage0-console-topology-20260829.md)；[项目外受控实跑](data-quality/ecs-dynamic-ssh-ip-stage0-controlled-run-20260829.md)；[阶段 1 实现与验证](data-quality/ecs-dynamic-ssh-ip-stage1-implementation-20260829.md) |
+| [TunnelPad Rust Core 迁移](plans/tunnelpad-rust-migration.md) | 实施中 | 阶段 3 | 2026-08-30 | tunnelpad-v1, tunnelpad-ui-refinements, tunnelpad-code-quality-refactor | [阶段 0 基线与复验证据](data-quality/tunnelpad-rust-migration-stage0-20260830.md)；[阶段 1 证据](data-quality/tunnelpad-rust-migration-stage1-20260830.md)；[阶段 2 证据](data-quality/tunnelpad-rust-migration-stage2-20260830.md)；[阶段 3 当前证据](data-quality/tunnelpad-rust-migration-stage3-20260830.md)；[专项计划](plans/tunnelpad-rust-migration.md) |
+| [TunnelPad 隧道稳定性与健康恢复](plans/tunnelpad-stability.md) | 设计中 | 阶段 0 | 2026-08-30 | tunnelpad-v1, tunnelpad-code-quality-refactor, tunnelpad-rust-migration | [专项计划](plans/tunnelpad-stability.md) |
+
+### 已完成
+
 | 计划 | 状态 | 当前阶段 | 最后更新 | 依赖 | 证据 |
 |---|---|---|---|---|---|
 | [TunnelPad v1 隧道管理应用](plans/tunnelpad-v1.md) | 已完成 | - | 2026-08-29 | - | [阶段 2 功能与验收记录](data-quality/tunnelpad-v1-stage2-features-20260829.md) |
-| [ECS 动态 SSH 公网 IP 同步](plans/ecs-dynamic-ssh-ip.md) | 实施中 | 阶段 1 | 2026-08-29 | - | [阶段 0 本机预检](data-quality/ecs-dynamic-ssh-ip-stage0-local-preflight-20260829.md)；[CLI 与凭证准备](data-quality/ecs-dynamic-ssh-ip-stage0-cli-credential-prep-20260829.md)；[云端只读验证](data-quality/ecs-dynamic-ssh-ip-stage0-cloud-readonly-20260829.md)；[控制台拓扑基线](data-quality/ecs-dynamic-ssh-ip-stage0-console-topology-20260829.md)；[项目外受控实跑](data-quality/ecs-dynamic-ssh-ip-stage0-controlled-run-20260829.md)；[阶段 1 实现与验证](data-quality/ecs-dynamic-ssh-ip-stage1-implementation-20260829.md) |
 | [TunnelPad 界面优化](plans/tunnelpad-ui-refinements.md) | 已完成 | - | 2026-08-30 | tunnelpad-v1 | [阶段 1 证据](data-quality/tunnelpad-ui-refinements-stage1-20260829.md)；[阶段 2 证据](data-quality/tunnelpad-ui-refinements-stage2-20260829.md)；[阶段 3 与阶段 1 收尾证据](data-quality/tunnelpad-ui-refinements-stage3-20260830.md)；[阶段 4 证据](data-quality/tunnelpad-ui-refinements-stage4-20260830.md) |
 | [TunnelPad 代码质量重构](plans/tunnelpad-code-quality-refactor.md) | 已完成 | - | 2026-08-30 | tunnelpad-v1, tunnelpad-ui-refinements | [阶段 0 基线证据](data-quality/tunnelpad-code-quality-refactor-stage0-20260830.md)；[阶段 1 实施证据](data-quality/tunnelpad-code-quality-refactor-stage1-20260830.md)；[阶段 2–4 实施证据](data-quality/tunnelpad-code-quality-refactor-stage2-4-20260830.md)；[专项计划](plans/tunnelpad-code-quality-refactor.md) |
-| [TunnelPad Rust Core 迁移](plans/tunnelpad-rust-migration.md) | 实施中 | 阶段 3 | 2026-08-30 | tunnelpad-v1, tunnelpad-ui-refinements, tunnelpad-code-quality-refactor | [阶段 0 基线证据](data-quality/tunnelpad-rust-migration-stage0-20260830.md)；[阶段 1 证据](data-quality/tunnelpad-rust-migration-stage1-20260830.md)；[阶段 2 证据](data-quality/tunnelpad-rust-migration-stage2-20260830.md)；[专项计划](plans/tunnelpad-rust-migration.md) |
+
+### 已废弃
+
+| 计划 | 状态 | 当前阶段 | 最后更新 | 依赖 | 证据 |
+|---|---|---|---|---|---|
 
 允许状态：`候选`、`设计中`、`待实施`、`实施中`、`已完成`、`已替代`、`已合并`、`已废弃`。
 
@@ -33,7 +46,8 @@
 2. `ecs-dynamic-ssh-ip` 后续阶段按其自身独立准入复核推进。
 3. `tunnelpad-ui-refinements` 各阶段按其自身独立准入复核推进，可与 `ecs-dynamic-ssh-ip` 并行。
 4. `tunnelpad-code-quality-refactor` 先完成阶段 0 基线与兼容边界确认；实现阶段默认排在 `tunnelpad-ui-refinements` 收尾及阶段 4 独立复核之后，避免重构与 UI 行为同时修改。
-5. `tunnelpad-rust-migration` 阶段 0–2 均已通过独立复核；阶段 3（隔离 demo 生命周期 + 全生命周期差分）实施中，差分一致并通过独立复核后才进入阶段 4；Rust UTC 时间戳与 Swift 本地时区的对齐（或用户显式接受）是阶段 4 前置。
+5. `tunnelpad-rust-migration` 阶段 0–3 已通过实现/功能复核与治理同步检查；阶段 4 保持设计中，需独立完成自身 Step 0、Rust UTC 与 Swift 本地时区对齐（或用户显式接受）后再准入实施。
+6. `tunnelpad-stability` 先完成阶段 0 基线与准入设计；实现阶段依赖 `tunnelpad-rust-migration` 阶段 3–4 完成并通过独立复核，避免并行修改执行器、生命周期和探针模块。
 
 ## 依赖关系
 
@@ -44,6 +58,7 @@
 | tunnelpad-ui-refinements | tunnelpad-v1 | 前置 v1 已完成；本计划不修改 config schema 与隧道启停语义，与 ecs-dynamic-ssh-ip 无依赖。 |
 | tunnelpad-code-quality-refactor | tunnelpad-v1, tunnelpad-ui-refinements | v1 提供现有运行契约；界面优化阶段 1–4 已完成，重构实现不与已验收 UI 行为并行修改；阶段 0–4 已完成。 |
 | tunnelpad-rust-migration | tunnelpad-v1, tunnelpad-ui-refinements, tunnelpad-code-quality-refactor | Rust 只替换内部 Core；必须先继承已验收的 Swift 行为契约；已确认 C ABI 主路径为默认 bridge 方案，待独立准入复核通过后进入阶段 1，保持迁移变更隔离。 |
+| tunnelpad-stability | tunnelpad-v1, tunnelpad-code-quality-refactor, tunnelpad-rust-migration | 稳定性行为增强依赖既有隧道生命周期契约和 Rust Core 迁移收口；阶段 0 可先做基线与准入设计，阶段 1 实施前必须等待 Rust 迁移阶段 3–4 的独立复核通过。 |
 
 ## 替代、合并和废弃
 
@@ -57,7 +72,8 @@
 |---|---|---|---|---|
 | - | - | - | 否 | 已延后 |
 | 阶段 1 实现与独立复核 | 阶段 1 已完成实现、fixture 验证和真实 ECS 只读回归；阶段 2 自动集成尚未启动，需另行准入。运行时任一双端点不一致、规则歧义、API 写入未确认或锁冲突都必须停止或保留新旧规则；Workbench 保留为恢复通道 | ecs-dynamic-ssh-ip 阶段 1 | 否 | 已通过 |
-| Rust Core demo 生命周期与全生命周期差分 | 阶段 0–2 已完成并通过独立复核（kill_by_pidfile 分叉已作为阶段 3 首项修复）；阶段 3 编排隔离 demo 全生命周期并差分验证，任一不一致即暂停该场景 | tunnelpad-rust-migration 阶段 3 | 是（阶段 4 实施） | 实施中 |
+| Rust Core demo 生命周期与全生命周期差分 | 阶段 0–3 已完成并通过实现/功能复核与治理同步检查；阶段 4 另行执行自身准入，任一差分不一致即暂停该场景 | tunnelpad-rust-migration 阶段 3 | 是（阶段 4 实施） | 已通过 |
+| TunnelPad 稳定性实现前置 | 先完成 tunnelpad-rust-migration 阶段 3–4 并通过独立复核；前置未通过前只推进本计划阶段 0，不修改稳定性运行时 | tunnelpad-stability 阶段 1–3 | 是（后续实现） | 已确认顺序 |
 | - | - | - | 否 | 已完成 |
 
 ## 完成证据
@@ -77,3 +93,4 @@
 | tunnelpad-rust-migration | 阶段 0 | [阶段 0 基线与复验证据](data-quality/tunnelpad-rust-migration-stage0-20260830.md)（基线、64e126fa 复验与独立准入复核通过，2026-08-30） |
 | tunnelpad-rust-migration | 阶段 1 | [阶段 1 证据](data-quality/tunnelpad-rust-migration-stage1-20260830.md)（C ABI 原型 5 门槛通过与独立完成复核通过，2026-08-30） |
 | tunnelpad-rust-migration | 阶段 2 | [阶段 2 证据](data-quality/tunnelpad-rust-migration-stage2-20260830.md)（9 类组件 parity、差分全绿、突变反证与独立完成复核通过，2026-08-30） |
+| tunnelpad-rust-migration | 阶段 3 | [阶段 3 证据](data-quality/tunnelpad-rust-migration-stage3-20260830.md)（demo 生命周期、takeover、generation 竞态与差分门禁通过；治理同步后 strict-readiness 通过，2026-08-30） |

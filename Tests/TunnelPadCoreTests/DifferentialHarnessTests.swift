@@ -32,6 +32,12 @@ final class ScriptedRunner: ProcessRunning, @unchecked Sendable {
 
     init(script: [Call]) { self.script = script }
 
+    var remainingCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return script.count - index
+    }
+
     static func result(_ exitCode: Int32, _ stdout: String, _ stderr: String) -> ScriptedResult {
         ScriptedResult(exitCode: exitCode, stdout: stdout, stderr: stderr)
     }
@@ -120,10 +126,320 @@ private func normalizeStatusDict(_ dict: [String: Any]) -> [String: Any] {
     return out
 }
 
+private func decodeTunnel(_ spec: [String: Any]) throws -> TunnelConfig {
+    let data = try JSONSerialization.data(withJSONObject: spec)
+    return try JSONDecoder().decode(TunnelConfig.self, from: data)
+}
+
+private func sortedFiles(in directory: URL) -> [String] {
+    (try? FileManager.default.contentsOfDirectory(atPath: directory.path))?.sorted() ?? []
+}
+
+private func normalizeArtifactNames(_ names: [String]) -> [String] {
+    names.map {
+        $0.replacingOccurrences(of: "\\d{8}-\\d{6}", with: "<stamp>", options: .regularExpression)
+    }
+}
+
+private func demoSnapshot(paths: TunnelPaths) -> [String: Any] {
+    let config = ConfigStore(paths: paths).load().config
+    return [
+        "op": "fs-snapshot",
+        "configIds": config.tunnels.map(\.id),
+        "launchdFiles": sortedFiles(in: paths.launchdDirectory),
+        "runFiles": sortedFiles(in: paths.runDirectory),
+        "logFiles": sortedFiles(in: paths.logsDirectory),
+        "backupFiles": normalizeArtifactNames(sortedFiles(in: paths.migrationBackupDirectory)),
+    ]
+}
+
+private func demoOutcome(_ op: String, _ outcome: TunnelOperationOutcome) -> [String: Any] {
+    if let error = outcome.error {
+        return ["op": op, "error": error]
+    }
+    return ["op": op, "result": outcome.refresh ? "ok" : "noop"]
+}
+
+private func removeDemoTunnel(
+    _ id: String,
+    paths: TunnelPaths,
+    launchd: LaunchCtlExecutor,
+    app: AppProcessExecutor
+) throws -> Bool {
+    let store = ConfigStore(paths: paths)
+    guard let tunnel = store.load().config.tunnels.first(where: { $0.id == id }) else {
+        return false
+    }
+
+    switch tunnel.executor {
+    case .launchd:
+        if launchd.status(label: tunnel.launchdLabel) != .notLoaded {
+            _ = try launchd.bootout(label: tunnel.launchdLabel)
+            if launchd.status(label: tunnel.launchdLabel) != .notLoaded {
+                throw HarnessSpawnError(message: "实例未成功停止")
+            }
+        }
+        let plistURL = paths.launchdPlistURL(for: tunnel)
+        if FileManager.default.fileExists(atPath: plistURL.path) {
+            try FileManager.default.removeItem(at: plistURL)
+        }
+    case .app:
+        app.stop(tunnel)
+    }
+
+    let logURL = paths.logURL(for: tunnel)
+    var logWarning = false
+    if FileManager.default.fileExists(atPath: logURL.path) {
+        try? FileManager.default.removeItem(at: logURL)
+        logWarning = FileManager.default.fileExists(atPath: logURL.path)
+    }
+
+    var config = store.load().config
+    guard let index = config.tunnels.firstIndex(where: { $0.id == id }) else {
+        return false
+    }
+    let removed = config.tunnels.remove(at: index)
+    do {
+        try store.save(config)
+    } catch {
+        config.tunnels.insert(removed, at: min(index, config.tunnels.count))
+        throw error
+    }
+    return logWarning
+}
+
+private func runDemoLifecycle(_ fixture: [String: Any], home: URL) throws -> [[String: Any]] {
+    let specs = fixture["tunnels"] as? [[String: Any]] ?? []
+    let tunnels = try specs.map(decodeTunnel)
+    guard let firstTunnel = tunnels.first else {
+        throw HarnessSpawnError(message: "demo-lifecycle fixture 缺 tunnels")
+    }
+
+    let scriptEntries = fixture["runnerScript"] as? [[String: Any]] ?? []
+    var script: [ScriptedRunner.Call] = []
+    for entry in scriptEntries {
+        let repeatCount = (entry["repeat"] as? Int) ?? 1
+        for _ in 0..<repeatCount {
+            script.append(scriptCall(entry))
+        }
+    }
+
+    let paths = TunnelPaths(homeDirectory: home)
+    let runner = ScriptedRunner(script: script)
+    let launchd = LaunchCtlExecutor(runner: runner, uid: uid_t(getuid()))
+    let app = AppProcessExecutor(paths: paths)
+    let coordinator = TunnelLifecycleCoordinator(paths: paths, launchd: launchd, app: app)
+    let store = ConfigStore(paths: paths)
+    defer { app.shutdownAll() }
+
+    var events: [[String: Any]] = []
+    let operations = fixture["ops"] as? [[String: Any]] ?? []
+    for operation in operations {
+        guard let op = operation["op"] as? String else {
+            throw HarnessSpawnError(message: "demo-lifecycle fixture 缺 op")
+        }
+        let tunnel: TunnelConfig
+        if let id = operation["id"] as? String {
+            guard let selected = tunnels.first(where: { $0.id == id }) else {
+                throw HarnessSpawnError(message: "demo-lifecycle fixture 缺隧道 \(id)")
+            }
+            tunnel = selected
+        } else {
+            tunnel = firstTunnel
+        }
+
+        switch op {
+        case "install":
+            try store.save(AppConfig(version: 1, tunnels: tunnels))
+            for item in tunnels where item.executor == .launchd {
+                _ = try LaunchdPlistRenderer.writePlist(for: item, paths: paths)
+            }
+            events.append(["op": "install", "ids": tunnels.map(\.id)])
+        case "snapshot":
+            events.append(demoSnapshot(paths: paths))
+        case "plist":
+            let url = paths.launchdPlistURL(for: tunnel)
+            let content = (try? Data(contentsOf: url)).flatMap { String(data: $0, encoding: .utf8) }
+            events.append([
+                "op": "plist",
+                "content": content.map { normalize($0, home: home) } ?? NSNull(),
+            ])
+        case "start":
+            events.append(demoOutcome(op, coordinator.startSync(tunnel)))
+        case "stop":
+            events.append(demoOutcome(op, coordinator.stopSync(tunnel)))
+        case "restart":
+            events.append(demoOutcome(op, coordinator.restartSync(tunnel)))
+        case "status":
+            let status = coordinator.statusesSync(for: [tunnel])[tunnel.id] ?? .notLoaded
+            events.append(["op": "status", "status": normalizeStatusDict(TunnelStatusEvent.dict(status))])
+        case "remove":
+            let logWarning = try removeDemoTunnel(tunnel.id, paths: paths, launchd: launchd, app: app)
+            events.append(["op": "remove", "result": "ok", "logWarning": logWarning])
+        case "takeover":
+            guard let legacy = fixture["legacy"] as? [String: Any],
+                  let label = legacy["agentLabel"] as? String,
+                  let plistXML = legacy["agentPlist"] as? String else {
+                throw HarnessSpawnError(message: "demo takeover fixture 缺 legacy")
+            }
+            try FileManager.default.createDirectory(at: paths.launchAgentsDirectory, withIntermediateDirectories: true)
+            let agentURL = paths.launchAgentsDirectory.appendingPathComponent("\(label).plist")
+            try Data(plistXML.utf8).write(to: agentURL)
+            let agent = try LegacyImporter.parsePlist(at: agentURL)
+            guard let candidate = LegacyImporter.tunnelConfig(from: agent), candidate.id.hasPrefix("demo-") else {
+                events.append(["op": "takeover", "errorCase": "invalidDemoID"])
+                continue
+            }
+            let service = MigrationService(paths: paths, executor: launchd, pollDelay: {})
+            let outcome = try service.takeover(agent: agent)
+            guard outcome.tunnel.id == candidate.id else {
+                throw HarnessSpawnError(message: "demo takeover 越过 ID 边界")
+            }
+            var config = store.load().config
+            config.tunnels.append(outcome.tunnel)
+            try store.save(config)
+            events.append([
+                "op": "takeover",
+                "result": "ok",
+                "rolledBack": outcome.rolledBack,
+                "tunnelId": outcome.tunnel.id,
+                "label": outcome.tunnel.launchdLabel,
+            ])
+        case "shutdown-all":
+            let stopped = Shutdown.stopAllManagedTunnels(paths: paths)
+            events.append(["op": "shutdown-all", "stopped": stopped])
+        default:
+            throw HarnessSpawnError(message: "demo-lifecycle 不支持操作 \(op)")
+        }
+    }
+
+    guard runner.remainingCount == 0 else {
+        throw HarnessSpawnError(message: "demo-lifecycle runnerScript 未完全消费：剩余 \(runner.remainingCount) 项")
+    }
+    events.append([
+        "op": "runner",
+        "invocations": runner.invocations.map { invocation in
+            let args = (invocation["args"] as? [String] ?? []).map { normalize($0, home: home) }
+            return ["args": args] as [String: Any]
+        },
+        "remaining": runner.remainingCount,
+    ])
+    return events
+}
+
+private func waitForNotLoaded(_ app: AppProcessExecutor, id: String, timeout: TimeInterval = 2) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if app.status(id: id) == .notLoaded { return true }
+        Thread.sleep(forTimeInterval: 0.02)
+    }
+    return app.status(id: id) == .notLoaded
+}
+
+private func runDemoRace(_ fixture: [String: Any]) throws -> [[String: Any]] {
+    let scenarios = fixture["scenarios"] as? [[String: Any]] ?? []
+    let delay = (fixture["restartDelay"] as? NSNumber)?.doubleValue ?? 1
+    var events: [[String: Any]] = []
+
+    for scenario in scenarios {
+        guard let name = scenario["name"] as? String,
+              let id = scenario["id"] as? String,
+              let action = scenario["action"] as? String else {
+            throw HarnessSpawnError(message: "demo-race fixture 缺 scenario 字段")
+        }
+        let scenarioHome = makeTempHome("race-\(name)")
+        defer { try? FileManager.default.removeItem(at: scenarioHome) }
+        let paths = TunnelPaths(homeDirectory: scenarioHome)
+        let tunnel = TunnelConfig(
+            id: id,
+            name: id,
+            command: ["/bin/sleep", "2"],
+            executor: .app,
+            keepAlive: true,
+            throttleInterval: 1
+        )
+        let app = AppProcessExecutor(paths: paths, restartDelayOverride: delay)
+        let launchd = LaunchCtlExecutor(runner: ScriptedRunner(script: []), uid: uid_t(getuid()))
+        let store = ConfigStore(paths: paths)
+        try store.save(AppConfig(version: 1, tunnels: [tunnel]))
+        try app.start(tunnel)
+        guard case .running(let initialPID?) = app.status(id: id) else {
+            throw HarnessSpawnError(message: "demo-race 初始进程未运行")
+        }
+        guard kill(initialPID, SIGKILL) == 0 else {
+            throw HarnessSpawnError(message: "demo-race 无法注入异常退出")
+        }
+        guard waitForNotLoaded(app, id: id) else {
+            throw HarnessSpawnError(message: "demo-race 等待进程退出超时")
+        }
+        let logURL = paths.logURL(for: tunnel)
+        let logDeadline = Date().addingTimeInterval(2)
+        var restartScheduled = false
+        while Date() < logDeadline {
+            let log = (try? String(contentsOf: logURL, encoding: .utf8)) ?? ""
+            if log.contains("process exited unexpectedly") {
+                restartScheduled = true
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        guard restartScheduled else {
+            throw HarnessSpawnError(message: "demo-race 未观察到 termination handler 的迟到重启计划")
+        }
+
+        var restartObserved = false
+        if action == "allow-restart" {
+            let restartDeadline = Date().addingTimeInterval(delay + 2)
+            while Date() < restartDeadline {
+                if case .running(let pid?) = app.status(id: id), pid != initialPID {
+                    restartObserved = true
+                    break
+                }
+                Thread.sleep(forTimeInterval: 0.02)
+            }
+            guard restartObserved else {
+                throw HarnessSpawnError(message: "demo-race 未观察到 keepAlive 延迟重启")
+            }
+            app.stop(tunnel)
+        } else if action == "remove" {
+            _ = try removeDemoTunnel(id, paths: paths, launchd: launchd, app: app)
+        } else if action == "stop" {
+            app.stop(tunnel)
+        } else if action == "shutdown-all" {
+            app.shutdownAll()
+        } else {
+            throw HarnessSpawnError(message: "demo-race 不支持动作 \(action)")
+        }
+        if !restartObserved {
+            Thread.sleep(forTimeInterval: delay + 0.3)
+        }
+
+        let status = normalizeStatusDict(TunnelStatusEvent.dict(app.status(id: id)))
+        var snapshot = demoSnapshot(paths: paths)
+        snapshot["op"] = "fs-snapshot"
+        events.append([
+            "scenario": name,
+            "restartBlocked": !restartObserved,
+            "restartScheduled": restartScheduled,
+            "restartObserved": restartObserved,
+            "status": status,
+            "snapshot": snapshot,
+        ])
+        app.shutdownAll()
+    }
+    return events
+}
+
 private func runComponent(_ component: String, fixture: [String: Any], home: URL) async throws -> [[String: Any]] {
     let fileManager = FileManager.default
 
     switch component {
+    case "demo-lifecycle":
+        return try runDemoLifecycle(fixture, home: home)
+
+    case "demo-race":
+        return try runDemoRace(fixture)
+
     case "config-store":
         let cases = fixture["cases"] as? [[String: Any]] ?? []
         var events: [[String: Any]] = []

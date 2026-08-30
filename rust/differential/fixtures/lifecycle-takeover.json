@@ -1,0 +1,19 @@
+{
+  "component": "demo-lifecycle",
+  "tunnels": [
+    {"id": "demo-takeover", "name": "demo-takeover", "command": ["/usr/bin/ssh", "-N"], "executor": "launchd", "keepAlive": true, "throttleInterval": 10}
+  ],
+  "legacy": {
+    "agentLabel": "com.jafish.motorcycle-manual.demo-takeover",
+    "agentPlist": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n\t<key>KeepAlive</key>\n\t<true/>\n\t<key>Label</key>\n\t<string>com.jafish.motorcycle-manual.demo-takeover</string>\n\t<key>ProgramArguments</key>\n\t<array>\n\t\t<string>/usr/bin/ssh</string>\n\t\t<string>-N</string>\n\t</array>\n\t<key>RunAtLoad</key>\n\t<true/>\n\t<key>ThrottleInterval</key>\n\t<integer>10</integer>\n</dict>\n</plist>\n"
+  },
+  "runnerScript": [
+    {"op": "bootout", "result": {"exitCode": 0, "stdout": "", "stderr": ""}},
+    {"op": "bootstrap", "result": {"exitCode": 0, "stdout": "", "stderr": ""}},
+    {"op": "print", "result": {"exitCode": 0, "stdout": "\tstate = running\n\tpid = 99", "stderr": ""}}
+  ],
+  "ops": [
+    {"op": "takeover", "id": "demo-takeover"},
+    {"op": "snapshot", "id": "demo-takeover"}
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "component": "demo-lifecycle",
+  "executor": "launchd",
+  "runnerScript": [
+    {"op": "print", "result": {"exitCode": 1, "stdout": "", "stderr": "not loaded"}},
+    {"op": "bootstrap", "result": {"exitCode": 0, "stdout": "", "stderr": ""}},
+    {"op": "print", "result": {"exitCode": 0, "stdout": "\tstate = running\n\tpid = 7", "stderr": ""}},
+    {"op": "print", "result": {"exitCode": 0, "stdout": "\tstate = running\n\tpid = 7", "stderr": ""}},
+    {"op": "bootout", "result": {"exitCode": 0, "stdout": "", "stderr": ""}},
+    {"op": "print", "result": {"exitCode": 1, "stdout": "", "stderr": "not loaded"}}
+  ],
+  "tunnels": [
+    {"id": "demo-b", "name": "demo-b", "command": ["/usr/bin/ssh", "-N"], "executor": "launchd", "keepAlive": true, "throttleInterval": 10}
+  ],
+  "ops": [
+    {"op": "install"},
+    {"op": "start"},
+    {"op": "status"},
+    {"op": "remove"},
+    {"op": "snapshot"}
+  ]
+}

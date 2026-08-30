@@ -1,0 +1,13 @@
+{
+  "component": "demo-lifecycle",
+  "executor": "app",
+  "tunnels": [
+    {"id": "demo-shutdown", "name": "demo-shutdown", "command": ["/bin/sleep", "2"], "executor": "app", "keepAlive": false, "throttleInterval": 10}
+  ],
+  "ops": [
+    {"op": "install"},
+    {"op": "start"},
+    {"op": "shutdown-all"},
+    {"op": "snapshot"}
+  ]
+}

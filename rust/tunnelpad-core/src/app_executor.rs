@@ -41,6 +41,17 @@ struct Inner {
 /// 时间戳函数（注入便于测试；格式 yyyy-MM-dd HH:mm:ss）。
 pub type LogTimestampFn = Arc<dyn Fn() -> String + Send + Sync>;
 
+/// keepAlive 意外退出后的重启计划。
+///
+/// `generation` 必须随计划返回；owner 在延迟窗口结束后调用
+/// `restart_if_current`，避免 stop/remove/shutdown-all 之后执行迟到计划。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RestartPlan {
+    pub tunnel: TunnelConfig,
+    pub delay_secs: u64,
+    pub generation: u64,
+}
+
 pub struct AppProcessExecutor {
     paths: TunnelPaths,
     restart_delay_override: Option<u64>,
@@ -170,10 +181,10 @@ impl AppProcessExecutor {
         ids
     }
 
-    /// 轮询意外退出：摘除已退出的上下文；keepAlive 时返回待重启计划
-    /// （(tunnel, delay_secs)），由调用方在并发所有者侧执行。
+    /// 轮询意外退出：摘除已退出的上下文；keepAlive 时返回带 generation
+    /// 的待重启计划，由调用方在并发所有者侧执行。
     /// 与 Swift terminationHandler 的语义差异已记录在计划契约冻结章节。
-    pub fn handle_exits(&self) -> Vec<(TunnelConfig, u64)> {
+    pub fn handle_exits(&self) -> Vec<RestartPlan> {
         let mut exited: Vec<AppContext> = vec![];
         {
             let mut inner = self.inner.lock().unwrap();
@@ -201,9 +212,24 @@ impl AppProcessExecutor {
                 continue;
             }
             let delay = self.restart_delay_override.unwrap_or(ctx.tunnel.throttle_interval.max(0) as u64);
-            restarts.push((ctx.tunnel, delay));
+            restarts.push(RestartPlan { tunnel: ctx.tunnel, delay_secs: delay, generation: ctx.generation });
         }
         restarts
+    }
+
+    /// 供并发 owner 在延迟窗口结束后执行重启；generation 失配时静默丢弃计划。
+    /// owner 仍应保证同一隧道的生命周期操作串行化，与 Swift 契约一致。
+    pub fn restart_if_current(&self, plan: &RestartPlan) -> Result<bool, ExecutorError> {
+        if !self.is_current_generation(&plan.tunnel.id, plan.generation) {
+            return Ok(false);
+        }
+        self.start(&plan.tunnel)?;
+        Ok(true)
+    }
+
+    /// 判断某个生命周期计划是否仍属于当前代。
+    pub fn is_current_generation(&self, id: &str, generation: u64) -> bool {
+        self.inner.lock().unwrap().generations.get(id).copied() == Some(generation)
     }
 
     fn open_log(&self, tunnel: &TunnelConfig) -> std::io::Result<File> {

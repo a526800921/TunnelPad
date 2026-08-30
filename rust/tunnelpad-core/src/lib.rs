@@ -12,6 +12,7 @@
 pub mod app_executor;
 pub mod apple_json;
 pub mod config_store;
+pub mod demo;
 pub mod ffi;
 pub mod launchctl;
 pub mod launchd_executing;

@@ -1,0 +1,26 @@
+{
+  "component": "demo-lifecycle",
+  "executor": "launchd",
+  "runnerScript": [
+    {"op": "print", "result": {"exitCode": 1, "stdout": "", "stderr": "not loaded"}},
+    {"op": "bootstrap", "result": {"exitCode": 0, "stdout": "", "stderr": ""}},
+    {"op": "bootout", "result": {"exitCode": 0, "stdout": "", "stderr": ""}},
+    {"op": "bootout", "result": {"exitCode": 3, "stdout": "", "stderr": "Could not find service \"gui/x\" in domain"}},
+    {"op": "bootstrap", "result": {"exitCode": 0, "stdout": "", "stderr": ""}},
+    {"op": "print", "result": {"exitCode": 1, "stdout": "", "stderr": "not loaded"}}
+  ],
+  "tunnels": [
+    {"id": "demo-a", "name": "demo-a", "command": ["/usr/bin/ssh", "-N"], "executor": "launchd", "keepAlive": true, "throttleInterval": 10}
+  ],
+  "ops": [
+    {"op": "install"},
+    {"op": "snapshot"},
+    {"op": "plist"},
+    {"op": "start"},
+    {"op": "snapshot"},
+    {"op": "stop"},
+    {"op": "restart"},
+    {"op": "remove"},
+    {"op": "snapshot"}
+  ]
+}
