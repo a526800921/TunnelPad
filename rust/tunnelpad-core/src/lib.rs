@@ -1,9 +1,10 @@
 //! tunnelpad-core：TunnelPadCore 的 Rust 对等模型（阶段 1 契约原型）。
 //!
 //! 类型形状镜像 Swift `Sources/TunnelPadCore/` 的 `AppConfig`/`TunnelConfig`/
-//! `TunnelStatus`/`ProbeResult`；字段顺序与 Swift `CodingKeys` 声明顺序一致，
-//! 使 serde 的规范序列化输出与 Swift `JSONEncoder` 语义等价（键序、缺省值、
-//! 可选字段的省略行为）。
+//! `TunnelStatus`/`ProbeResult`；字段顺序与 Swift `CodingKeys` 声明顺序一致
+//! （规范形状）。跨语言等价性按解码后语义判定——Swift `JSONEncoder` 无
+//! sortedKeys 时键序不确定且转义 `/`，不作字节级参照（2026-08-30 独立
+//! 复核实测）；缺省值与可选字段的省略行为与 Swift 解码/编码语义对齐。
 //!
 //! 契约版本：[`ABI_VERSION`] = 1。演进规则（阶段 1 冻结）：
 //! 只允许追加新函数与追加错误码；任何破坏性变化必须递增 ABI 版本。
@@ -107,7 +108,7 @@ pub struct AppConfig {
     pub tunnels: Vec<TunnelConfig>,
 }
 
-/// 解析 config.json 并返回规范序列化（键序与 Swift `JSONEncoder` 一致）。
+/// 解析 config.json 并返回规范序列化（键序 = Swift `CodingKeys` 声明顺序的规范形状）。
 ///
 /// 拒绝语义与 Swift 对齐：JSON 非法或必填字段缺失 → `INVALID_JSON`；
 /// version != 1 → `SCHEMA_VERSION`；id 非法 → `INVALID_ID`；
@@ -194,9 +195,8 @@ pub fn probe_result_to_json(kind: u32, status: i32, reason: Option<&str>) -> Res
 mod tests {
     use super::*;
 
-    /// 与 Swift `JSONEncoder` 对完整 TunnelConfig 的输出语义等价
-    /// （CodingKeys 顺序：id, name, command, executor, keepAlive,
-    /// throttleInterval, probe；probe 为 nil 时省略）。
+    /// 规范形状 fixture：按 Swift `CodingKeys` 声明顺序书写。
+    /// 跨语言等价性按解码后语义判定（Swift JSONEncoder 无 sortKeys 时键序不确定）。
     const FULL: &str = r#"{"version":1,"tunnels":[{"id":"admin-tunnel","name":"管理隧道","command":["/usr/bin/ssh","-N","-L","8080:127.0.0.1:80","host"],"executor":"launchd","keepAlive":true,"throttleInterval":10,"probe":{"url":"http://127.0.0.1:8080/health","expectedStatuses":[200,204]}}]}"#;
 
     /// Swift 手写配置允许省略默认字段；编码时补全为默认值。
