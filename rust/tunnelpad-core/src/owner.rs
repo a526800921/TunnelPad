@@ -430,6 +430,7 @@ mod tests {
     use crate::launchctl::{LaunchCtlExecutor, ProcessResult, ProcessRunning};
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::collections::VecDeque;
     use std::thread;
     use std::time::Duration;
 
@@ -486,6 +487,68 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    struct ScriptedRunner {
+        script: Arc<Mutex<VecDeque<Result<ProcessResult, String>>>>,
+        calls: Arc<Mutex<Vec<Vec<String>>>>,
+    }
+
+    impl ScriptedRunner {
+        fn new(script: Vec<Result<ProcessResult, String>>) -> Self {
+            Self {
+                script: Arc::new(Mutex::new(script.into())),
+                calls: Arc::new(Mutex::new(vec![])),
+            }
+        }
+
+        fn calls(&self) -> Vec<Vec<String>> {
+            self.calls.lock().unwrap().clone()
+        }
+
+        fn assert_exhausted(&self) {
+            assert!(self.script.lock().unwrap().is_empty(), "launchd fixture 仍有未消费的调用")
+        }
+    }
+
+    impl ProcessRunning for ScriptedRunner {
+        fn run(
+            &self,
+            _executable_path: &str,
+            arguments: &[String],
+        ) -> Result<ProcessResult, String> {
+            self.calls.lock().unwrap().push(arguments.to_vec());
+            self.script
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("launchd fixture 调用超出脚本")
+        }
+    }
+
+    fn process(exit_code: i32, stdout: &str, stderr: &str) -> Result<ProcessResult, String> {
+        Ok(ProcessResult {
+            exit_code,
+            stdout: stdout.into(),
+            stderr: stderr.into(),
+        })
+    }
+
+    fn spawn_error(message: &str) -> Result<ProcessResult, String> {
+        Err(message.into())
+    }
+
+    fn not_loaded() -> Result<ProcessResult, String> {
+        process(3, "", "Could not find service")
+    }
+
+    fn running(pid: i32) -> Result<ProcessResult, String> {
+        process(0, &format!("\tstate = running\n\tpid = {pid}\n"), "")
+    }
+
+    fn not_running() -> Result<ProcessResult, String> {
+        process(0, "\tstate = not running\n", "")
+    }
+
     fn temp_home(label: &str) -> PathBuf {
         let home = std::env::temp_dir().join(format!("tp-owner-{label}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&home);
@@ -519,6 +582,16 @@ mod tests {
             LaunchCtlExecutor::new(FakeRunner::new(Duration::from_millis(10)), 501),
         )
         .unwrap()
+    }
+
+    fn scripted_owner(
+        home: &Path,
+        ids: &[&str],
+        runner: ScriptedRunner,
+    ) -> CoreOwner<LaunchCtlExecutor<ScriptedRunner>> {
+        let paths = TunnelPaths::new(home);
+        ConfigStore::new(paths.clone()).save(&config(ids)).unwrap();
+        CoreOwner::new(paths, LaunchCtlExecutor::new(runner, 501)).unwrap()
     }
 
     #[test]
@@ -629,6 +702,158 @@ mod tests {
         assert!(!calls
             .iter()
             .any(|arguments| arguments.first().map(String::as_str) == Some("bootout")));
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn lifecycle_success_matrix_preserves_command_order() {
+        let home = temp_home("matrix-start");
+        let runner = ScriptedRunner::new(vec![
+            not_loaded(),
+            process(0, "", ""),
+            running(123),
+        ]);
+        let owner = scripted_owner(&home, &["matrix-start"], runner.clone());
+        let result = owner.start("matrix-start").unwrap();
+        assert_eq!(result["operation"], "start");
+        assert_eq!(result["status"]["case"], "running");
+        assert_eq!(
+            runner.calls().iter().map(|call| call[0].as_str()).collect::<Vec<_>>(),
+            vec!["print", "bootstrap", "print"]
+        );
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+
+        let home = temp_home("matrix-stop");
+        let runner = ScriptedRunner::new(vec![process(0, "", ""), not_running()]);
+        let owner = scripted_owner(&home, &["matrix-stop"], runner.clone());
+        let result = owner.stop("matrix-stop").unwrap();
+        assert_eq!(result["operation"], "stop");
+        assert_eq!(result["stopped"], true);
+        assert_eq!(
+            runner.calls().iter().map(|call| call[0].as_str()).collect::<Vec<_>>(),
+            vec!["bootout", "print"]
+        );
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+
+        let home = temp_home("matrix-restart");
+        let runner = ScriptedRunner::new(vec![
+            process(3, "", "Could not find service"),
+            process(0, "", ""),
+            running(456),
+        ]);
+        let owner = scripted_owner(&home, &["matrix-restart"], runner.clone());
+        let result = owner.restart("matrix-restart").unwrap();
+        assert_eq!(result["operation"], "restart");
+        assert_eq!(result["status"]["case"], "running");
+        assert_eq!(
+            runner.calls().iter().map(|call| call[0].as_str()).collect::<Vec<_>>(),
+            vec!["bootout", "bootstrap", "print"]
+        );
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn status_matrix_returns_launchd_state_and_rejects_unknown_id() {
+        let home = temp_home("matrix-status");
+        let runner = ScriptedRunner::new(vec![running(2468)]);
+        let owner = scripted_owner(&home, &["matrix-status"], runner.clone());
+        assert_eq!(owner.status("matrix-status").unwrap(), TunnelStatus::Running { pid: Some(2468) });
+        assert_eq!(runner.calls()[0][0], "print");
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+
+        let home = temp_home("matrix-status-unknown");
+        let runner = ScriptedRunner::new(vec![]);
+        let owner = scripted_owner(&home, &["matrix-status-unknown"], runner.clone());
+        let error = owner.status("missing").unwrap_err();
+        assert_eq!(error.code, error_code::TUNNEL_NOT_FOUND);
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn lifecycle_failure_matrix_returns_executor_errors_without_swallowing_failures() {
+        let home = temp_home("matrix-start-error");
+        let runner = ScriptedRunner::new(vec![
+            not_loaded(),
+            process(9, "", "Operation not permitted"),
+        ]);
+        let owner = scripted_owner(&home, &["matrix-start-error"], runner.clone());
+        let error = owner.start("matrix-start-error").unwrap_err();
+        assert_eq!(error.code, error_code::EXECUTOR);
+        assert!(error.message.contains("启动 launchd 失败"));
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+
+        let home = temp_home("matrix-stop-error");
+        let runner = ScriptedRunner::new(vec![spawn_error("launchctl missing")]);
+        let owner = scripted_owner(&home, &["matrix-stop-error"], runner.clone());
+        let error = owner.stop("matrix-stop-error").unwrap_err();
+        assert_eq!(error.code, error_code::EXECUTOR);
+        assert!(error.message.contains("无法启动"));
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+
+        let home = temp_home("matrix-restart-error");
+        let runner = ScriptedRunner::new(vec![
+            process(3, "", "Could not find service"),
+            process(7, "", "Bootstrap failed"),
+        ]);
+        let owner = scripted_owner(&home, &["matrix-restart-error"], runner.clone());
+        let error = owner.restart("matrix-restart-error").unwrap_err();
+        assert_eq!(error.code, error_code::EXECUTOR);
+        assert!(error.message.contains("重启 launchd 失败"));
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+
+        let home = temp_home("matrix-remove-error");
+        let runner = ScriptedRunner::new(vec![
+            running(789),
+            process(5, "", "Operation not permitted"),
+            not_loaded(),
+        ]);
+        let owner = scripted_owner(&home, &["matrix-remove-error"], runner.clone());
+        let error = owner.remove("matrix-remove-error").unwrap_err();
+        assert_eq!(error.code, error_code::EXECUTOR);
+        assert!(error.message.contains("删除时停止 launchd 失败"));
+        assert_eq!(owner.snapshot().unwrap().config.tunnels.len(), 1);
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn remove_and_shutdown_matrix_updates_config_and_counts_loaded_services() {
+        let home = temp_home("matrix-remove-success");
+        let runner = ScriptedRunner::new(vec![running(321), process(0, "", ""), not_loaded()]);
+        let owner = scripted_owner(&home, &["matrix-remove-success"], runner.clone());
+        owner.remove("matrix-remove-success").unwrap();
+        assert!(owner.snapshot().unwrap().config.tunnels.is_empty());
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+
+        let home = temp_home("matrix-shutdown");
+        let runner = ScriptedRunner::new(vec![running(654), process(0, "", ""), not_loaded()]);
+        let owner = scripted_owner(&home, &["loaded", "unloaded"], runner.clone());
+        let result = owner.shutdown().unwrap();
+        assert_eq!(result["operation"], "shutdown");
+        assert_eq!(result["stopped"], 1);
+        assert_eq!(
+            runner.calls().iter().map(|call| call[0].as_str()).collect::<Vec<_>>(),
+            vec!["print", "bootout", "print"]
+        );
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+
+        let home = temp_home("matrix-shutdown-error");
+        let runner = ScriptedRunner::new(vec![running(987), process(8, "", "Operation not permitted")]);
+        let owner = scripted_owner(&home, &["matrix-shutdown-error"], runner.clone());
+        let error = owner.shutdown().unwrap_err();
+        assert_eq!(error.code, error_code::EXECUTOR);
+        assert!(owner.status("matrix-shutdown-error").is_err());
+        runner.assert_exhausted();
         let _ = fs::remove_dir_all(home);
     }
 

@@ -40,7 +40,7 @@ opaque handle、UTF-8 JSON 命令、配置 owner、launchd 生命周期和并发
 
 - Rust owner 实现：[owner.rs](../../rust/tunnelpad-core/src/owner.rs)；C ABI 扩展：[owner_ffi.rs](../../rust/tunnelpad-core/src/owner_ffi.rs)；头文件声明：[tunnelpad_core.h](../../rust/include/tunnelpad_core.h)。
 - 原型函数为 `tp_core_abi_version`、`tp_core_create`、`tp_core_command`、`tp_core_shutdown`、`tp_core_destroy` 和 `tp_core_last_error`；旧 `tp_*` ABI v1 未改变。
-- `cargo test --manifest-path rust/Cargo.toml`：42 个 Rust 单测 + 1 个差分测试全部通过。
+- `cargo test --manifest-path rust/Cargo.toml`：46 个 Rust 单测 + 1 个差分测试全部通过；新增 fake `launchd` owner 矩阵覆盖 status、start、stop、restart、remove、shutdown 的成功序列、未加载语义、命令失败和 spawn 失败。
 - `./rust/scripts/smoke.sh`：Rust release 构建、上述测试、Swift C ABI smoke、arm64 产物和 ad-hoc 签名校验全部通过；Swift smoke 覆盖 owner 创建、空配置 snapshot、shutdown 和释放断言。
 - `swift test`：79/79 通过；新增 `RustCoreClientTests` 2 项，覆盖真实 release dylib 的 snapshot、shutdown 后 owner closed 和 `app` 配置 fail-closed。
 - `./scripts/build_app.sh`：Rust release、Swift 测试、Swift release、动态库复制、`@rpath`、ad-hoc 签名和 `Info.plist` 校验全部通过。
@@ -49,12 +49,11 @@ opaque handle、UTF-8 JSON 命令、配置 owner、launchd 生命周期和并发
 - Rust FFI shutdown 现在返回并校验实际停止数量；Swift manager 关闭路径和信号句柄共用该结果通道。
 - fixture 明确验证：version=1 配置读写、`app` 配置拒绝且不自动转换、JSON 生命周期结果、同隧道串行、不同隧道并行，以及 shutdown 后拒绝新命令。
 
-该结果只代表 owner 适配、生产退出路由与 Release 构建验证通过，不代表阶段 5 已完成。当前仍缺少 Rust owner 的后台任务/取消/过期代次、完整 fake `launchd` 故障矩阵、app 入口删除后的 UI/AX 回归、真实隧道 Rust owner 验证、隔离 app/AX/退出操作复核和阶段 5 独立准入复核。
+该结果只代表 owner 适配、生产退出路由、fake `launchd` 故障矩阵与 Release 构建验证通过，不代表阶段 5 已完成。当前仍缺少 Rust owner 的后台任务/取消/过期代次、app 入口删除后的 UI/AX 回归、真实隧道 Rust owner 验证、隔离 app/AX/退出操作复核和阶段 5 独立准入复核。
 
 ## Step 0 尚缺证据
 
 - owner 原型的最终 ABI 冻结与 Swift 适配层独立复核；
-- fake `launchd` 的完整启动、停止、重启、删除、错误注入和 shutdown 矩阵；
 - 后台任务、取消和过期任务保护测试；
 - 隐藏/删除 app 执行器入口后的 UI/AX 回归；
 - Rust owner 版本的 Release 启动、退出清理和独立准入复核；当前只完成构建/签名及退出路由代码/单测，尚未在隔离 app 环境执行 UI/AX 启动与退出操作。
