@@ -19,6 +19,8 @@ pub mod launchd_executing;
 pub mod legacy;
 pub mod log_tail;
 pub mod migration;
+pub mod owner;
+pub mod owner_ffi;
 pub mod paths;
 pub mod plist_render;
 pub mod probe;
@@ -41,6 +43,13 @@ pub mod error_code {
     pub const INVALID_ID: u32 = 3;
     pub const INVALID_COMMAND: u32 = 4;
     pub const INVALID_ARGUMENT: u32 = 5;
+    pub const OWNER_COMMAND: u32 = 6;
+    pub const UNSUPPORTED_EXECUTOR: u32 = 7;
+    pub const TUNNEL_NOT_FOUND: u32 = 8;
+    pub const OWNER_CLOSED: u32 = 9;
+    pub const EXECUTOR: u32 = 10;
+    pub const CONFIG_IO: u32 = 11;
+    pub const STILL_RUNNING: u32 = 12;
 }
 
 /// 跨边界错误：`code` 取 [`error_code`] 常量，`message` 语义对齐 Swift 抛错文案。

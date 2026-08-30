@@ -33,4 +33,20 @@ char *tp_last_error(void);
 /* 释放 tp_* 返回的字符串；NULL 是合法输入。 */
 void tp_string_free(char *s);
 
+/*
+ * 阶段 5 owner 原型扩展（tp_core_abi_version() == 1）。
+ *
+ * 该扩展使用长期 opaque handle + UTF-8 JSON 命令。owner 命令的业务失败
+ * 仍返回 {"ok":false,...} JSON；只有参数/传输错误返回 NULL，并通过
+ * tp_core_last_error() 取得错误。返回字符串统一由 tp_string_free() 释放。
+ */
+typedef struct TpCoreHandle TpCoreHandle;
+
+uint32_t tp_core_abi_version(void);
+TpCoreHandle *tp_core_create(const char *home);
+char *tp_core_command(TpCoreHandle *handle, const char *command);
+char *tp_core_shutdown(TpCoreHandle *handle);
+void tp_core_destroy(TpCoreHandle *handle);
+char *tp_core_last_error(void);
+
 #endif /* TUNNELPAD_CORE_H */

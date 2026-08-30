@@ -101,6 +101,29 @@ expectTrue(tp_last_error() == nil, "成功调用后 last-error 清空")
 tp_string_free(nil)
 print("ok - tp_string_free(NULL) 安全")
 
+// 阶段 5 Step 0：opaque Rust owner handle + JSON command 的 Swift 兼容调用。
+let ownerHome = FileManager.default.temporaryDirectory
+    .appendingPathComponent("tunnelpad-owner-smoke-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+try? FileManager.default.removeItem(at: ownerHome)
+try? FileManager.default.createDirectory(at: ownerHome, withIntermediateDirectories: true)
+let ownerHandle = ownerHome.path.withCString { tp_core_create($0) }
+expectTrue(tp_core_abi_version() == 1, "tp_core_abi_version == 1")
+if let ownerHandle {
+    let snapshot = "{\"op\":\"snapshot\"}".withCString { tp_core_command(ownerHandle, $0) }
+    if let output = takeString(snapshot) {
+        expectTrue(output.contains("\"ok\":true"), "owner snapshot 返回 JSON")
+        expectTrue(output.contains("\"tunnels\":[]"), "owner snapshot 读取空配置")
+    } else {
+        expectTrue(false, "owner snapshot 调用成功（lastError=\(lastErrorCode())）")
+    }
+    let shutdown = takeString(tp_core_shutdown(ownerHandle))
+    expectTrue(shutdown?.contains("\"operation\":\"shutdown\"") == true, "owner shutdown 返回 JSON")
+    tp_core_destroy(ownerHandle)
+} else {
+    expectTrue(false, "owner handle 创建成功（lastError=\(lastErrorCode())）")
+}
+try? FileManager.default.removeItem(at: ownerHome)
+
 if failures.isEmpty {
     print("SWIFT SMOKE: 全部通过")
     exit(0)
