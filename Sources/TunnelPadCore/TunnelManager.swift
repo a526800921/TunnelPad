@@ -359,15 +359,10 @@ public final class TunnelManager: ObservableObject {
 
         if let rustCore {
             guard let rustGeneration = beginRustOperation(for: id) else { return }
-            defer {
-                if Task.isCancelled {
-                    cancelRustOperation(id: id, generation: rustGeneration)
-                }
-            }
             do {
-                try await Task.detached(priority: .userInitiated) {
+                try await runRustOperation(id: id, generation: rustGeneration) {
                     try rustCore.remove(id: id, generation: rustGeneration)
-                }.value
+                }
                 guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return }
                 config.tunnels.removeAll { $0.id == id }
                 updateRuntime {
@@ -603,15 +598,10 @@ public final class TunnelManager: ObservableObject {
 
         if let rustCore {
             guard let rustGeneration = beginRustOperation(for: id) else { return }
-            defer {
-                if Task.isCancelled {
-                    cancelRustOperation(id: id, generation: rustGeneration)
-                }
-            }
             do {
-                let status = try await Task.detached(priority: .userInitiated) {
+                let status = try await runRustOperation(id: id, generation: rustGeneration) {
                     try rustCore.start(id: id, generation: rustGeneration)
-                }.value
+                }
                 guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return }
                 updateRuntime { $0.setStatus(status, for: id) }
                 lastMessage = "「\(tunnel.name)」已启动"
@@ -658,15 +648,10 @@ public final class TunnelManager: ObservableObject {
 
         if let rustCore {
             guard let rustGeneration = beginRustOperation(for: id) else { return }
-            defer {
-                if Task.isCancelled {
-                    cancelRustOperation(id: id, generation: rustGeneration)
-                }
-            }
             do {
-                let status = try await Task.detached(priority: .userInitiated) {
+                let status = try await runRustOperation(id: id, generation: rustGeneration) {
                     try rustCore.stop(id: id, generation: rustGeneration)
-                }.value
+                }
                 guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return }
                 updateRuntime { $0.setStatus(status, for: id) }
                 lastMessage = "「\(tunnel.name)」已停止"
@@ -713,15 +698,10 @@ public final class TunnelManager: ObservableObject {
 
         if let rustCore {
             guard let rustGeneration = beginRustOperation(for: id) else { return }
-            defer {
-                if Task.isCancelled {
-                    cancelRustOperation(id: id, generation: rustGeneration)
-                }
-            }
             do {
-                let status = try await Task.detached(priority: .userInitiated) {
+                let status = try await runRustOperation(id: id, generation: rustGeneration) {
                     try rustCore.restart(id: id, generation: rustGeneration)
-                }.value
+                }
                 guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return }
                 updateRuntime { $0.setStatus(status, for: id) }
                 lastMessage = "「\(tunnel.name)」已重启"
@@ -865,6 +845,23 @@ public final class TunnelManager: ObservableObject {
     private func cancelRustOperation(id: String, generation: UInt64) {
         guard let rustCore else { return }
         try? rustCore.cancelOperation(id: id, generation: generation)
+    }
+
+    private func runRustOperation<T: Sendable>(
+        id: String,
+        generation: UInt64,
+        body: @escaping @Sendable () throws -> T
+    ) async throws -> T {
+        guard let rustCore else {
+            throw RustCoreClient.ClientError.unavailable("owner handle 未创建")
+        }
+        return try await withTaskCancellationHandler(operation: {
+            try await Task.detached(priority: .userInitiated) {
+                try body()
+            }.value
+        }, onCancel: {
+            try? rustCore.cancelOperation(id: id, generation: generation)
+        })
     }
 
     private func isStaleRustOperation(_ error: Error) -> Bool {

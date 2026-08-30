@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::config_store::ConfigStore;
-use crate::launchctl::{ExecutorError, TunnelStatus};
+use crate::launchctl::{CancellationToken, ExecutorError, TunnelStatus};
 use crate::launchd_executing::LaunchdExecuting;
 use crate::paths::TunnelPaths;
 use crate::plist_render::write_plist;
@@ -73,6 +73,12 @@ pub struct CoreResponse {
     pub error: Option<TpError>,
 }
 
+#[derive(Clone)]
+struct OperationState {
+    generation: u64,
+    cancellation: CancellationToken,
+}
+
 impl CoreResponse {
     fn success(result: Value) -> Self {
         Self {
@@ -98,7 +104,7 @@ pub struct CoreOwner<L: LaunchdExecuting> {
     pub(crate) launchd: L,
     config: Mutex<AppConfig>,
     tunnel_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
-    generations: Mutex<HashMap<String, u64>>,
+    operations: Mutex<HashMap<String, OperationState>>,
     closed: AtomicBool,
 }
 
@@ -113,7 +119,7 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
             launchd,
             config: Mutex::new(config),
             tunnel_locks: Mutex::new(HashMap::new()),
-            generations: Mutex::new(HashMap::new()),
+            operations: Mutex::new(HashMap::new()),
             closed: AtomicBool::new(false),
         })
     }
@@ -215,14 +221,26 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
             .ok_or_else(|| TpError::new(error_code::TUNNEL_NOT_FOUND, format!("找不到隧道：{id}")))
     }
 
-    fn next_generation(&self, id: &str) -> u64 {
-        let mut generations = self
-            .generations
+    fn next_generation(&self, id: &str) -> (u64, CancellationToken) {
+        let mut operations = self
+            .operations
             .lock()
-            .expect("owner generation mutex 不应中毒");
-        let generation = generations.entry(id.to_string()).or_insert(0);
-        *generation = generation.wrapping_add(1).max(1);
-        *generation
+            .expect("owner operation mutex 不应中毒");
+        let state = operations
+            .entry(id.to_string())
+            .or_insert_with(|| OperationState {
+                generation: 0,
+                cancellation: CancellationToken::new(),
+            });
+        state.generation = state.generation.wrapping_add(1).max(1);
+        state.cancellation = CancellationToken::new();
+        (state.generation, state.cancellation.clone())
+    }
+
+    fn advance_generation(state: &mut OperationState) -> u64 {
+        state.generation = state.generation.wrapping_add(1).max(1);
+        state.cancellation = CancellationToken::new();
+        state.generation
     }
 
     fn ensure_generation(&self, id: &str, expected: Option<u64>) -> Result<(), TpError> {
@@ -230,11 +248,11 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
             return Ok(());
         };
         let current = self
-            .generations
+            .operations
             .lock()
-            .expect("owner generation mutex 不应中毒")
+            .expect("owner operation mutex 不应中毒")
             .get(id)
-            .copied();
+            .map(|state| state.generation);
         if current != Some(expected) {
             return Err(TpError::new(
                 error_code::STALE_OPERATION,
@@ -248,29 +266,55 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
         self.ensure_open()?;
         let lock = self.lock_for(id);
         let _guard = lock.lock().expect("owner tunnel mutex 不应中毒");
+        self.ensure_open()?;
         self.tunnel(id)?;
-        let generation = self.next_generation(id);
+        let (generation, _) = self.next_generation(id);
         Ok(json!({ "id": id, "operation": "begin", "generation": generation }))
     }
 
     pub fn cancel(&self, id: &str, generation: u64) -> Result<Value, TpError> {
         self.ensure_open()?;
-        // 取消必须和同隧道生命周期命令共用串行锁；否则它可能在生命周期
-        // 通过 generation 检查后、触发 launchd/plist 副作用前插入，形成竞态。
-        let lock = self.lock_for(id);
-        let _guard = lock.lock().expect("owner tunnel mutex 不应中毒");
         self.tunnel(id)?;
-        let current = self
-            .generations
+        // 取消不能等待生命周期锁：它必须能在 launchctl 正在运行时立即发出
+        // 信号。生命周期仍在每个副作用边界检查 generation，系统 runner 还
+        // 会终止正在运行的 launchctl 子进程。
+        let mut operations = self
+            .operations
             .lock()
-            .expect("owner generation mutex 不应中毒")
-            .get(id)
-            .copied();
-        if current == Some(generation) {
-            let next = self.next_generation(id);
+            .expect("owner operation mutex 不应中毒");
+        let Some(state) = operations.get_mut(id) else {
+            return Ok(json!({ "id": id, "operation": "stale", "generation": null }));
+        };
+        if state.generation == generation {
+            state.cancellation.cancel();
+            let next = Self::advance_generation(state);
             return Ok(json!({ "id": id, "operation": "cancel", "generation": next }));
         }
-        Ok(json!({ "id": id, "operation": "stale", "generation": current }))
+        Ok(json!({ "id": id, "operation": "stale", "generation": state.generation }))
+    }
+
+    fn cancellation_for(&self, id: &str, generation: Option<u64>) -> CancellationToken {
+        generation
+            .and_then(|expected| {
+                self.operations
+                    .lock()
+                    .expect("owner operation mutex 不应中毒")
+                    .get(id)
+                    .filter(|state| state.generation == expected)
+                    .map(|state| state.cancellation.clone())
+            })
+            .unwrap_or_else(CancellationToken::new)
+    }
+
+    fn cancel_all_operations(&self) {
+        let mut operations = self
+            .operations
+            .lock()
+            .expect("owner operation mutex 不应中毒");
+        for state in operations.values_mut() {
+            state.cancellation.cancel();
+            Self::advance_generation(state);
+        }
     }
 
     fn status_result(&self, id: &str) -> Result<Value, TpError> {
@@ -298,6 +342,7 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
         let lock = self.lock_for(id);
         let _guard = lock.lock().expect("owner tunnel mutex 不应中毒");
         self.ensure_generation(id, generation)?;
+        let cancellation = self.cancellation_for(id, generation);
         let tunnel = self.tunnel(id)?;
         let current_status = self.launchd.status(&tunnel.launchd_label());
         self.ensure_generation(id, generation)?;
@@ -311,7 +356,7 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
             )
         })?;
         self.launchd
-            .bootstrap(&tunnel.launchd_label(), &plist)
+            .bootstrap_cancellable(&tunnel.launchd_label(), &plist, &cancellation)
             .map_err(|error| executor_error("启动", error))?;
         self.ensure_generation(id, generation)?;
         let status = self.launchd.status(&tunnel.launchd_label());
@@ -329,10 +374,11 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
         let lock = self.lock_for(id);
         let _guard = lock.lock().expect("owner tunnel mutex 不应中毒");
         self.ensure_generation(id, generation)?;
+        let cancellation = self.cancellation_for(id, generation);
         let tunnel = self.tunnel(id)?;
         let stopped = self
             .launchd
-            .bootout(&tunnel.launchd_label())
+            .bootout_cancellable(&tunnel.launchd_label(), &cancellation)
             .map_err(|error| executor_error("停止", error))?;
         self.ensure_generation(id, generation)?;
         let status = self.launchd.status(&tunnel.launchd_label());
@@ -350,10 +396,13 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
         let lock = self.lock_for(id);
         let _guard = lock.lock().expect("owner tunnel mutex 不应中毒");
         self.ensure_generation(id, generation)?;
+        let cancellation = self.cancellation_for(id, generation);
         let tunnel = self.tunnel(id)?;
         // 保持现有 Swift restartSync 的兼容语义：未加载或 bootout 失败
         // 不阻断后续 plist 重写/bootstrap，bootstrap 失败仍返回错误。
-        let _ = self.launchd.bootout(&tunnel.launchd_label());
+        let _ = self
+            .launchd
+            .bootout_cancellable(&tunnel.launchd_label(), &cancellation);
         self.ensure_generation(id, generation)?;
         let plist = write_plist(&tunnel, &self.paths).map_err(|error| {
             TpError::new(
@@ -362,7 +411,7 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
             )
         })?;
         self.launchd
-            .bootstrap(&tunnel.launchd_label(), &plist)
+            .bootstrap_cancellable(&tunnel.launchd_label(), &plist, &cancellation)
             .map_err(|error| executor_error("重启", error))?;
         self.ensure_generation(id, generation)?;
         let status = self.launchd.status(&tunnel.launchd_label());
@@ -380,12 +429,13 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
         let lock = self.lock_for(id);
         let _guard = lock.lock().expect("owner tunnel mutex 不应中毒");
         self.ensure_generation(id, generation)?;
+        let cancellation = self.cancellation_for(id, generation);
         let tunnel = self.tunnel(id)?;
         let status = self.launchd.status(&tunnel.launchd_label());
         self.ensure_generation(id, generation)?;
         if status != TunnelStatus::NotLoaded {
             self.launchd
-                .bootout(&tunnel.launchd_label())
+                .bootout_cancellable(&tunnel.launchd_label(), &cancellation)
                 .map_err(|error| executor_error("删除时停止", error))?;
             self.ensure_generation(id, generation)?;
             if self.launchd.status(&tunnel.launchd_label()) != TunnelStatus::NotLoaded {
@@ -466,6 +516,7 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
     /// 让新生命周期操作在 shutdown 之后进入。
     pub fn shutdown(&self) -> Result<Value, TpError> {
         self.ensure_open()?;
+        self.cancel_all_operations();
         let ids = {
             let mut ids: Vec<String> = self
                 .config
@@ -534,6 +585,7 @@ fn validate_launchd_config(config: &AppConfig) -> Result<(), TpError> {
 }
 
 fn executor_error(operation: &str, error: ExecutorError) -> TpError {
+    let cancelled = matches!(&error, ExecutorError::Cancelled);
     let message = match error {
         ExecutorError::CommandFailed {
             exit_code, stderr, ..
@@ -541,14 +593,22 @@ fn executor_error(operation: &str, error: ExecutorError) -> TpError {
             format!("{operation} launchd 失败（exit={exit_code}）：{stderr}")
         }
         ExecutorError::Spawn { message } => format!("{operation} launchd 无法启动：{message}"),
+        ExecutorError::Cancelled => format!("{operation} launchd 操作已取消"),
     };
-    TpError::new(error_code::EXECUTOR, message)
+    let code = if cancelled {
+        error_code::STALE_OPERATION
+    } else {
+        error_code::EXECUTOR
+    };
+    TpError::new(code, message)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::launchctl::{LaunchCtlExecutor, ProcessResult, ProcessRunning};
+    use crate::launchctl::{
+        CancellationToken, LaunchCtlExecutor, ProcessResult, ProcessRunError, ProcessRunning,
+    };
     use std::collections::VecDeque;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -653,20 +713,16 @@ mod tests {
     #[derive(Clone)]
     struct BlockingRunner {
         entered: Arc<Mutex<Option<Sender<()>>>>,
-        release: Arc<Mutex<Receiver<()>>>,
     }
 
     impl BlockingRunner {
-        fn new() -> (Self, Receiver<()>, Sender<()>) {
+        fn new() -> (Self, Receiver<()>) {
             let (entered_tx, entered_rx) = mpsc::channel();
-            let (release_tx, release_rx) = mpsc::channel();
             (
                 Self {
                     entered: Arc::new(Mutex::new(Some(entered_tx))),
-                    release: Arc::new(Mutex::new(release_rx)),
                 },
                 entered_rx,
-                release_tx,
             )
         }
     }
@@ -677,15 +733,86 @@ mod tests {
             _executable_path: &str,
             _arguments: &[String],
         ) -> Result<ProcessResult, String> {
+            Ok(ProcessResult {
+                exit_code: 3,
+                stdout: String::new(),
+                stderr: "Could not find service".into(),
+            })
+        }
+
+        fn run_cancellable(
+            &self,
+            _executable_path: &str,
+            _arguments: &[String],
+            cancellation: &CancellationToken,
+        ) -> Result<ProcessResult, ProcessRunError> {
             if let Some(entered) = self.entered.lock().unwrap().take() {
                 entered.send(()).unwrap();
-                self.release.lock().unwrap().recv().unwrap();
             }
-            Ok(ProcessResult {
-                exit_code: 0,
-                stdout: "\tstate = not running\n".into(),
-                stderr: String::new(),
-            })
+            while !cancellation.is_cancelled() {
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err(ProcessRunError::Cancelled)
+        }
+    }
+
+    #[derive(Clone)]
+    struct RestartBlockingRunner {
+        calls: Arc<Mutex<Vec<Vec<String>>>>,
+        bootstrap_entered: Arc<Mutex<Option<Sender<()>>>>,
+    }
+
+    impl RestartBlockingRunner {
+        fn new() -> (Self, Receiver<()>) {
+            let (entered_tx, entered_rx) = mpsc::channel();
+            (
+                Self {
+                    calls: Arc::new(Mutex::new(vec![])),
+                    bootstrap_entered: Arc::new(Mutex::new(Some(entered_tx))),
+                },
+                entered_rx,
+            )
+        }
+
+        fn calls(&self) -> Vec<Vec<String>> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    impl ProcessRunning for RestartBlockingRunner {
+        fn run(
+            &self,
+            _executable_path: &str,
+            arguments: &[String],
+        ) -> Result<ProcessResult, String> {
+            self.calls.lock().unwrap().push(arguments.to_vec());
+            Err("restart 使用了不可取消 launchctl 路径".into())
+        }
+
+        fn run_cancellable(
+            &self,
+            _executable_path: &str,
+            arguments: &[String],
+            cancellation: &CancellationToken,
+        ) -> Result<ProcessResult, ProcessRunError> {
+            self.calls.lock().unwrap().push(arguments.to_vec());
+            match arguments.first().map(String::as_str) {
+                Some("bootout") => Ok(ProcessResult {
+                    exit_code: 0,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                }),
+                Some("bootstrap") => {
+                    if let Some(entered) = self.bootstrap_entered.lock().unwrap().take() {
+                        entered.send(()).unwrap();
+                    }
+                    while !cancellation.is_cancelled() {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(ProcessRunError::Cancelled)
+                }
+                other => panic!("unexpected launchctl operation: {other:?}"),
+            }
         }
     }
 
@@ -983,13 +1110,13 @@ mod tests {
     }
 
     #[test]
-    fn cancel_serializes_with_lifecycle_commands() {
+    fn cancel_interrupts_in_flight_lifecycle_commands() {
         let home = temp_home("cancel-lock");
         let paths = TunnelPaths::new(&home);
         ConfigStore::new(paths.clone())
             .save(&config(&["cancel-lock"]))
             .unwrap();
-        let (runner, entered_rx, release_tx) = BlockingRunner::new();
+        let (runner, entered_rx) = BlockingRunner::new();
         let owner = Arc::new(CoreOwner::new(paths, LaunchCtlExecutor::new(runner, 501)).unwrap());
         let generation = owner.begin("cancel-lock").unwrap()["generation"]
             .as_u64()
@@ -1004,29 +1131,89 @@ mod tests {
         });
         entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
 
-        let (cancel_started_tx, cancel_started_rx) = mpsc::channel();
         let (cancel_done_tx, cancel_done_rx) = mpsc::channel();
         let cancel_owner = owner.clone();
         let cancel = thread::spawn(move || {
-            cancel_started_tx.send(()).unwrap();
             let response = cancel_owner.cancel("cancel-lock", generation).unwrap();
             cancel_done_tx.send(response).unwrap();
         });
-        cancel_started_rx
-            .recv_timeout(Duration::from_secs(1))
-            .unwrap();
-        assert!(
-            cancel_done_rx
-                .recv_timeout(Duration::from_millis(25))
-                .is_err(),
-            "cancel 不应在同隧道生命周期持锁时完成"
-        );
-
-        release_tx.send(()).unwrap();
-        assert!(lifecycle.join().unwrap().ok);
         let response = cancel_done_rx.recv_timeout(Duration::from_secs(1)).unwrap();
         assert_eq!(response["operation"], "cancel");
         cancel.join().unwrap();
+        let lifecycle = lifecycle.join().unwrap();
+        assert!(!lifecycle.ok);
+        assert_eq!(lifecycle.error.unwrap().code, error_code::STALE_OPERATION);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn shutdown_cancels_in_flight_lifecycle_commands() {
+        let home = temp_home("shutdown-cancel");
+        let paths = TunnelPaths::new(&home);
+        ConfigStore::new(paths.clone())
+            .save(&config(&["shutdown-cancel"]))
+            .unwrap();
+        let (runner, entered_rx) = BlockingRunner::new();
+        let owner = Arc::new(CoreOwner::new(paths, LaunchCtlExecutor::new(runner, 501)).unwrap());
+        let generation = owner.begin("shutdown-cancel").unwrap()["generation"]
+            .as_u64()
+            .unwrap();
+
+        let lifecycle_owner = owner.clone();
+        let lifecycle = thread::spawn(move || {
+            lifecycle_owner.execute(CoreCommand::Start {
+                id: "shutdown-cancel".into(),
+                generation: Some(generation),
+            })
+        });
+        entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        let shutdown = owner.shutdown().unwrap();
+        assert_eq!(shutdown["operation"], "shutdown");
+        let lifecycle = lifecycle.join().unwrap();
+        assert!(!lifecycle.ok);
+        assert_eq!(lifecycle.error.unwrap().code, error_code::STALE_OPERATION);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn restart_cancels_in_flight_bootstrap() {
+        let home = temp_home("restart-cancel-bootstrap");
+        let paths = TunnelPaths::new(&home);
+        ConfigStore::new(paths.clone())
+            .save(&config(&["restart-cancel-bootstrap"]))
+            .unwrap();
+        let (runner, entered_rx) = RestartBlockingRunner::new();
+        let owner =
+            Arc::new(CoreOwner::new(paths, LaunchCtlExecutor::new(runner.clone(), 501)).unwrap());
+        let generation = owner.begin("restart-cancel-bootstrap").unwrap()["generation"]
+            .as_u64()
+            .unwrap();
+
+        let lifecycle_owner = owner.clone();
+        let lifecycle = thread::spawn(move || {
+            lifecycle_owner.execute(CoreCommand::Restart {
+                id: "restart-cancel-bootstrap".into(),
+                generation: Some(generation),
+            })
+        });
+        entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        let cancel = owner
+            .cancel("restart-cancel-bootstrap", generation)
+            .unwrap();
+        assert_eq!(cancel["operation"], "cancel");
+        let lifecycle = lifecycle.join().unwrap();
+        assert!(!lifecycle.ok);
+        assert_eq!(lifecycle.error.unwrap().code, error_code::STALE_OPERATION);
+        assert_eq!(
+            runner
+                .calls()
+                .iter()
+                .map(|call| call[0].as_str())
+                .collect::<Vec<_>>(),
+            vec!["bootout", "bootstrap"]
+        );
         let _ = fs::remove_dir_all(home);
     }
 

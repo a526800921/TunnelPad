@@ -1,8 +1,13 @@
 //! launchd 执行器（Swift `LaunchCtlExecutor` + `ProcessRunner` 对等）。
 //! bootstrap / bootout / status，标签 `com.jafish.tunnelpad.<id>`。
 
+use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
 use serde::Serialize;
 
@@ -28,7 +33,35 @@ pub enum ExecutorError {
         stderr: String,
     },
     #[serde(rename_all = "camelCase")]
+    Spawn {
+        message: String,
+    },
+    Cancelled,
+}
+
+/// Rust owner 与外部命令之间共享的取消信号。取消是幂等的，已经启动的
+/// `launchctl` 子进程由系统执行器负责终止；fake runner 可用同一信号验证边界。
+#[derive(Clone, Debug, Default)]
+pub struct CancellationToken(Arc<AtomicBool>);
+
+impl CancellationToken {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProcessRunError {
     Spawn { message: String },
+    Cancelled,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +74,21 @@ pub struct ProcessResult {
 /// 同步执行外部命令（launchctl 等），测试可注入 fake。
 pub trait ProcessRunning: Send + Sync {
     fn run(&self, executable_path: &str, arguments: &[String]) -> Result<ProcessResult, String>;
+
+    /// 可取消执行的默认实现保持 fake/旧实现兼容；真实系统 runner 会在
+    /// 子进程运行期间轮询 token 并终止 launchctl。
+    fn run_cancellable(
+        &self,
+        executable_path: &str,
+        arguments: &[String],
+        cancellation: &CancellationToken,
+    ) -> Result<ProcessResult, ProcessRunError> {
+        if cancellation.is_cancelled() {
+            return Err(ProcessRunError::Cancelled);
+        }
+        self.run(executable_path, arguments)
+            .map_err(|message| ProcessRunError::Spawn { message })
+    }
 }
 
 /// 真实系统执行器：同步执行、读全量 stdout/stderr、等退出。
@@ -60,6 +108,65 @@ impl ProcessRunning for SystemProcessRunner {
             exit_code: output.status.code().unwrap_or(-1),
             stdout: String::from_utf8_lossy(&output.stdout).to_string(),
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        })
+    }
+
+    fn run_cancellable(
+        &self,
+        executable_path: &str,
+        arguments: &[String],
+        cancellation: &CancellationToken,
+    ) -> Result<ProcessResult, ProcessRunError> {
+        if cancellation.is_cancelled() {
+            return Err(ProcessRunError::Cancelled);
+        }
+        let mut child = Command::new(executable_path)
+            .args(arguments)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| ProcessRunError::Spawn {
+                message: error.to_string(),
+            })?;
+
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) if cancellation.is_cancelled() => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(ProcessRunError::Cancelled);
+                }
+                Ok(None) => thread::sleep(Duration::from_millis(5)),
+                Err(error) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(ProcessRunError::Spawn {
+                        message: error.to_string(),
+                    });
+                }
+            }
+        };
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        if let Some(mut pipe) = child.stdout.take() {
+            pipe.read_to_end(&mut stdout)
+                .map_err(|error| ProcessRunError::Spawn {
+                    message: error.to_string(),
+                })?;
+        }
+        if let Some(mut pipe) = child.stderr.take() {
+            pipe.read_to_end(&mut stderr)
+                .map_err(|error| ProcessRunError::Spawn {
+                    message: error.to_string(),
+                })?;
+        }
+        Ok(ProcessResult {
+            exit_code: status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&stdout).to_string(),
+            stderr: String::from_utf8_lossy(&stderr).to_string(),
         })
     }
 }
@@ -98,13 +205,31 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
     /// 加载并立即启动（生成 plist 固定 RunAtLoad=true）。
     /// `label` 仅用于调用方语义；launchctl bootstrap 以 plist 路径定位。
     pub fn bootstrap(&self, _label: &str, plist_path: &Path) -> Result<(), ExecutorError> {
-        let result = self
-            .runner
-            .run(
-                Self::LAUNCHCTL_PATH,
-                &["bootstrap".into(), self.domain(), path_display(plist_path)],
-            )
-            .map_err(|message| ExecutorError::Spawn { message })?;
+        let result = self.run_process(
+            &["bootstrap".into(), self.domain(), path_display(plist_path)],
+            None,
+        )?;
+        if result.exit_code == 0 {
+            Ok(())
+        } else {
+            Err(ExecutorError::CommandFailed {
+                operation: "bootstrap".into(),
+                exit_code: result.exit_code,
+                stderr: result.stderr,
+            })
+        }
+    }
+
+    pub fn bootstrap_cancellable(
+        &self,
+        _label: &str,
+        plist_path: &Path,
+        cancellation: &CancellationToken,
+    ) -> Result<(), ExecutorError> {
+        let result = self.run_process(
+            &["bootstrap".into(), self.domain(), path_display(plist_path)],
+            Some(cancellation),
+        )?;
         if result.exit_code == 0 {
             Ok(())
         } else {
@@ -118,13 +243,32 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
 
     /// 卸载。返回是否确实卸载了已加载实例；"未加载"不算错误。
     pub fn bootout(&self, label: &str) -> Result<bool, ExecutorError> {
-        let result = self
-            .runner
-            .run(
-                Self::LAUNCHCTL_PATH,
-                &["bootout".into(), format!("{}/{}", self.domain(), label)],
-            )
-            .map_err(|message| ExecutorError::Spawn { message })?;
+        let result = self.run_process(
+            &["bootout".into(), format!("{}/{}", self.domain(), label)],
+            None,
+        )?;
+        if result.exit_code == 0 {
+            return Ok(true);
+        }
+        if is_not_found_message(&result.stderr, &result.stdout) {
+            return Ok(false);
+        }
+        Err(ExecutorError::CommandFailed {
+            operation: "bootout".into(),
+            exit_code: result.exit_code,
+            stderr: result.stderr,
+        })
+    }
+
+    pub fn bootout_cancellable(
+        &self,
+        label: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<bool, ExecutorError> {
+        let result = self.run_process(
+            &["bootout".into(), format!("{}/{}", self.domain(), label)],
+            Some(cancellation),
+        )?;
         if result.exit_code == 0 {
             return Ok(true);
         }
@@ -147,6 +291,27 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
             Ok(result) if result.exit_code == 0 => parse_status(&result.stdout),
             _ => TunnelStatus::NotLoaded,
         }
+    }
+
+    fn run_process(
+        &self,
+        arguments: &[String],
+        cancellation: Option<&CancellationToken>,
+    ) -> Result<ProcessResult, ExecutorError> {
+        match cancellation {
+            Some(cancellation) => {
+                self.runner
+                    .run_cancellable(Self::LAUNCHCTL_PATH, arguments, cancellation)
+            }
+            None => self
+                .runner
+                .run(Self::LAUNCHCTL_PATH, arguments)
+                .map_err(|message| ProcessRunError::Spawn { message }),
+        }
+        .map_err(|error| match error {
+            ProcessRunError::Spawn { message } => ExecutorError::Spawn { message },
+            ProcessRunError::Cancelled => ExecutorError::Cancelled,
+        })
     }
 }
 
@@ -216,6 +381,8 @@ mod tests {
     use super::*;
     use std::collections::VecDeque;
     use std::sync::Mutex;
+    use std::thread;
+    use std::time::{Duration, Instant};
 
     struct FakeRunner {
         outputs: Mutex<VecDeque<Result<ProcessResult, String>>>,
@@ -313,5 +480,25 @@ mod tests {
             }
             other => panic!("期望 CommandFailed，实际 {other:?}"),
         }
+    }
+
+    #[test]
+    fn system_runner_terminates_cancelled_child() {
+        let runner = SystemProcessRunner;
+        let cancellation = CancellationToken::new();
+        let worker_cancellation = cancellation.clone();
+        let started = Instant::now();
+        let worker = thread::spawn(move || {
+            runner.run_cancellable("/bin/sleep", &["30".into()], &worker_cancellation)
+        });
+
+        thread::sleep(Duration::from_millis(25));
+        cancellation.cancel();
+        assert_eq!(worker.join().unwrap(), Err(ProcessRunError::Cancelled));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "取消后的子进程退出过慢：{:?}",
+            started.elapsed()
+        );
     }
 }

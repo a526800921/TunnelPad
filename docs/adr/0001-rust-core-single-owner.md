@@ -12,11 +12,11 @@
 
 1. 保留 SwiftUI/AppKit、菜单栏、窗口、表单和状态展示作为 App 外壳。
 2. Rust 动态库通过进程内 C ABI 提供 Core；不引入 sidecar 进程。
-3. Rust Core 是唯一生命周期 owner，持有配置、运行时状态、并发协调和后台任务。
+3. Rust Core 是唯一生命周期 owner，持有配置、运行时状态、并发协调和活动操作取消状态；同步 C ABI 下不引入 Rust 持久 worker，Swift detached task 只负责脱离 UI 线程。
 4. 跨边界使用 UTF-8 JSON 与 opaque Rust handle；Swift 只发命令、读取状态快照和绑定 UI。
 5. `config.json` 的读取、解析、保存和 schema 校验由 Rust 负责；version=1 磁盘格式保持不变。
 6. 阶段 5 只覆盖 `launchd`。当前 `app` 执行器入口、实现和配置分支移除；未来需要时另立计划。
-7. 用户退出 TunnelPad 时由 Rust 停止全部受管 `launchd` 隧道并取消后台任务；关闭窗口不停止隧道。
+7. 用户退出 TunnelPad 时由 Rust 使活动代次失效、取消正在运行的 `launchctl` 并停止全部受管 `launchd` 隧道；关闭窗口不停止隧道。
 8. 验证完成后删除旧 Swift Core，不保留 App 内 Swift fallback；缺陷直接修复 Rust。
 
 ## 后果

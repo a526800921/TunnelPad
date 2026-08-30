@@ -27,7 +27,7 @@
 | 计划 | 状态 | 当前阶段 | 最后更新 | 依赖 | 证据 |
 |---|---|---|---|---|---|
 | [ECS 动态 SSH 公网 IP 同步](plans/ecs-dynamic-ssh-ip.md) | 实施中 | 阶段 1 | 2026-08-29 | - | [阶段 0 本机预检](data-quality/ecs-dynamic-ssh-ip-stage0-local-preflight-20260829.md)；[CLI 与凭证准备](data-quality/ecs-dynamic-ssh-ip-stage0-cli-credential-prep-20260829.md)；[云端只读验证](data-quality/ecs-dynamic-ssh-ip-stage0-cloud-readonly-20260829.md)；[控制台拓扑基线](data-quality/ecs-dynamic-ssh-ip-stage0-console-topology-20260829.md)；[项目外受控实跑](data-quality/ecs-dynamic-ssh-ip-stage0-controlled-run-20260829.md)；[阶段 1 实现与验证](data-quality/ecs-dynamic-ssh-ip-stage1-implementation-20260829.md) |
-| [TunnelPad Rust Core 迁移](plans/tunnelpad-rust-migration.md) | 实施中 | 阶段 5 | 2026-08-30 | tunnelpad-v1, tunnelpad-ui-refinements, tunnelpad-code-quality-refactor | [阶段 5 Step 0 基线](data-quality/tunnelpad-rust-migration-stage5-step0-20260830.md)；[ADR-0001](adr/0001-rust-core-single-owner.md)；[迁移说明](migrations/tunnelpad-rust-owner-cutover.md)；[专项计划](plans/tunnelpad-rust-migration.md) |
+| [TunnelPad Rust Core 迁移](plans/tunnelpad-rust-migration.md) | 实施中 | 阶段 5 | 2026-08-30 | tunnelpad-v1, tunnelpad-ui-refinements, tunnelpad-code-quality-refactor | [阶段 5 Step 0 基线与真实 Rust owner 验证](data-quality/tunnelpad-rust-migration-stage5-step0-20260830.md)；[ADR-0001](adr/0001-rust-core-single-owner.md)；[迁移说明](migrations/tunnelpad-rust-owner-cutover.md)；[专项计划](plans/tunnelpad-rust-migration.md) |
 | [TunnelPad 隧道稳定性与健康恢复](plans/tunnelpad-stability.md) | 设计中 | 阶段 0 | 2026-08-30 | tunnelpad-v1, tunnelpad-code-quality-refactor, tunnelpad-rust-migration | [专项计划](plans/tunnelpad-stability.md)；[功能图谱审计](data-quality/tunnelpad-functional-graph-review-20260830.md) |
 | [TunnelPad 日志事件流与面板生命周期](plans/tunnelpad-log-streaming.md) | 设计中 | 阶段 0 | 2026-08-30 | tunnelpad-v1, tunnelpad-code-quality-refactor, tunnelpad-rust-migration, tunnelpad-stability | [专项计划](plans/tunnelpad-log-streaming.md) |
 | [TunnelPad 隧道备注说明与列表副标题](plans/tunnelpad-tunnel-remarks.md) | 设计中 | 阶段 0 | 2026-08-30 | tunnelpad-v1, tunnelpad-code-quality-refactor, tunnelpad-rust-migration | [专项计划](plans/tunnelpad-tunnel-remarks.md) |
@@ -83,7 +83,7 @@
 |---|---|---|---|---|
 | - | - | - | 否 | 已延后 |
 | 阶段 1 实现与独立复核 | 阶段 1 已完成实现、fixture 验证和真实 ECS 只读回归；阶段 2 自动集成尚未启动，需另行准入。运行时任一双端点不一致、规则歧义、API 写入未确认或锁冲突都必须停止或保留新旧规则；Workbench 保留为恢复通道 | ecs-dynamic-ssh-ip 阶段 1 | 否 | 已通过 |
-| Rust Core 阶段 5 owner 切换准入 | 阶段 5 Step 0、owner ABI/配置 fixture、fake `launchd`、真实 `admin-tunnel` 基线和独立复核通过后再切换并删除 Swift Core | tunnelpad-rust-migration 阶段 5 | 是（阶段 5 实施） | 进行中 |
+| Rust Core 阶段 5 owner 切换准入 | 阶段 5 Step 0、owner ABI/配置 fixture、fake `launchd`、当前两条真实隧道的 Rust owner 验证、隔离 App/AX/退出复核和独立复核通过后再删除 Swift Core | tunnelpad-rust-migration 阶段 5 | 是（阶段 5 实施） | 进行中 |
 | TunnelPad 稳定性实现前置 | 等待 Rust Core 迁移阶段 5 完成；继续推进本计划阶段 0，阶段 1 实施仍需本计划自身独立准入 | tunnelpad-stability 阶段 1–3 | 否（阻塞阶段 1） | 进行中 |
 | TunnelPad 日志事件流实现前置 | 等待 Rust Core 迁移阶段 5 完成；继续推进本计划阶段 0，阶段 1 实施仍需本计划自身独立准入，并与稳定性共享模块改动串行 | tunnelpad-log-streaming 阶段 1–3 | 否（阻塞阶段 1） | 进行中 |
 | TunnelPad 隧道备注实现前置 | 等待 Rust Core 迁移阶段 5 完成并确定 Rust 配置事实源；继续推进本计划阶段 0，阶段 1 实施仍需本计划自身独立准入 | tunnelpad-tunnel-remarks 阶段 1–3 | 否（阻塞阶段 1） | 进行中 |

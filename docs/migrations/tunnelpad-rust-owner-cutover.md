@@ -36,8 +36,8 @@
 2. 用 fake `launchd` 完成配置读写、命令序列、错误注入、并发和取消 fixture。
 3. 将 Swift `TunnelManager` 收缩为 UI/FFI 门面，禁止直接调用 Swift `ConfigStore` 和 Swift 生命周期执行器（当前生产路径已切换，旧注入路径仅供迁移测试）。
 4. 隐藏并移除 `app` 执行器入口、实现和配置分支；当前配置只允许 `launchd`。
-5. 先在隔离 demo 验证 Rust owner，再验证用户授权的 `admin-tunnel`，随后逐条验证其他 `launchd` 隧道。
-6. 完成 Release、签名、AX、退出清理和 GitNexus 反向引用审计（当前已完成 Release/签名，AX/退出操作待隔离环境复核）。
+5. 先在隔离 demo 验证 Rust owner，再完成当前两条真实 `launchd` 隧道的状态/重启闭环，以及 `admin-tunnel` 的探针闭环。
+6. 完成 Release、签名、AX、退出清理和 GitNexus 反向引用审计（当前已完成 Release/签名、真实 Release App 退出清理；隔离环境 AX/退出操作待复核）。
 7. 通过阶段 5 独立复核后删除旧 Swift Core；删除后不保留 App 内 fallback。
 
 ## 配置兼容边界
