@@ -1,0 +1,10 @@
+{
+  "component": "ssh-command",
+  "cases": [
+    {"command": ["/usr/bin/ssh", "-N"]},
+    {"command": ["ssh", "-N", "-v"]},
+    {"command": ["ssh", "-vv"]},
+    {"command": ["/usr/bin/sshx", "-N"]},
+    {"command": ["ssh", "-N", "-v", "-L", "a:b"]}
+  ]
+}

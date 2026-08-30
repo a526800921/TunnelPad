@@ -1,0 +1,12 @@
+{
+  "component": "launchctl-status",
+  "cases": [
+    {"label": "a", "printOutput": "\tstate = running\n\tpid = 1234"},
+    {"label": "b", "printOutput": "\tstate = not running"},
+    {"label": "c", "printOutput": "\tstate = weird"},
+    {"label": "d", "printOutput": ""},
+    {"label": "e", "printOutput": "\tstate = running\n\t\tstate = active\n\tpid = 4321"},
+    {"label": "f", "printOutput": "\tstate = running\n\tpid = 99999999999"},
+    {"label": "g", "printOutput": "\tstate  =  running"}
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "component": "launchctl-bootstrap",
+  "cases": [
+    {"label": "a", "result": {"exitCode": 0, "stdout": "", "stderr": ""}},
+    {"label": "b", "result": {"exitCode": 9, "stdout": "", "stderr": "Input/output error"}},
+    {"label": "c", "spawnError": "launchctl 不可执行"}
+  ]
+}

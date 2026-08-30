@@ -1,0 +1,4 @@
+{
+  "component": "app-executor",
+  "command": ["/bin/sleep", "2"]
+}

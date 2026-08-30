@@ -1,0 +1,43 @@
+{
+  "component": "migration",
+  "scenarios": [
+    {
+      "name": "ok",
+      "agentLabel": "com.jafish.motorcycle-manual.web",
+      "agentPlist": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n\t<key>KeepAlive</key>\n\t<true/>\n\t<key>Label</key>\n\t<string>com.jafish.motorcycle-manual.web</string>\n\t<key>ProgramArguments</key>\n\t<array>\n\t\t<string>/usr/bin/ssh</string>\n\t\t<string>-N</string>\n\t</array>\n\t<key>RunAtLoad</key>\n\t<true/>\n\t<key>ThrottleInterval</key>\n\t<integer>30</integer>\n</dict>\n</plist>\n",
+      "runnerScript": [
+        {"op": "bootout", "result": {"exitCode": 0, "stdout": "", "stderr": ""}},
+        {"op": "bootstrap", "result": {"exitCode": 0, "stdout": "", "stderr": ""}},
+        {"op": "print", "result": {"exitCode": 0, "stdout": "\tstate = running\n\tpid = 99", "stderr": ""}}
+      ]
+    },
+    {
+      "name": "verify-fail",
+      "agentLabel": "com.jafish.motorcycle-manual.web",
+      "agentPlist": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n\t<key>Label</key>\n\t<string>com.jafish.motorcycle-manual.web</string>\n\t<key>ProgramArguments</key>\n\t<array>\n\t\t<string>/usr/bin/ssh</string>\n\t</array>\n</dict>\n</plist>\n",
+      "runnerScript": [
+        {"op": "bootout", "result": {"exitCode": 0, "stdout": "", "stderr": ""}},
+        {"op": "bootstrap", "result": {"exitCode": 0, "stdout": "", "stderr": ""}},
+        {"op": "print", "repeat": 20, "result": {"exitCode": 1, "stdout": "", "stderr": "not loaded"}}
+      ]
+    },
+    {
+      "name": "bootstrap-fail",
+      "agentLabel": "com.jafish.motorcycle-manual.web",
+      "agentPlist": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n\t<key>Label</key>\n\t<string>com.jafish.motorcycle-manual.web</string>\n\t<key>ProgramArguments</key>\n\t<array>\n\t\t<string>/usr/bin/ssh</string>\n\t</array>\n</dict>\n</plist>\n",
+      "runnerScript": [
+        {"op": "bootout", "result": {"exitCode": 0, "stdout": "", "stderr": ""}},
+        {"op": "bootstrap", "result": {"exitCode": 9, "stdout": "", "stderr": "Input/output error"}},
+        {"op": "bootout", "result": {"exitCode": 3, "stdout": "", "stderr": "Could not find service \"gui/x\" in domain"}},
+        {"op": "bootout", "result": {"exitCode": 0, "stdout": "", "stderr": ""}},
+        {"op": "bootstrap", "result": {"exitCode": 0, "stdout": "", "stderr": ""}}
+      ]
+    },
+    {
+      "name": "invalid-agent",
+      "agentLabel": "com.jafish.motorcycle-manual.Bad ID",
+      "agentPlist": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n\t<key>Label</key>\n\t<string>com.jafish.motorcycle-manual.Bad ID</string>\n\t<key>ProgramArguments</key>\n\t<array>\n\t\t<string>/usr/bin/ssh</string>\n\t</array>\n</dict>\n</plist>\n",
+      "runnerScript": []
+    }
+  ]
+}

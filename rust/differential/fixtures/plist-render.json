@@ -1,0 +1,13 @@
+{
+  "component": "plist-render",
+  "cases": [
+    {
+      "tunnel": {"id": "web", "name": "web", "command": ["/usr/bin/ssh", "-N"], "executor": "launchd", "keepAlive": true, "throttleInterval": 10},
+      "logPath": "/tmp/fixture/web.log"
+    },
+    {
+      "tunnel": {"id": "mixed-x", "name": "名字&<带>特殊", "command": ["/usr/bin/ssh", "-N", "-L", "8080:127.0.0.1:80", "host"], "executor": "launchd", "keepAlive": false, "throttleInterval": 30},
+      "logPath": "/tmp/fixture/mixed.log"
+    }
+  ]
+}

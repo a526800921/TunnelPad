@@ -1,0 +1,32 @@
+{
+  "component": "legacy-derive",
+  "labels": [
+    "com.jafish.motorcycle-manual.web",
+    "com.jafish.motorcycle-manual.Bad ID",
+    "com.jafish.motorcycle-manual.",
+    "other.prefix.x"
+  ],
+  "agents": [
+    {
+      "label": "com.jafish.motorcycle-manual.web",
+      "programArguments": ["/usr/bin/ssh", "-N"],
+      "keepAlive": true,
+      "runAtLoad": true,
+      "throttleInterval": 30
+    },
+    {
+      "label": "com.jafish.motorcycle-manual.empty",
+      "programArguments": [],
+      "keepAlive": false,
+      "runAtLoad": false,
+      "throttleInterval": null
+    },
+    {
+      "label": "com.jafish.motorcycle-manual.def",
+      "programArguments": ["/usr/bin/ssh", "-L", "1.2.3.4:5.6.7.8"],
+      "keepAlive": false,
+      "runAtLoad": true,
+      "throttleInterval": null
+    }
+  ]
+}

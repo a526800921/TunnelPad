@@ -1,0 +1,10 @@
+{
+  "component": "launchctl-bootout",
+  "cases": [
+    {"label": "a", "result": {"exitCode": 0, "stdout": "", "stderr": ""}},
+    {"label": "b", "result": {"exitCode": 3, "stdout": "", "stderr": "Could not find service \"gui/x\" in domain"}},
+    {"label": "c", "result": {"exitCode": 1, "stdout": "", "stderr": "Bootstrap failed: 5"}},
+    {"label": "d", "result": {"exitCode": 4, "stdout": "No such file or directory", "stderr": ""}},
+    {"label": "e", "spawnError": "launchctl 不可执行"}
+  ]
+}

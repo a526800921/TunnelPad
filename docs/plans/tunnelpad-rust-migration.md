@@ -5,7 +5,7 @@
 - 最后更新：2026-08-30
 - 前置：`tunnelpad-v1`、`tunnelpad-ui-refinements` 与 `tunnelpad-code-quality-refactor` 已完成；本计划只在现有 Swift 行为基线上设计 Rust Core 的渐进替换
 
-当前说明：用户已确认迁移边界为“保留 SwiftUI/AppKit 菜单栏与窗口 UI，逐步用 Rust 替换 `TunnelPadCore`”，并确认以“C ABI 主路径 + Swift Core 可回退”作为默认 bridge 方案（sidecar IPC 为备选）。阶段 0、阶段 1 均已通过独立准入复核；阶段 2（Rust Core 组件 parity + 差分测试）达到待实施标准并进入实施。本计划不直接修改现有 Swift 行为，不接管真实用户隧道。
+当前说明：用户已确认迁移边界为“保留 SwiftUI/AppKit 菜单栏与窗口 UI，逐步用 Rust 替换 `TunnelPadCore`”，并确认以“C ABI 主路径 + Swift Core 可回退”作为默认 bridge 方案（sidecar IPC 为备选）。阶段 0、1 均已通过独立准入复核；阶段 2（9 类组件 parity + 差分测试）已实现并全绿，等待独立完成复核。本计划不直接修改现有 Swift 行为，不接管真实用户隧道。
 
 ## 背景
 

@@ -1,0 +1,11 @@
+{
+  "component": "probe",
+  "cases": [
+    {"url": "http://127.0.0.1:8080/health", "expectedStatuses": [200, 204], "perform": {"status": 200}},
+    {"url": "http://127.0.0.1:8080/health", "expectedStatuses": [200], "perform": {"status": 502}},
+    {"url": "http://127.0.0.1:8080/health", "expectedStatuses": [200], "perform": {"error": "连接被拒绝"}},
+    {"url": "", "expectedStatuses": [200], "perform": {"status": 200}},
+    {"url": "http://bad url", "expectedStatuses": [200], "perform": {"status": 200}},
+    {"url": "http://127.0.0.1:8080/health", "expectedStatuses": [], "perform": {"status": 200}}
+  ]
+}

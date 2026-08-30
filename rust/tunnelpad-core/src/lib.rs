@@ -9,7 +9,21 @@
 //! 契约版本：[`ABI_VERSION`] = 1。演进规则（阶段 1 冻结）：
 //! 只允许追加新函数与追加错误码；任何破坏性变化必须递增 ABI 版本。
 
+pub mod app_executor;
+pub mod apple_json;
+pub mod config_store;
 pub mod ffi;
+pub mod launchctl;
+pub mod launchd_executing;
+pub mod legacy;
+pub mod log_tail;
+pub mod migration;
+pub mod paths;
+pub mod plist_render;
+pub mod probe;
+pub mod shutdown;
+pub mod ssh_command;
+pub mod tunnel_id;
 
 use serde::{Deserialize, Serialize};
 
@@ -55,10 +69,10 @@ pub enum ExecutorKind {
 pub struct ProbeConfig {
     pub url: String,
     #[serde(default = "default_expected_statuses")]
-    pub expected_statuses: Vec<i64>,
+    pub expected_statuses: Vec<i32>,
 }
 
-fn default_expected_statuses() -> Vec<i64> {
+fn default_expected_statuses() -> Vec<i32> {
     vec![200]
 }
 
@@ -114,6 +128,13 @@ pub struct AppConfig {
 /// version != 1 → `SCHEMA_VERSION`；id 非法 → `INVALID_ID`；
 /// command 为空或首元素为空 → `INVALID_COMMAND`。
 pub fn parse_app_config(input: &str) -> Result<String, TpError> {
+    let config = parse_config_envelope(input)?;
+    serde_json::to_string(&config)
+        .map_err(|e| TpError::new(error_code::INVALID_JSON, format!("config.json 序列化失败：{e}")))
+}
+
+/// 解析 config.json 结构（供 ConfigStore 等复用）：version 检查 + id/command 校验。
+pub fn parse_config_envelope(input: &str) -> Result<AppConfig, TpError> {
     let value: serde_json::Value = serde_json::from_str(input)
         .map_err(|e| TpError::new(error_code::INVALID_JSON, format!("config.json 解析失败：{e}")))?;
 
@@ -145,9 +166,7 @@ pub fn parse_app_config(input: &str) -> Result<String, TpError> {
             ));
         }
     }
-
-    serde_json::to_string(&config)
-        .map_err(|e| TpError::new(error_code::INVALID_JSON, format!("config.json 序列化失败：{e}")))
+    Ok(config)
 }
 
 /// `TunnelStatus` 的规范 JSON（阶段 1 契约）：

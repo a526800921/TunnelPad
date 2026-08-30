@@ -1,0 +1,13 @@
+{
+  "component": "log-tail",
+  "cases": [
+    {"content": "a\nb\nc", "maxLines": 500},
+    {"content": "a\nb\nc", "maxLines": 2},
+    {"content": "a\nb\nc\n", "maxLines": 500},
+    {"content": "", "maxLines": 500},
+    {"content": "\n\n", "maxLines": 500},
+    {"content": "a\n\nb", "maxLines": 500},
+    {"content": "中文\n日志", "maxLines": 1},
+    {"missing": true, "maxLines": 500}
+  ]
+}

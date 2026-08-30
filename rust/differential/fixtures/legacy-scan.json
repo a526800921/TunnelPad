@@ -1,0 +1,12 @@
+{
+  "component": "legacy-scan",
+  "files": {
+    "a-manual.web.plist": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n\t<key>KeepAlive</key>\n\t<true/>\n\t<key>Label</key>\n\t<string>com.jafish.motorcycle-manual.web</string>\n\t<key>ProgramArguments</key>\n\t<array>\n\t\t<string>/usr/bin/ssh</string>\n\t\t<string>-N</string>\n\t\t<string>-L</string>\n\t\t<string>8080:127.0.0.1:80</string>\n\t\t<string>host</string>\n\t</array>\n\t<key>RunAtLoad</key>\n\t<true/>\n\t<key>ThrottleInterval</key>\n\t<integer>30</integer>\n</dict>\n</plist>\n",
+    "b-manual.other.plist": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n\t<key>ProgramArguments</key>\n\t<array>\n\t\t<string>/usr/bin/ssh</string>\n\t</array>\n</dict>\n</plist>\n",
+    "c-not-a-plist.txt": "ignore me",
+    "d-manual.Bad-ID.plist": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n\t<key>Label</key>\n\t<string>com.jafish.motorcycle-manual.Bad ID</string>\n\t<key>ProgramArguments</key>\n\t<array>\n\t\t<string>/usr/bin/ssh</string>\n\t</array>\n</dict>\n</plist>\n",
+    "e-foreign.plist": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n\t<key>Label</key>\n\t<string>com.other.vendor.thing</string>\n\t<key>ProgramArguments</key>\n\t<array>\n\t\t<string>/bin/true</string>\n\t</array>\n</dict>\n</plist>\n",
+    "f-manual.corrupt.plist": "not a plist at all",
+    "g-manual.third.plist": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n\t<key>Label</key>\n\t<string>com.jafish.motorcycle-manual.third</string>\n\t<key>ProgramArguments</key>\n\t<array>\n\t\t<string>/usr/bin/ssh</string>\n\t\t<string>-N</string>\n\t</array>\n</dict>\n</plist>\n"
+  }
+}

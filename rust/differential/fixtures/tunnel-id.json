@@ -1,0 +1,15 @@
+{
+  "component": "tunnel-id",
+  "cases": [
+    {"name": "Web Server", "existing": []},
+    {"name": "管理 隧道", "existing": []},
+    {"name": "管理A隧道", "existing": []},
+    {"name": "  --Web--  ", "existing": []},
+    {"name": "a  b", "existing": []},
+    {"name": "a_b", "existing": []},
+    {"name": "!!!", "existing": []},
+    {"name": "Web", "existing": ["web"]},
+    {"name": "Web", "existing": ["web", "web-2", "web-3"]},
+    {"name": "中文ABC123", "existing": []}
+  ]
+}
