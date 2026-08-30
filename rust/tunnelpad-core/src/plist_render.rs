@@ -33,8 +33,14 @@ pub fn plist_xml(tunnel: &TunnelConfig, log_path: &str) -> String {
     out.push_str("<dict>\n");
     // 键按字母序：KeepAlive, Label, ProcessType, ProgramArguments, RunAtLoad,
     // StandardErrorPath, StandardOutPath, ThrottleInterval
-    out.push_str(&format!("\t<key>KeepAlive</key>\n\t<{}/>\n", if tunnel.keep_alive { "true" } else { "false" }));
-    out.push_str(&format!("\t<key>Label</key>\n\t<string>{}</string>\n", escape_xml(&tunnel.launchd_label())));
+    out.push_str(&format!(
+        "\t<key>KeepAlive</key>\n\t<{}/>\n",
+        if tunnel.keep_alive { "true" } else { "false" }
+    ));
+    out.push_str(&format!(
+        "\t<key>Label</key>\n\t<string>{}</string>\n",
+        escape_xml(&tunnel.launchd_label())
+    ));
     out.push_str("\t<key>ProcessType</key>\n\t<string>Background</string>\n");
     out.push_str("\t<key>ProgramArguments</key>\n\t<array>\n");
     for arg in &tunnel.command {
@@ -50,7 +56,10 @@ pub fn plist_xml(tunnel: &TunnelConfig, log_path: &str) -> String {
         "\t<key>StandardOutPath</key>\n\t<string>{}</string>\n",
         escape_xml(log_path)
     ));
-    out.push_str(&format!("\t<key>ThrottleInterval</key>\n\t<integer>{}</integer>\n", tunnel.throttle_interval));
+    out.push_str(&format!(
+        "\t<key>ThrottleInterval</key>\n\t<integer>{}</integer>\n",
+        tunnel.throttle_interval
+    ));
     out.push_str("</dict>\n");
     out.push_str("</plist>\n");
     out

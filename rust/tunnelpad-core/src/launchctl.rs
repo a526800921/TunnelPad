@@ -22,7 +22,11 @@ pub enum TunnelStatus {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ExecutorError {
     #[serde(rename_all = "camelCase")]
-    CommandFailed { operation: String, exit_code: i32, stderr: String },
+    CommandFailed {
+        operation: String,
+        exit_code: i32,
+        stderr: String,
+    },
     #[serde(rename_all = "camelCase")]
     Spawn { message: String },
 }
@@ -68,7 +72,10 @@ pub struct LaunchCtlExecutor<R: ProcessRunning> {
 
 impl Default for LaunchCtlExecutor<SystemProcessRunner> {
     fn default() -> Self {
-        LaunchCtlExecutor { runner: SystemProcessRunner, uid: current_uid() }
+        LaunchCtlExecutor {
+            runner: SystemProcessRunner,
+            uid: current_uid(),
+        }
     }
 }
 
@@ -93,7 +100,10 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
     pub fn bootstrap(&self, _label: &str, plist_path: &Path) -> Result<(), ExecutorError> {
         let result = self
             .runner
-            .run(Self::LAUNCHCTL_PATH, &["bootstrap".into(), self.domain(), path_display(plist_path)])
+            .run(
+                Self::LAUNCHCTL_PATH,
+                &["bootstrap".into(), self.domain(), path_display(plist_path)],
+            )
             .map_err(|message| ExecutorError::Spawn { message })?;
         if result.exit_code == 0 {
             Ok(())
@@ -172,7 +182,9 @@ pub fn parse_status(stdout: &str) -> TunnelStatus {
     match state.as_deref() {
         Some("running") => TunnelStatus::Running { pid },
         Some("not running") => TunnelStatus::NotRunning,
-        Some(other) => TunnelStatus::Other { state: other.to_string() },
+        Some(other) => TunnelStatus::Other {
+            state: other.to_string(),
+        },
         None => TunnelStatus::NotLoaded,
     }
 }
@@ -211,7 +223,9 @@ mod tests {
 
     impl FakeRunner {
         fn new(outputs: Vec<Result<ProcessResult, String>>) -> Self {
-            FakeRunner { outputs: Mutex::new(outputs.into()) }
+            FakeRunner {
+                outputs: Mutex::new(outputs.into()),
+            }
         }
     }
 
@@ -228,7 +242,10 @@ mod tests {
     #[test]
     fn parse_status_matches_swift() {
         // 无顶层 state（0 缩进的行被忽略）→ notLoaded
-        assert_eq!(parse_status("state = running\npid = 5"), TunnelStatus::NotLoaded);
+        assert_eq!(
+            parse_status("state = running\npid = 5"),
+            TunnelStatus::NotLoaded
+        );
         // 嵌套块（2 缩进）里的 state = active 被忽略
         assert_eq!(
             parse_status("\tstate = running\n\tpid = 1234\n\t\tstate = active"),
@@ -238,13 +255,21 @@ mod tests {
             parse_status("\tstate = running\n\tpid = 1234"),
             TunnelStatus::Running { pid: Some(1234) }
         );
-        assert_eq!(parse_status("\tstate = not running"), TunnelStatus::NotRunning);
+        assert_eq!(
+            parse_status("\tstate = not running"),
+            TunnelStatus::NotRunning
+        );
         assert_eq!(
             parse_status("\tstate = weird-state"),
-            TunnelStatus::Other { state: "weird-state".into() }
+            TunnelStatus::Other {
+                state: "weird-state".into()
+            }
         );
         assert_eq!(parse_status(""), TunnelStatus::NotLoaded);
-        assert_eq!(parse_status("\tstate = running"), TunnelStatus::Running { pid: None });
+        assert_eq!(
+            parse_status("\tstate = running"),
+            TunnelStatus::Running { pid: None }
+        );
         // 非法 pid 忽略
         assert_eq!(
             parse_status("\tstate = running\n\tpid = 99999999999"),
@@ -277,7 +302,11 @@ mod tests {
             501,
         );
         match executor.bootout("x") {
-            Err(ExecutorError::CommandFailed { operation, exit_code, stderr }) => {
+            Err(ExecutorError::CommandFailed {
+                operation,
+                exit_code,
+                stderr,
+            }) => {
                 assert_eq!(operation, "bootout");
                 assert_eq!(exit_code, 1);
                 assert_eq!(stderr, "Bootstrap failed: 5");

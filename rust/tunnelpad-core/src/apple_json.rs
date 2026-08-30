@@ -33,7 +33,10 @@ fn render_tunnel(tunnel: &TunnelConfig) -> String {
     ));
     out.push_str(&format!("      \"id\" : {},\n", render_string(&tunnel.id)));
     out.push_str(&format!("      \"keepAlive\" : {},\n", tunnel.keep_alive));
-    out.push_str(&format!("      \"name\" : {},\n", render_string(&tunnel.name)));
+    out.push_str(&format!(
+        "      \"name\" : {},\n",
+        render_string(&tunnel.name)
+    ));
     if let Some(probe) = &tunnel.probe {
         out.push_str("      \"probe\" : {\n");
         // 键序：expectedStatuses, url
@@ -41,10 +44,16 @@ fn render_tunnel(tunnel: &TunnelConfig) -> String {
             "        \"expectedStatuses\" : {},\n",
             render_int_array(&probe.expected_statuses, 8)
         ));
-        out.push_str(&format!("        \"url\" : {}\n", render_string(&probe.url)));
+        out.push_str(&format!(
+            "        \"url\" : {}\n",
+            render_string(&probe.url)
+        ));
         out.push_str("      },\n");
     }
-    out.push_str(&format!("      \"throttleInterval\" : {}\n", tunnel.throttle_interval));
+    out.push_str(&format!(
+        "      \"throttleInterval\" : {}\n",
+        tunnel.throttle_interval
+    ));
     out.push_str("    }");
     out
 }
@@ -63,7 +72,10 @@ fn render_array<T, F: Fn(&T) -> String>(items: &[T], indent: usize, render: F) -
         return format!("[\n\n{pad}]");
     }
     let inner_pad = " ".repeat(indent + 2);
-    let rendered: Vec<String> = items.iter().map(|item| format!("{inner_pad}{},", render(item))).collect();
+    let rendered: Vec<String> = items
+        .iter()
+        .map(|item| format!("{inner_pad}{},", render(item)))
+        .collect();
     let mut joined = rendered.join("\n");
     if joined.ends_with(',') {
         joined.truncate(joined.len() - 1);
@@ -96,7 +108,10 @@ mod tests {
 
     #[test]
     fn empty_tunnels_matches_swift_pretty_printed() {
-        let config = AppConfig { version: 1, tunnels: vec![] };
+        let config = AppConfig {
+            version: 1,
+            tunnels: vec![],
+        };
         assert_eq!(
             app_config_to_apple_json(&config),
             "{\n  \"tunnels\" : [\n\n  ],\n  \"version\" : 1\n}"

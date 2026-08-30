@@ -52,7 +52,11 @@ pub struct DemoLifecycle<L: LaunchdExecuting> {
 impl<L: LaunchdExecuting> DemoLifecycle<L> {
     pub fn new(paths: TunnelPaths, launchd: L) -> Self {
         let app = AppProcessExecutor::new(paths.clone());
-        DemoLifecycle { paths, launchd, app }
+        DemoLifecycle {
+            paths,
+            launchd,
+            app,
+        }
     }
 
     fn validate_demo_id(&self, id: &str) -> Result<(), DemoOpError> {
@@ -72,8 +76,13 @@ impl<L: LaunchdExecuting> DemoLifecycle<L> {
         for tunnel in tunnels {
             self.validate_demo_id(&tunnel.id)?;
         }
-        let config = AppConfig { version: 1, tunnels: tunnels.to_vec() };
-        self.store().save(&config).map_err(|_| DemoOpError::ConfigSaveFailed)?;
+        let config = AppConfig {
+            version: 1,
+            tunnels: tunnels.to_vec(),
+        };
+        self.store()
+            .save(&config)
+            .map_err(|_| DemoOpError::ConfigSaveFailed)?;
         for tunnel in tunnels {
             if tunnel.executor == crate::ExecutorKind::Launchd {
                 write_plist(tunnel, &self.paths).map_err(|_| DemoOpError::PlistCleanupFailed)?;
@@ -104,14 +113,17 @@ impl<L: LaunchdExecuting> DemoLifecycle<L> {
                 ) {
                     return Ok("noop");
                 }
-                let plist = write_plist(&tunnel, &self.paths).map_err(|_| DemoOpError::PlistCleanupFailed)?;
+                let plist = write_plist(&tunnel, &self.paths)
+                    .map_err(|_| DemoOpError::PlistCleanupFailed)?;
                 self.launchd
                     .bootstrap(&tunnel.launchd_label(), &plist)
                     .map_err(|_| DemoOpError::StopFailed)?;
                 Ok("ok")
             }
             crate::ExecutorKind::App => {
-                self.app.start(&tunnel).map_err(|_| DemoOpError::StopFailed)?;
+                self.app
+                    .start(&tunnel)
+                    .map_err(|_| DemoOpError::StopFailed)?;
                 Ok("ok")
             }
         }
@@ -141,14 +153,17 @@ impl<L: LaunchdExecuting> DemoLifecycle<L> {
             crate::ExecutorKind::Launchd => {
                 // restartSync：try? bootout（未加载不算错误）→ 重写 plist → bootstrap
                 let _ = self.launchd.bootout(&tunnel.launchd_label());
-                let plist = write_plist(&tunnel, &self.paths).map_err(|_| DemoOpError::PlistCleanupFailed)?;
+                let plist = write_plist(&tunnel, &self.paths)
+                    .map_err(|_| DemoOpError::PlistCleanupFailed)?;
                 self.launchd
                     .bootstrap(&tunnel.launchd_label(), &plist)
                     .map_err(|_| DemoOpError::StopFailed)?;
                 Ok("ok")
             }
             crate::ExecutorKind::App => {
-                self.app.restart(&tunnel).map_err(|_| DemoOpError::StopFailed)?;
+                self.app
+                    .restart(&tunnel)
+                    .map_err(|_| DemoOpError::StopFailed)?;
                 Ok("ok")
             }
         }
@@ -223,7 +238,9 @@ impl<L: LaunchdExecuting> DemoLifecycle<L> {
         match self.store().save(&config) {
             Ok(()) => Ok(("ok", log_warning)),
             Err(_) => {
-                config.tunnels.insert(index.min(config.tunnels.len()), removed);
+                config
+                    .tunnels
+                    .insert(index.min(config.tunnels.len()), removed);
                 Err(DemoOpError::ConfigSaveFailed)
             }
         }
@@ -241,14 +258,21 @@ impl<L: LaunchdExecuting> DemoLifecycle<L> {
         for tunnel in &config.tunnels {
             match tunnel.executor {
                 crate::ExecutorKind::Launchd => {
-                    if self.launchd.bootout(&tunnel.launchd_label()).unwrap_or(false) {
+                    if self
+                        .launchd
+                        .bootout(&tunnel.launchd_label())
+                        .unwrap_or(false)
+                    {
                         stopped += 1;
                     }
                 }
                 crate::ExecutorKind::App => {
                     if managed_app_ids.iter().any(|id| id == &tunnel.id) {
                         stopped += 1;
-                    } else if shutdown::kill_by_pidfile(&self.paths.pidfile_url(tunnel), libc::SIGTERM) {
+                    } else if shutdown::kill_by_pidfile(
+                        &self.paths.pidfile_url(tunnel),
+                        libc::SIGTERM,
+                    ) {
                         // 兼容 demo owner 之外留下的 pidfile；没有对应 app
                         // context 时不存在可推进的 generation。
                         stopped += 1;
@@ -282,7 +306,10 @@ impl<L: LaunchdExecuting> DemoLifecycle<L> {
     /// 渲染（不落盘）的 plist 内容。
     pub fn rendered_plist(&self, id: &str) -> Result<String, DemoOpError> {
         let tunnel = self.load_tunnel(id)?;
-        Ok(plist_xml(&tunnel, &path_string(&self.paths.log_url(&tunnel))))
+        Ok(plist_xml(
+            &tunnel,
+            &path_string(&self.paths.log_url(&tunnel)),
+        ))
     }
 }
 
@@ -310,7 +337,11 @@ fn sorted_files(dir: &Path) -> Vec<String> {
 struct BorrowedLaunchd<'a, L: LaunchdExecuting + ?Sized>(&'a L);
 
 impl<L: LaunchdExecuting + ?Sized> LaunchdExecuting for BorrowedLaunchd<'_, L> {
-    fn bootstrap(&self, label: &str, plist_path: &Path) -> Result<(), crate::launchctl::ExecutorError> {
+    fn bootstrap(
+        &self,
+        label: &str,
+        plist_path: &Path,
+    ) -> Result<(), crate::launchctl::ExecutorError> {
         self.0.bootstrap(label, plist_path)
     }
 
@@ -335,12 +366,19 @@ mod tests {
 
     impl FakeLaunchd {
         fn new() -> Self {
-            FakeLaunchd { bootstraps: Mutex::new(0), bootouts: Mutex::new(0) }
+            FakeLaunchd {
+                bootstraps: Mutex::new(0),
+                bootouts: Mutex::new(0),
+            }
         }
     }
 
     impl LaunchdExecuting for FakeLaunchd {
-        fn bootstrap(&self, _label: &str, _plist_path: &Path) -> Result<(), crate::launchctl::ExecutorError> {
+        fn bootstrap(
+            &self,
+            _label: &str,
+            _plist_path: &Path,
+        ) -> Result<(), crate::launchctl::ExecutorError> {
             *self.bootstraps.lock().unwrap() += 1;
             Ok(())
         }
@@ -360,7 +398,8 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let home = std::env::temp_dir().join(format!("tp-demo-test-{}-{stamp}", std::process::id()));
+        let home =
+            std::env::temp_dir().join(format!("tp-demo-test-{}-{stamp}", std::process::id()));
         fs::create_dir_all(&home).unwrap();
         home
     }
@@ -384,7 +423,10 @@ mod tests {
         let mut tunnel = demo_tunnel();
         tunnel.id = "admin-tunnel".into();
 
-        assert_eq!(lifecycle.install(&[tunnel]), Err(DemoOpError::InvalidDemoID));
+        assert_eq!(
+            lifecycle.install(&[tunnel]),
+            Err(DemoOpError::InvalidDemoID)
+        );
         assert!(!lifecycle.paths.config_url().exists());
         fs::remove_dir_all(home).ok();
     }
@@ -397,7 +439,10 @@ mod tests {
         let lifecycle = DemoLifecycle::new(paths.clone(), fake);
         let tunnel = demo_tunnel();
 
-        assert_eq!(lifecycle.install(&[tunnel.clone()]).unwrap(), vec![tunnel.id.clone()]);
+        assert_eq!(
+            lifecycle.install(&[tunnel.clone()]).unwrap(),
+            vec![tunnel.id.clone()]
+        );
         assert!(paths.config_url().exists());
         assert!(paths.launchd_plist_url(&tunnel).exists());
         assert_eq!(lifecycle.start(&tunnel.id), Ok("ok"));
@@ -453,7 +498,10 @@ mod tests {
             if let Some(plan) = lifecycle.app.handle_exits().into_iter().next() {
                 break plan;
             }
-            assert!(std::time::Instant::now() < deadline, "应观察到 app 迟到重启计划");
+            assert!(
+                std::time::Instant::now() < deadline,
+                "应观察到 app 迟到重启计划"
+            );
             std::thread::sleep(std::time::Duration::from_millis(20));
         };
 

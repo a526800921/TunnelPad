@@ -52,14 +52,22 @@ pub fn scan(directory: &Path) -> Vec<LegacyAgent> {
 }
 
 pub fn parse_plist_file(path: &Path) -> Result<LegacyAgent, LegacyImporterError> {
-    let data = fs::read(path).map_err(|_| LegacyImporterError::UnreadablePlist { path: path_display(path) })?;
-    let text = String::from_utf8(data)
-        .map_err(|_| LegacyImporterError::UnreadablePlist { path: path_display(path) })?;
-    let dict = parse_plist_xml(&text)
-        .ok_or_else(|| LegacyImporterError::UnreadablePlist { path: path_display(path) })?;
+    let data = fs::read(path).map_err(|_| LegacyImporterError::UnreadablePlist {
+        path: path_display(path),
+    })?;
+    let text = String::from_utf8(data).map_err(|_| LegacyImporterError::UnreadablePlist {
+        path: path_display(path),
+    })?;
+    let dict = parse_plist_xml(&text).ok_or_else(|| LegacyImporterError::UnreadablePlist {
+        path: path_display(path),
+    })?;
     let label = match dict.get("Label") {
         Some(PlistValue::String(label)) => label.clone(),
-        _ => return Err(LegacyImporterError::MissingLabel { path: path_display(path) }),
+        _ => {
+            return Err(LegacyImporterError::MissingLabel {
+                path: path_display(path),
+            })
+        }
     };
     let program_arguments = match dict.get("ProgramArguments") {
         Some(PlistValue::Array(items)) => items
@@ -140,7 +148,10 @@ struct XmlScanner<'a> {
 
 /// 解析 plist XML 子集；任何结构意外都返回 None（对应 Swift 的 unreadable）。
 pub fn parse_plist_xml(text: &str) -> Option<PlistValue> {
-    let mut scanner = XmlScanner { bytes: text.as_bytes(), pos: 0 };
+    let mut scanner = XmlScanner {
+        bytes: text.as_bytes(),
+        pos: 0,
+    };
     scanner.skip_prolog()?;
     let value = scanner.parse_element()?;
     // 尾部允许 </plist> 与空白
@@ -217,7 +228,10 @@ impl<'a> XmlScanner<'a> {
     }
 
     fn find(&self, needle: u8) -> Option<usize> {
-        self.bytes[self.pos..].iter().position(|c| *c == needle).map(|i| self.pos + i)
+        self.bytes[self.pos..]
+            .iter()
+            .position(|c| *c == needle)
+            .map(|i| self.pos + i)
     }
 
     fn parse_element(&mut self) -> Option<PlistValue> {
@@ -295,7 +309,9 @@ impl<'a> XmlScanner<'a> {
     fn read_text_until_tag(&mut self, name: &str) -> Option<String> {
         let closing = format!("</{name}>");
         let rest = &self.bytes[self.pos..];
-        let end = rest.windows(closing.len()).position(|w| w == closing.as_bytes())?;
+        let end = rest
+            .windows(closing.len())
+            .position(|w| w == closing.as_bytes())?;
         let raw = std::str::from_utf8(&rest[..end]).ok()?;
         self.pos += end + closing.len();
         Some(decode_entities(raw))
@@ -370,10 +386,18 @@ mod tests {
         let agent = parse_plist_xml(SAMPLE).expect("应可解析");
         assert_eq!(
             agent.get("Label"),
-            Some(&PlistValue::String("com.jafish.motorcycle-manual.web".into()))
+            Some(&PlistValue::String(
+                "com.jafish.motorcycle-manual.web".into()
+            ))
         );
-        assert!(matches!(agent.get("KeepAlive"), Some(PlistValue::Boolean(true))));
-        assert!(matches!(agent.get("ThrottleInterval"), Some(PlistValue::Integer(30))));
+        assert!(matches!(
+            agent.get("KeepAlive"),
+            Some(PlistValue::Boolean(true))
+        ));
+        assert!(matches!(
+            agent.get("ThrottleInterval"),
+            Some(PlistValue::Integer(30))
+        ));
     }
 
     #[test]
@@ -395,10 +419,16 @@ mod tests {
         // 非法 id 后缀
         assert_eq!(tunnel_id("com.jafish.motorcycle-manual.Bad ID"), None);
         // ThrottleInterval 缺省 → 10
-        let no_throttle = LegacyAgent { throttle_interval: None, ..agent };
+        let no_throttle = LegacyAgent {
+            throttle_interval: None,
+            ..agent
+        };
         assert_eq!(tunnel_config(&no_throttle).unwrap().throttle_interval, 10);
         // 空 ProgramArguments
-        let empty_args = LegacyAgent { program_arguments: vec![], ..no_throttle };
+        let empty_args = LegacyAgent {
+            program_arguments: vec![],
+            ..no_throttle
+        };
         assert!(tunnel_config(&empty_args).is_none());
     }
 }

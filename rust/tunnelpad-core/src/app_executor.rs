@@ -69,7 +69,11 @@ impl AppProcessExecutor {
         }
     }
 
-    pub fn with_options(paths: TunnelPaths, restart_delay_override: Option<u64>, log_timestamp: LogTimestampFn) -> Self {
+    pub fn with_options(
+        paths: TunnelPaths,
+        restart_delay_override: Option<u64>,
+        log_timestamp: LogTimestampFn,
+    ) -> Self {
         AppProcessExecutor {
             paths,
             restart_delay_override,
@@ -106,13 +110,23 @@ impl AppProcessExecutor {
         };
 
         let pid = child.id() as i32;
-        let line = format!("[{}] spawned pid={} (executor=app)\n", (self.log_timestamp)(), pid);
+        let line = format!(
+            "[{}] spawned pid={} (executor=app)\n",
+            (self.log_timestamp)(),
+            pid
+        );
         let _ = log.write_all(line.as_bytes());
         let _ = log.flush();
 
         self.inner.lock().unwrap().contexts.insert(
             tunnel.id.clone(),
-            AppContext { child, tunnel: tunnel.clone(), generation, manual_stop: false, log },
+            AppContext {
+                child,
+                tunnel: tunnel.clone(),
+                generation,
+                manual_stop: false,
+                log,
+            },
         );
 
         if let Err(error) = self.write_pidfile(pid, tunnel) {
@@ -150,9 +164,9 @@ impl AppProcessExecutor {
     pub fn status(&self, id: &str) -> TunnelStatus {
         let inner = self.inner.lock().unwrap();
         match inner.contexts.get(id) {
-            Some(ctx) if probe_exit(ctx.child.id() as i32).is_running() => {
-                TunnelStatus::Running { pid: Some(ctx.child.id() as i32) }
-            }
+            Some(ctx) if probe_exit(ctx.child.id() as i32).is_running() => TunnelStatus::Running {
+                pid: Some(ctx.child.id() as i32),
+            },
             _ => TunnelStatus::NotLoaded,
         }
     }
@@ -176,7 +190,14 @@ impl AppProcessExecutor {
     }
 
     pub fn managed_ids(&self) -> Vec<String> {
-        let mut ids: Vec<String> = self.inner.lock().unwrap().contexts.keys().cloned().collect();
+        let mut ids: Vec<String> = self
+            .inner
+            .lock()
+            .unwrap()
+            .contexts
+            .keys()
+            .cloned()
+            .collect();
         ids.sort();
         ids
     }
@@ -190,15 +211,23 @@ impl AppProcessExecutor {
             let mut inner = self.inner.lock().unwrap();
             let ids: Vec<String> = inner.contexts.keys().cloned().collect();
             for id in ids {
-                let Some(ctx) = inner.contexts.get(&id) else { continue };
+                let Some(ctx) = inner.contexts.get(&id) else {
+                    continue;
+                };
                 let probe = probe_exit(ctx.child.id() as i32);
                 if probe.is_running() {
                     continue;
                 }
-                let Some(mut ctx) = inner.contexts.remove(&id) else { continue };
+                let Some(mut ctx) = inner.contexts.remove(&id) else {
+                    continue;
+                };
                 if !ctx.manual_stop {
                     let code = probe.exit_code();
-                    let line = format!("[{}] process exited unexpectedly code={}\n", (self.log_timestamp)(), code);
+                    let line = format!(
+                        "[{}] process exited unexpectedly code={}\n",
+                        (self.log_timestamp)(),
+                        code
+                    );
                     let _ = ctx.log.write_all(line.as_bytes());
                     self.remove_pidfile(&ctx.tunnel);
                 }
@@ -211,8 +240,14 @@ impl AppProcessExecutor {
             if ctx.manual_stop || !ctx.tunnel.keep_alive {
                 continue;
             }
-            let delay = self.restart_delay_override.unwrap_or(ctx.tunnel.throttle_interval.max(0) as u64);
-            restarts.push(RestartPlan { tunnel: ctx.tunnel, delay_secs: delay, generation: ctx.generation });
+            let delay = self
+                .restart_delay_override
+                .unwrap_or(ctx.tunnel.throttle_interval.max(0) as u64);
+            restarts.push(RestartPlan {
+                tunnel: ctx.tunnel,
+                delay_secs: delay,
+                generation: ctx.generation,
+            });
         }
         restarts
     }
@@ -266,7 +301,10 @@ impl AppProcessExecutor {
 
     fn write_pidfile(&self, pid: i32, tunnel: &TunnelConfig) -> std::io::Result<()> {
         fs::create_dir_all(self.paths.run_directory())?;
-        write_atomic(&self.paths.pidfile_url(tunnel), format!("{pid}\n").as_bytes())
+        write_atomic(
+            &self.paths.pidfile_url(tunnel),
+            format!("{pid}\n").as_bytes(),
+        )
     }
 
     fn remove_pidfile(&self, tunnel: &TunnelConfig) {
@@ -277,7 +315,9 @@ impl AppProcessExecutor {
 /// waitpid(WNOHANG) 探测结果。
 enum ExitProbe {
     Running,
-    Exited { code: i32 },
+    Exited {
+        code: i32,
+    },
     /// 已被回收或探测失败：按已退出处理（与 Swift isRunning=false 等价）。
     Unknown,
 }
@@ -302,9 +342,13 @@ fn probe_exit(pid: i32) -> ExitProbe {
         let result = libc::waitpid(pid, &mut status, libc::WNOHANG);
         if result == pid {
             if libc::WIFEXITED(status) {
-                ExitProbe::Exited { code: libc::WEXITSTATUS(status) }
+                ExitProbe::Exited {
+                    code: libc::WEXITSTATUS(status),
+                }
             } else if libc::WIFSIGNALED(status) {
-                ExitProbe::Exited { code: libc::WTERMSIG(status) }
+                ExitProbe::Exited {
+                    code: libc::WTERMSIG(status),
+                }
             } else {
                 ExitProbe::Exited { code: -1 }
             }
@@ -331,7 +375,9 @@ fn terminate_and_reap(child: &mut Child) {
 }
 
 fn spawn_error(error: std::io::Error) -> ExecutorError {
-    ExecutorError::Spawn { message: error.to_string() }
+    ExecutorError::Spawn {
+        message: error.to_string(),
+    }
 }
 
 fn write_atomic(path: &PathBuf, data: &[u8]) -> std::io::Result<()> {

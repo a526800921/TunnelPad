@@ -1,0 +1,832 @@
+schema_version: 1
+project:
+  id: tunnelpad
+  name: TunnelPad
+gitnexus:
+  repo: TunnelPad
+  indexed_commit: e34bce7
+
+nodes:
+  - id: business.tunnelpad
+    type: business
+    name: TunnelPad 隧道管理
+    evidence:
+      - kind: document
+        ref: docs/plans/tunnelpad-v1.md
+        locator: "计划范围与验收目标"
+
+  - id: function.app.lifecycle
+    type: function
+    name: 应用生命周期与退出清理
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/AppDelegate.swift
+        locator: "AppDelegate.applicationDidFinishLaunching/applicationShouldTerminate"
+      - kind: code
+        ref: Sources/TunnelPadCore/Shutdown.swift
+        locator: "Shutdown.installSignalHandlers/stopAllManagedTunnels"
+
+  - id: function.config.management
+    type: function
+    name: 配置加载、保存与刷新
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/ConfigStore.swift
+        locator: "ConfigStore.load/save"
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "TunnelManager.reloadConfigAsync/updateTunnelAsync"
+      - kind: code
+        ref: Sources/tunnelpad/MainPanelView.swift
+        locator: "MainPanelView 配置刷新按钮"
+
+  - id: function.sidebar.selection
+    type: function
+    name: 隧道列表、选择与详情面板
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/MainPanelView.swift
+        locator: "MainPanelView.sidebar/selectedTunnel"
+      - kind: code
+        ref: Sources/tunnelpad/TunnelDetailComponents.swift
+        locator: "TunnelSidebarRow/TunnelDetailView"
+      - kind: document
+        ref: docs/plans/tunnelpad-tunnel-remarks.md
+        locator: "目标与左侧列表副标题"
+
+  - id: function.tunnel.lifecycle
+    type: function
+    name: 隧道启动、停止、重启与删除
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "TunnelManager.start/stop/restart/removeTunnel"
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelLifecycleCoordinator.swift
+        locator: "TunnelLifecycleCoordinator.start/stop/restart"
+      - kind: test
+        ref: Tests/TunnelPadCoreTests/RefactorBoundaryTests.swift
+        locator: "异步生命周期与失败注入测试"
+
+  - id: function.launchd.executor
+    type: function
+    name: launchd 执行器
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/LaunchCtlExecutor.swift
+        locator: "LaunchCtlExecutor.bootstrap/bootout/status"
+      - kind: code
+        ref: Sources/TunnelPadCore/LaunchdPlistRenderer.swift
+        locator: "LaunchdPlistRenderer.writePlist"
+      - kind: test
+        ref: Tests/TunnelPadCoreTests/LaunchCtlExecutorTests.swift
+        locator: "launchctl 状态解析与 bootout 测试"
+
+  - id: function.app.executor
+    type: function
+    name: app 子进程执行器
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
+        locator: "AppProcessExecutor.start/stop/handleTermination/shutdownAll"
+      - kind: code
+        ref: Sources/TunnelPadCore/Shutdown.swift
+        locator: "Shutdown.killByPidfile"
+      - kind: test
+        ref: Tests/TunnelPadCoreTests/AppProcessExecutorTests.swift
+        locator: "进程生命周期、keepAlive 与 pidfile 测试"
+
+  - id: function.health.probe
+    type: function
+    name: HTTP 探针与健康判定
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/ProbeService.swift
+        locator: "ProbeService.check"
+      - kind: code
+        ref: Sources/TunnelPadCore/ProbeCoordinator.swift
+        locator: "ProbeCoordinator.run/cancel"
+      - kind: document
+        ref: docs/plans/tunnelpad-stability.md
+        locator: "目标与健康恢复状态机"
+
+  - id: function.log.management
+    type: function
+    name: 日志写入、尾部读取与日志面板
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
+        locator: "AppProcessExecutor stdout/stderr 日志写入"
+      - kind: code
+        ref: Sources/tunnelpad/LogView.swift
+        locator: "LogView.load/LogTextView.updateNSView"
+      - kind: document
+        ref: docs/plans/tunnelpad-log-streaming.md
+        locator: "目标与面板生命周期"
+
+  - id: function.legacy.migration
+    type: function
+    name: 旧 LaunchAgent 扫描、接管与回滚
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/MigrationService.swift
+        locator: "MigrationService.takeOver/rollback"
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "TunnelManager.takeOver/legacyAgentsNeedingMigration"
+      - kind: test
+        ref: Tests/TunnelPadCoreTests/MigrationServiceTests.swift
+        locator: "迁移备份、接管、验证与回滚测试"
+
+  - id: function.menu.bar
+    type: function
+    name: 菜单栏隧道控制
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/MenuBarController.swift
+        locator: "MenuBarController.rebuildMenu/toggleTunnel/menuWillOpen"
+      - kind: document
+        ref: docs/data-quality/tunnelpad-ui-refinements-stage4-20260830.md
+        locator: "菜单栏单项启停验收"
+
+  - id: function.runtime.coordination
+    type: function
+    name: 运行时状态、代次与并发取消
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelRuntimeState.swift
+        locator: "TunnelRuntimeState"
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "TunnelManager beginOperation/isCurrentOperation/updateRuntime"
+      - kind: document
+        ref: docs/data-quality/tunnelpad-code-quality-refactor-stage1-20260830.md
+        locator: "异步取消保护与代次基线"
+
+  - id: function.rust.parity
+    type: function
+    name: Swift/Rust Core 行为一致性
+    evidence:
+      - kind: document
+        ref: docs/plans/tunnelpad-rust-migration.md
+        locator: "组件 parity、shadow bridge 与阶段准入"
+      - kind: test
+        ref: Tests/TunnelPadCoreTests/DifferentialHarnessTests.swift
+        locator: "Swift/Rust 差分 harness"
+
+  - id: process.app.startup
+    type: process
+    name: 应用启动与初始刷新
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/AppDelegate.swift
+        locator: "applicationDidFinishLaunching"
+      - kind: code
+        ref: Sources/tunnelpad/MainPanelView.swift
+        locator: "MainPanelView.task 初始 refreshAsync"
+
+  - id: process.app.terminate
+    type: process
+    name: 应用退出与全部隧道清理
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/AppDelegate.swift
+        locator: "applicationShouldTerminate"
+      - kind: code
+        ref: Sources/TunnelPadCore/Shutdown.swift
+        locator: "stopAllAndExit"
+
+  - id: process.config.reload
+    type: process
+    name: 点击刷新配置并刷新状态
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/MainPanelView.swift
+        locator: "重新加载 config.json 按钮"
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "reloadConfigAsync"
+
+  - id: process.tunnel.start
+    type: process
+    name: 单条隧道启动
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "startAsync/start"
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelLifecycleCoordinator.swift
+        locator: "startSync"
+
+  - id: process.tunnel.stop
+    type: process
+    name: 单条隧道停止
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "stopAsync/stop"
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelLifecycleCoordinator.swift
+        locator: "stopSync"
+
+  - id: process.tunnel.restart
+    type: process
+    name: 单条隧道重启
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "restartAsync/restart"
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelLifecycleCoordinator.swift
+        locator: "restartSync"
+
+  - id: process.tunnel.remove
+    type: process
+    name: 停止并删除隧道及其产物
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "removeTunnelAsync/removeTunnel"
+      - kind: test
+        ref: Tests/TunnelPadCoreTests/RefactorBoundaryTests.swift
+        locator: "异步删除与产物清理测试"
+
+  - id: process.status.refresh
+    type: process
+    name: 周期性状态刷新
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/MainPanelView.swift
+        locator: "窗口可见时每 5 秒 refreshAsync"
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "refreshAsync/runProbes"
+
+  - id: process.health.refresh
+    type: process
+    name: 探针检查与健康结果回写
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "runProbes/applyProbeResults"
+      - kind: code
+        ref: Sources/TunnelPadCore/ProbeCoordinator.swift
+        locator: "run"
+
+  - id: process.log.refresh
+    type: process
+    name: 日志尾部读取与面板更新
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/LogView.swift
+        locator: "LogView.task 每 2 秒 load"
+      - kind: code
+        ref: Sources/TunnelPadCore/LogTail.swift
+        locator: "LogTail.lastLines"
+
+  - id: process.legacy.takeover
+    type: process
+    name: 旧 LaunchAgent 接管
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/MigrationService.swift
+        locator: "takeOver"
+      - kind: test
+        ref: Tests/TunnelPadCoreTests/MigrationServiceTests.swift
+        locator: "takeover 回滚测试"
+
+  - id: process.menu.toggle
+    type: process
+    name: 菜单栏单条隧道切换
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/MenuBarController.swift
+        locator: "toggleTunnel"
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "startAsync/stopAsync"
+
+  - id: external.config.file
+    type: external_workflow
+    name: Application Support 中的 config.json
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/ConfigStore.swift
+        locator: "paths.configURL/Data(contentsOf:)"
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelPaths.swift
+        locator: "configURL"
+
+  - id: external.launchd.service
+    type: external_workflow
+    name: 用户域 launchd 服务与生成的 plist
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/LaunchCtlExecutor.swift
+        locator: "launchctl bootstrap/bootout/print"
+      - kind: code
+        ref: Sources/TunnelPadCore/LaunchdPlistRenderer.swift
+        locator: "生成 plist"
+
+  - id: external.app.process
+    type: external_workflow
+    name: TunnelPad 托管的 app 子进程
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
+        locator: "Process/terminationHandler"
+      - kind: code
+        ref: Sources/TunnelPadCore/Shutdown.swift
+        locator: "killByPidfile"
+
+  - id: external.app.pidfiles
+    type: external_workflow
+    name: app 执行器 pidfile
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
+        locator: "writePidfile/removePidfile"
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelPaths.swift
+        locator: "pidfileURL"
+
+  - id: external.log.files
+    type: external_workflow
+    name: 隧道日志文件
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
+        locator: "LogWriter 与 stdout/stderr"
+      - kind: code
+        ref: Sources/TunnelPadCore/LogTail.swift
+        locator: "日志尾部读取"
+
+  - id: external.http.endpoint
+    type: external_workflow
+    name: HTTP 探针目标端点
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/ProbeService.swift
+        locator: "URLRequest/URLSession"
+      - kind: document
+        ref: docs/plans/tunnelpad-stability.md
+        locator: "现有 HTTP 探针健康信号"
+
+  - id: external.legacy.launchagents
+    type: external_workflow
+    name: 旧版 LaunchAgents 与备份文件
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/MigrationService.swift
+        locator: "backupURL/旧 plist 接管"
+      - kind: document
+        ref: docs/plans/tunnelpad-v1.md
+        locator: "首次启动迁移与回滚边界"
+
+relations:
+  - from: business.tunnelpad
+    to: function.app.lifecycle
+    type: contains
+    evidence:
+      - kind: document
+        ref: docs/plans/tunnelpad-v1.md
+        locator: "应用生命周期"
+  - from: business.tunnelpad
+    to: function.config.management
+    type: contains
+    evidence:
+      - kind: document
+        ref: docs/plans/tunnelpad-v1.md
+        locator: "配置管理"
+  - from: business.tunnelpad
+    to: function.sidebar.selection
+    type: contains
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/MainPanelView.swift
+        locator: "主面板"
+  - from: business.tunnelpad
+    to: function.tunnel.lifecycle
+    type: contains
+    evidence:
+      - kind: document
+        ref: docs/plans/tunnelpad-v1.md
+        locator: "隧道生命周期"
+  - from: business.tunnelpad
+    to: function.launchd.executor
+    type: contains
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/LaunchCtlExecutor.swift
+        locator: "launchd 执行器"
+  - from: business.tunnelpad
+    to: function.app.executor
+    type: contains
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
+        locator: "app 执行器"
+  - from: business.tunnelpad
+    to: function.health.probe
+    type: contains
+    evidence:
+      - kind: document
+        ref: docs/plans/tunnelpad-stability.md
+        locator: "健康恢复"
+  - from: business.tunnelpad
+    to: function.log.management
+    type: contains
+    evidence:
+      - kind: document
+        ref: docs/plans/tunnelpad-log-streaming.md
+        locator: "日志事件流"
+  - from: business.tunnelpad
+    to: function.legacy.migration
+    type: contains
+    evidence:
+      - kind: document
+        ref: docs/plans/tunnelpad-v1.md
+        locator: "迁移接管"
+  - from: business.tunnelpad
+    to: function.menu.bar
+    type: contains
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/MenuBarController.swift
+        locator: "菜单栏控制"
+  - from: business.tunnelpad
+    to: function.runtime.coordination
+    type: contains
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelRuntimeState.swift
+        locator: "运行时状态"
+  - from: business.tunnelpad
+    to: function.rust.parity
+    type: contains
+    evidence:
+      - kind: document
+        ref: docs/plans/tunnelpad-rust-migration.md
+        locator: "迁移与 parity"
+
+  - from: function.app.lifecycle
+    to: process.app.startup
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/AppDelegate.swift
+        locator: "applicationDidFinishLaunching"
+  - from: function.app.lifecycle
+    to: process.app.terminate
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/AppDelegate.swift
+        locator: "applicationShouldTerminate"
+  - from: function.app.lifecycle
+    to: external.launchd.service
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/AppDelegate.swift
+        locator: "正常退出 bootout"
+  - from: function.app.lifecycle
+    to: external.app.pidfiles
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/Shutdown.swift
+        locator: "信号退出 pidfile 清理"
+
+  - from: function.config.management
+    to: process.config.reload
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "reloadConfigAsync"
+  - from: function.config.management
+    to: external.config.file
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/ConfigStore.swift
+        locator: "load/save config.json"
+
+  - from: function.sidebar.selection
+    to: process.status.refresh
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/MainPanelView.swift
+        locator: "窗口任务刷新"
+  - from: function.sidebar.selection
+    to: process.log.refresh
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/LogView.swift
+        locator: "当前隧道日志面板"
+
+  - from: function.tunnel.lifecycle
+    to: process.tunnel.start
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "startAsync"
+  - from: function.tunnel.lifecycle
+    to: process.tunnel.stop
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "stopAsync"
+  - from: function.tunnel.lifecycle
+    to: process.tunnel.restart
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "restartAsync"
+  - from: function.tunnel.lifecycle
+    to: process.tunnel.remove
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "removeTunnelAsync"
+  - from: function.tunnel.lifecycle
+    to: function.launchd.executor
+    type: depends_on
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelLifecycleCoordinator.swift
+        locator: "launchd 生命周期分派"
+  - from: function.tunnel.lifecycle
+    to: function.app.executor
+    type: depends_on
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelLifecycleCoordinator.swift
+        locator: "app 生命周期分派"
+  - from: function.tunnel.lifecycle
+    to: function.runtime.coordination
+    type: depends_on
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "操作代次与运行时状态"
+
+  - from: function.launchd.executor
+    to: external.launchd.service
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/LaunchCtlExecutor.swift
+        locator: "launchctl 调用"
+  - from: function.app.executor
+    to: external.app.process
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
+        locator: "spawn/terminate"
+  - from: function.app.executor
+    to: external.app.pidfiles
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
+        locator: "pidfile 写入与删除"
+  - from: function.app.executor
+    to: external.log.files
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
+        locator: "stdout/stderr 日志写入"
+
+  - from: function.health.probe
+    to: process.health.refresh
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "runProbes"
+  - from: function.health.probe
+    to: external.http.endpoint
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/ProbeService.swift
+        locator: "HTTP GET"
+  - from: function.health.probe
+    to: function.tunnel.lifecycle
+    type: depends_on
+    evidence:
+      - kind: document
+        ref: docs/plans/tunnelpad-stability.md
+        locator: "健康恢复复用生命周期边界"
+
+  - from: function.log.management
+    to: process.log.refresh
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/LogView.swift
+        locator: "load 与 2 秒任务"
+  - from: function.log.management
+    to: external.log.files
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/LogTail.swift
+        locator: "lastLines"
+
+  - from: function.legacy.migration
+    to: process.legacy.takeover
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/MigrationService.swift
+        locator: "takeOver"
+  - from: function.legacy.migration
+    to: external.legacy.launchagents
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/MigrationService.swift
+        locator: "旧 plist 备份与接管"
+
+  - from: function.menu.bar
+    to: process.menu.toggle
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/MenuBarController.swift
+        locator: "toggleTunnel"
+  - from: function.menu.bar
+    to: function.tunnel.lifecycle
+    type: depends_on
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/MenuBarController.swift
+        locator: "startAsync/stopAsync 菜单动作"
+
+  - from: function.runtime.coordination
+    to: function.config.management
+    type: depends_on
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "配置快照与运行时裁剪"
+
+  - from: function.rust.parity
+    to: function.config.management
+    type: depends_on
+    evidence:
+      - kind: document
+        ref: docs/plans/tunnelpad-rust-migration.md
+        locator: "ConfigStore parity"
+  - from: function.rust.parity
+    to: function.tunnel.lifecycle
+    type: depends_on
+    evidence:
+      - kind: document
+        ref: docs/plans/tunnelpad-rust-migration.md
+        locator: "生命周期 parity"
+
+  - from: process.app.startup
+    to: external.config.file
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/ConfigStore.swift
+        locator: "启动加载配置"
+  - from: process.app.terminate
+    to: external.launchd.service
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/AppDelegate.swift
+        locator: "逐条 bootout"
+  - from: process.app.terminate
+    to: external.app.process
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
+        locator: "shutdownAll"
+  - from: process.config.reload
+    to: external.config.file
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/ConfigStore.swift
+        locator: "后台读取配置"
+  - from: process.tunnel.start
+    to: external.launchd.service
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelLifecycleCoordinator.swift
+        locator: "launchd bootstrap"
+  - from: process.tunnel.start
+    to: external.app.process
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
+        locator: "app start"
+  - from: process.tunnel.stop
+    to: external.launchd.service
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelLifecycleCoordinator.swift
+        locator: "launchd bootout"
+  - from: process.tunnel.stop
+    to: external.app.process
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
+        locator: "app stop"
+  - from: process.tunnel.restart
+    to: external.launchd.service
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelLifecycleCoordinator.swift
+        locator: "launchd bootout/bootstrap"
+  - from: process.tunnel.restart
+    to: external.app.process
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
+        locator: "app restart"
+  - from: process.tunnel.remove
+    to: external.config.file
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "删除配置条目并保存"
+  - from: process.tunnel.remove
+    to: external.log.files
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "删除日志产物"
+  - from: process.status.refresh
+    to: external.launchd.service
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/LaunchCtlExecutor.swift
+        locator: "status/print"
+  - from: process.status.refresh
+    to: external.app.process
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/AppProcessExecutor.swift
+        locator: "内存 contexts status"
+  - from: process.health.refresh
+    to: external.http.endpoint
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/ProbeService.swift
+        locator: "check"
+  - from: process.log.refresh
+    to: external.log.files
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/LogTail.swift
+        locator: "lastLines"
+  - from: process.legacy.takeover
+    to: external.legacy.launchagents
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/MigrationService.swift
+        locator: "旧 agent backup/bootout/bootstrap"
+  - from: process.menu.toggle
+    to: process.tunnel.start
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/MenuBarController.swift
+        locator: "notLoaded -> startAsync"
+  - from: process.menu.toggle
+    to: process.tunnel.stop
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/MenuBarController.swift
+        locator: "running/notRunning -> stopAsync"

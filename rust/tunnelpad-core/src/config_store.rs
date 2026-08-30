@@ -28,7 +28,10 @@ pub struct ConfigStore {
 
 impl ConfigStore {
     pub fn new(paths: TunnelPaths) -> Self {
-        ConfigStore { paths, timestamp: Arc::new(system_timestamp) }
+        ConfigStore {
+            paths,
+            timestamp: Arc::new(system_timestamp),
+        }
     }
 
     pub fn with_timestamp(paths: TunnelPaths, timestamp: TimestampFn) -> Self {
@@ -38,13 +41,19 @@ impl ConfigStore {
     pub fn load(&self) -> ConfigLoadResult {
         let url = self.paths.config_url();
         if !url.exists() {
-            return ConfigLoadResult { config: AppConfig::default_config(), recovered_from: None };
+            return ConfigLoadResult {
+                config: AppConfig::default_config(),
+                recovered_from: None,
+            };
         }
         match fs::read(&url)
             .map_err(|e| e.to_string())
             .and_then(|bytes| parse_config_bytes(&bytes))
         {
-            Ok(config) => ConfigLoadResult { config, recovered_from: None },
+            Ok(config) => ConfigLoadResult {
+                config,
+                recovered_from: None,
+            },
             Err(_) => {
                 let _ = fs::create_dir_all(self.paths.support_directory());
                 let archive = self
@@ -52,7 +61,10 @@ impl ConfigStore {
                     .support_directory()
                     .join(format!("config.json.corrupt-{}", (self.timestamp)()));
                 let _ = fs::rename(&url, &archive);
-                ConfigLoadResult { config: AppConfig::default_config(), recovered_from: Some(archive) }
+                ConfigLoadResult {
+                    config: AppConfig::default_config(),
+                    recovered_from: Some(archive),
+                }
             }
         }
     }
@@ -73,7 +85,10 @@ pub fn parse_config_bytes(bytes: &[u8]) -> Result<AppConfig, String> {
 
 impl AppConfig {
     pub fn default_config() -> Self {
-        AppConfig { version: CONFIG_SCHEMA_VERSION, tunnels: vec![] }
+        AppConfig {
+            version: CONFIG_SCHEMA_VERSION,
+            tunnels: vec![],
+        }
     }
 }
 
@@ -175,7 +190,10 @@ mod tests {
             std::env::set_var("TZ", value);
             // SAFETY: 测试串行持有 TZ_LOCK，避免并发修改进程时区状态。
             unsafe { tzset() };
-            Self { previous, _lock: lock }
+            Self {
+                previous,
+                _lock: lock,
+            }
         }
     }
 

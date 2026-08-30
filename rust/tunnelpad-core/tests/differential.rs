@@ -13,18 +13,25 @@ use serde_json::{json, Value};
 use tunnelpad_core::app_executor::AppProcessExecutor;
 use tunnelpad_core::config_store::ConfigStore;
 use tunnelpad_core::demo::DemoLifecycle;
-use tunnelpad_core::launchctl::{ExecutorError, LaunchCtlExecutor, ProcessRunning, ProcessResult, TunnelStatus};
+use tunnelpad_core::launchctl::{
+    ExecutorError, LaunchCtlExecutor, ProcessResult, ProcessRunning, TunnelStatus,
+};
 use tunnelpad_core::legacy::{self, LegacyAgent};
 use tunnelpad_core::log_tail::last_lines;
 use tunnelpad_core::paths::TunnelPaths;
 use tunnelpad_core::plist_render::plist_xml;
-use tunnelpad_core::probe::{ProbeOutcome, ProbeService, ProbePerforming};
+use tunnelpad_core::probe::{ProbeOutcome, ProbePerforming, ProbeService};
 use tunnelpad_core::ssh_command;
 use tunnelpad_core::tunnel_id;
 use tunnelpad_core::TunnelConfig;
 
 fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap().to_path_buf()
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf()
 }
 
 fn fixtures_dir() -> PathBuf {
@@ -109,8 +116,12 @@ fn normalize_value(value: &mut Value, home: &Path) {
         Value::String(text) => {
             *text = normalize_text(text, home);
         }
-        Value::Array(items) => items.iter_mut().for_each(|item| normalize_value(item, home)),
-        Value::Object(map) => map.values_mut().for_each(|item| normalize_value(item, home)),
+        Value::Array(items) => items
+            .iter_mut()
+            .for_each(|item| normalize_value(item, home)),
+        Value::Object(map) => map
+            .values_mut()
+            .for_each(|item| normalize_value(item, home)),
         _ => {}
     }
 }
@@ -153,7 +164,10 @@ impl ScriptedRunner {
                 }
             }
         }
-        ScriptedRunner { script: Mutex::new(script), invocations: Mutex::new(vec![]) }
+        ScriptedRunner {
+            script: Mutex::new(script),
+            invocations: Mutex::new(vec![]),
+        }
     }
 
     fn remaining(&self) -> usize {
@@ -195,7 +209,10 @@ fn temp_home(label: &str) -> PathBuf {
 
 fn uuid_like() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let counter = nanos % 1_000_000_000;
     format!("{nanos:x}{counter:x}")
 }
@@ -215,7 +232,6 @@ fn demo_outcome(
 }
 
 fn run_component(component: &str, fixture: &Value, home: &Path) -> Vec<Value> {
-
     match component {
         "demo-lifecycle" => {
             let tunnels: Vec<TunnelConfig> = fixture["tunnels"]
@@ -791,7 +807,11 @@ fn run_component(component: &str, fixture: &Value, home: &Path) -> Vec<Value> {
 fn runner_invocations_alias(runner: &ScriptedRunner) -> impl ProcessRunning + '_ {
     struct Borrow<'a>(&'a ScriptedRunner);
     impl ProcessRunning for Borrow<'_> {
-        fn run(&self, executable_path: &str, arguments: &[String]) -> Result<ProcessResult, String> {
+        fn run(
+            &self,
+            executable_path: &str,
+            arguments: &[String],
+        ) -> Result<ProcessResult, String> {
             self.0.run(executable_path, arguments)
         }
     }
@@ -802,7 +822,9 @@ fn runner_invocations_alias(runner: &ScriptedRunner) -> impl ProcessRunning + '_
 fn differential_matches_swift_events() {
     let swift_events_path = repo_root().join("rust/target/differential/swift-events.json");
     if !swift_events_path.exists() {
-        println!("swift-events.json 不存在；请先运行 rust/scripts/differential.sh（swift test 阶段）");
+        println!(
+            "swift-events.json 不存在；请先运行 rust/scripts/differential.sh（swift test 阶段）"
+        );
         return;
     }
 
@@ -816,18 +838,27 @@ fn differential_matches_swift_events() {
 
     let mut rust_events: BTreeMap<String, Value> = BTreeMap::new();
     for fixture_path in &fixture_paths {
-        let fixture: Value = serde_json::from_str(&fs::read_to_string(fixture_path).unwrap()).unwrap();
+        let fixture: Value =
+            serde_json::from_str(&fs::read_to_string(fixture_path).unwrap()).unwrap();
         let component = fixture["component"].as_str().unwrap().to_string();
         let home = temp_home(&component);
         let events = run_component(&component, &fixture, &home);
         let mut normalized = json!(events);
         normalize_value(&mut normalized, &home);
-        rust_events.insert(fixture_path.file_name().unwrap().to_string_lossy().to_string(), normalized);
+        rust_events.insert(
+            fixture_path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string(),
+            normalized,
+        );
         fs::remove_dir_all(&home).ok();
     }
 
-    let swift_events: Value = serde_json::from_str(&fs::read_to_string(&swift_events_path).unwrap())
-        .expect("swift-events.json 应为合法 JSON");
+    let swift_events: Value =
+        serde_json::from_str(&fs::read_to_string(&swift_events_path).unwrap())
+            .expect("swift-events.json 应为合法 JSON");
     let swift_map = swift_events.as_object().expect("顶层应为对象");
 
     let mut failures = vec![];

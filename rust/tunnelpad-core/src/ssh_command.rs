@@ -6,7 +6,10 @@ use std::path::Path;
 /// 命令的可执行文件是否为 ssh（按首行路径末段判断，兼容 PATH 上的 `ssh`）。
 pub fn is_ssh(command: &[String]) -> bool {
     match command.first() {
-        Some(first) => Path::new(first).file_name().map(|f| f == "ssh").unwrap_or(false),
+        Some(first) => Path::new(first)
+            .file_name()
+            .map(|f| f == "ssh")
+            .unwrap_or(false),
         None => false,
     }
 }
@@ -33,7 +36,13 @@ pub fn removing_verbose_flag(command: &[String]) -> Vec<String> {
     match command.first() {
         Some(first) => {
             let mut out = vec![first.clone()];
-            out.extend(command.iter().skip(1).filter(|arg| arg.as_str() != "-v").cloned());
+            out.extend(
+                command
+                    .iter()
+                    .skip(1)
+                    .filter(|arg| arg.as_str() != "-v")
+                    .cloned(),
+            );
             out
         }
         None => command.to_vec(),
@@ -61,9 +70,21 @@ mod tests {
         assert!(!has_verbose_flag(&cmd(&["ssh", "-vv"])));
         assert!(!has_verbose_flag(&cmd(&["ssh"])));
 
-        assert_eq!(adding_verbose_flag(&cmd(&["ssh", "-N"])), cmd(&["ssh", "-v", "-N"]));
-        assert_eq!(adding_verbose_flag(&cmd(&["ssh", "-v", "-N"])), cmd(&["ssh", "-v", "-N"]));
-        assert_eq!(removing_verbose_flag(&cmd(&["ssh", "-N", "-v", "-L", "a:b"])), cmd(&["ssh", "-N", "-L", "a:b"]));
-        assert_eq!(removing_verbose_flag(&cmd(&["ssh", "-vv"])), cmd(&["ssh", "-vv"]));
+        assert_eq!(
+            adding_verbose_flag(&cmd(&["ssh", "-N"])),
+            cmd(&["ssh", "-v", "-N"])
+        );
+        assert_eq!(
+            adding_verbose_flag(&cmd(&["ssh", "-v", "-N"])),
+            cmd(&["ssh", "-v", "-N"])
+        );
+        assert_eq!(
+            removing_verbose_flag(&cmd(&["ssh", "-N", "-v", "-L", "a:b"])),
+            cmd(&["ssh", "-N", "-L", "a:b"])
+        );
+        assert_eq!(
+            removing_verbose_flag(&cmd(&["ssh", "-vv"])),
+            cmd(&["ssh", "-vv"])
+        );
     }
 }

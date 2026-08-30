@@ -23,12 +23,16 @@ pub struct ProbeService {
 
 impl ProbeService {
     pub fn with_performer(performer: Box<dyn ProbePerforming>) -> Self {
-        ProbeService { performer: Some(performer) }
+        ProbeService {
+            performer: Some(performer),
+        }
     }
 
     pub fn check(&self, probe: &ProbeConfig) -> ProbeOutcome {
         if !is_valid_url(&probe.url) {
-            return ProbeOutcome::Failed { reason: format!("非法探针 URL：{}", probe.url) };
+            return ProbeOutcome::Failed {
+                reason: format!("非法探针 URL：{}", probe.url),
+            };
         }
         match self.performer.as_ref() {
             Some(performer) => match performer.perform(&probe.url) {
@@ -41,7 +45,9 @@ impl ProbeService {
                 }
                 Err(reason) => ProbeOutcome::Failed { reason },
             },
-            None => ProbeOutcome::Failed { reason: "未配置探针传输".into() },
+            None => ProbeOutcome::Failed {
+                reason: "未配置探针传输".into(),
+            },
         }
     }
 }
@@ -93,7 +99,9 @@ mod tests {
         );
         assert_eq!(
             service.check(&probe("http://127.0.0.1/health", vec![200])),
-            ProbeOutcome::Failed { reason: "连接被拒绝".into() }
+            ProbeOutcome::Failed {
+                reason: "连接被拒绝".into()
+            }
         );
     }
 
@@ -104,11 +112,15 @@ mod tests {
         }));
         assert_eq!(
             service.check(&probe("", vec![200])),
-            ProbeOutcome::Failed { reason: "非法探针 URL：".into() }
+            ProbeOutcome::Failed {
+                reason: "非法探针 URL：".into()
+            }
         );
         assert_eq!(
             service.check(&probe("http://x y", vec![200])),
-            ProbeOutcome::Failed { reason: "非法探针 URL：http://x y".into() }
+            ProbeOutcome::Failed {
+                reason: "非法探针 URL：http://x y".into()
+            }
         );
     }
 

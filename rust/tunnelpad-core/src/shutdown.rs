@@ -95,13 +95,12 @@ mod tests {
             ("launchd-b", "launchd"),
         ]);
         std::fs::create_dir_all(paths.support_directory()).unwrap();
-        std::fs::write(
-            paths.config_url(),
-            serde_json::to_string(&config).unwrap(),
-        )
-        .unwrap();
+        std::fs::write(paths.config_url(), serde_json::to_string(&config).unwrap()).unwrap();
 
-        let launchd = FakeLaunchd { bootouts: Mutex::new(vec![]), succeed: true };
+        let launchd = FakeLaunchd {
+            bootouts: Mutex::new(vec![]),
+            succeed: true,
+        };
         let app_kills: Mutex<Vec<PathBuf>> = Mutex::new(vec![]);
         let stopped = stop_all_managed_tunnels(&paths, &launchd, &|pidfile| {
             app_kills.lock().unwrap().push(pidfile.to_path_buf());
@@ -111,14 +110,20 @@ mod tests {
         assert_eq!(stopped, 3);
         assert_eq!(
             *launchd.bootouts.lock().unwrap(),
-            vec!["com.jafish.tunnelpad.launchd-a", "com.jafish.tunnelpad.launchd-b"]
+            vec![
+                "com.jafish.tunnelpad.launchd-a",
+                "com.jafish.tunnelpad.launchd-b"
+            ]
         );
         let kills = app_kills.lock().unwrap();
         assert_eq!(kills.len(), 1);
         assert!(kills[0].ends_with("run/app-a.pid"));
 
         // bootout 失败（未加载 false）不计入
-        let launchd = FakeLaunchd { bootouts: Mutex::new(vec![]), succeed: false };
+        let launchd = FakeLaunchd {
+            bootouts: Mutex::new(vec![]),
+            succeed: false,
+        };
         let stopped = stop_all_managed_tunnels(&paths, &launchd, &|_| false);
         assert_eq!(stopped, 0);
 
@@ -158,7 +163,10 @@ mod tests {
         assert!(!garbage.exists());
 
         // 文件缺失 → false
-        assert!(!kill_by_pidfile(&paths.run_directory().join("missing.pid"), libc::SIGTERM));
+        assert!(!kill_by_pidfile(
+            &paths.run_directory().join("missing.pid"),
+            libc::SIGTERM
+        ));
 
         std::fs::remove_dir_all(&home).ok();
     }
@@ -171,10 +179,14 @@ mod tests {
                 .map(|(id, executor)| {
                     serde_json::from_value(serde_json::json!({
                         "id": id, "name": id, "command": ["/bin/true"], "executor": executor
-                    }))                    .unwrap()
+                    }))
+                    .unwrap()
                 })
                 .collect();
-            crate::AppConfig { version: 1, tunnels }
+            crate::AppConfig {
+                version: 1,
+                tunnels,
+            }
         }
     }
 }

@@ -25,7 +25,10 @@ thread_local! {
 
 fn set_last_error(error: &TpError) {
     let json = serde_json::to_string(error).unwrap_or_else(|_| {
-        format!("{{\"code\":{},\"message\":\"error serialization failed\"}}", error.code)
+        format!(
+            "{{\"code\":{},\"message\":\"error serialization failed\"}}",
+            error.code
+        )
     });
     LAST_ERROR.with(|slot| *slot.borrow_mut() = Some(json));
 }
@@ -35,7 +38,8 @@ fn clear_last_error() {
 }
 
 fn take_last_error() -> Option<CString> {
-    LAST_ERROR.with(|slot| slot.borrow_mut().take())
+    LAST_ERROR
+        .with(|slot| slot.borrow_mut().take())
         .and_then(|json| CString::new(json).ok())
 }
 
@@ -63,11 +67,17 @@ fn finish(result: Result<String, TpError>) -> *mut c_char {
 /// `input` 必须是 NUL 结尾的合法 UTF-8 指针，或 NULL。
 unsafe fn read_input<'a>(input: *const c_char, label: &str) -> Result<&'a str, TpError> {
     if input.is_null() {
-        return Err(TpError::new(error_code::INVALID_ARGUMENT, format!("{label} 输入指针为 NULL")));
+        return Err(TpError::new(
+            error_code::INVALID_ARGUMENT,
+            format!("{label} 输入指针为 NULL"),
+        ));
     }
-    CStr::from_ptr(input)
-        .to_str()
-        .map_err(|_| TpError::new(error_code::INVALID_ARGUMENT, format!("{label} 输入不是合法 UTF-8")))
+    CStr::from_ptr(input).to_str().map_err(|_| {
+        TpError::new(
+            error_code::INVALID_ARGUMENT,
+            format!("{label} 输入不是合法 UTF-8"),
+        )
+    })
 }
 
 /// 返回 C ABI 契约版本（当前 1）。
@@ -188,7 +198,9 @@ mod tests {
 
         let err_raw = tp_last_error();
         assert!(!err_raw.is_null());
-        let err = unsafe { CStr::from_ptr(err_raw) }.to_string_lossy().to_string();
+        let err = unsafe { CStr::from_ptr(err_raw) }
+            .to_string_lossy()
+            .to_string();
         unsafe { tp_string_free(err_raw) };
         assert!(err.contains("\"code\":2"));
 
@@ -212,11 +224,17 @@ mod tests {
     fn status_and_probe_encode_via_ffi() {
         let state = CString::new("weird").unwrap();
         let raw = unsafe { tp_status_encode(0, 1, 1234, ptr::null()) };
-        assert_eq!(unsafe { CStr::from_ptr(raw) }.to_bytes(), br#"{"case":"running","pid":1234}"#);
+        assert_eq!(
+            unsafe { CStr::from_ptr(raw) }.to_bytes(),
+            br#"{"case":"running","pid":1234}"#
+        );
         unsafe { tp_string_free(raw) };
 
         let raw = unsafe { tp_status_encode(3, 0, 0, state.as_ptr()) };
-        assert_eq!(unsafe { CStr::from_ptr(raw) }.to_bytes(), br#"{"case":"other","state":"weird"}"#);
+        assert_eq!(
+            unsafe { CStr::from_ptr(raw) }.to_bytes(),
+            br#"{"case":"other","state":"weird"}"#
+        );
         unsafe { tp_string_free(raw) };
 
         let raw = unsafe { tp_status_encode(3, 0, 0, ptr::null()) };
@@ -224,7 +242,10 @@ mod tests {
         assert_eq!(last_error_code(), error_code::INVALID_ARGUMENT);
 
         let raw = unsafe { tp_probe_result_encode(2, 0, state.as_ptr()) };
-        assert_eq!(unsafe { CStr::from_ptr(raw) }.to_bytes(), br#"{"case":"failed","reason":"weird"}"#);
+        assert_eq!(
+            unsafe { CStr::from_ptr(raw) }.to_bytes(),
+            br#"{"case":"failed","reason":"weird"}"#
+        );
         unsafe { tp_string_free(raw) };
     }
 

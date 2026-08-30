@@ -25,11 +25,20 @@ use crate::{error_code, AppConfig, ExecutorKind, TpError, TunnelConfig};
 #[serde(tag = "op", rename_all = "camelCase")]
 pub enum CoreCommand {
     LoadConfig,
-    SaveConfig { config: AppConfig },
-    Begin { id: String },
-    Cancel { id: String, generation: u64 },
+    SaveConfig {
+        config: AppConfig,
+    },
+    Begin {
+        id: String,
+    },
+    Cancel {
+        id: String,
+        generation: u64,
+    },
     Snapshot,
-    Status { id: String },
+    Status {
+        id: String,
+    },
     Start {
         id: String,
         #[serde(default)]
@@ -217,7 +226,9 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
     }
 
     fn ensure_generation(&self, id: &str, expected: Option<u64>) -> Result<(), TpError> {
-        let Some(expected) = expected else { return Ok(()) };
+        let Some(expected) = expected else {
+            return Ok(());
+        };
         let current = self
             .generations
             .lock()
@@ -333,11 +344,7 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
         self.restart_with_generation(id, None)
     }
 
-    fn restart_with_generation(
-        &self,
-        id: &str,
-        generation: Option<u64>,
-    ) -> Result<Value, TpError> {
+    fn restart_with_generation(&self, id: &str, generation: Option<u64>) -> Result<Value, TpError> {
         self.ensure_open()?;
         self.ensure_generation(id, generation)?;
         let lock = self.lock_for(id);
@@ -367,11 +374,7 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
         self.remove_with_generation(id, None)
     }
 
-    fn remove_with_generation(
-        &self,
-        id: &str,
-        generation: Option<u64>,
-    ) -> Result<Value, TpError> {
+    fn remove_with_generation(&self, id: &str, generation: Option<u64>) -> Result<Value, TpError> {
         self.ensure_open()?;
         self.ensure_generation(id, generation)?;
         let lock = self.lock_for(id);
@@ -546,10 +549,10 @@ fn executor_error(operation: &str, error: ExecutorError) -> TpError {
 mod tests {
     use super::*;
     use crate::launchctl::{LaunchCtlExecutor, ProcessResult, ProcessRunning};
+    use std::collections::VecDeque;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::mpsc::{self, Receiver, Sender};
-    use std::collections::VecDeque;
     use std::thread;
     use std::time::Duration;
 
@@ -625,7 +628,10 @@ mod tests {
         }
 
         fn assert_exhausted(&self) {
-            assert!(self.script.lock().unwrap().is_empty(), "launchd fixture 仍有未消费的调用")
+            assert!(
+                self.script.lock().unwrap().is_empty(),
+                "launchd fixture 仍有未消费的调用"
+            )
         }
     }
 
@@ -866,17 +872,17 @@ mod tests {
     #[test]
     fn lifecycle_success_matrix_preserves_command_order() {
         let home = temp_home("matrix-start");
-        let runner = ScriptedRunner::new(vec![
-            not_loaded(),
-            process(0, "", ""),
-            running(123),
-        ]);
+        let runner = ScriptedRunner::new(vec![not_loaded(), process(0, "", ""), running(123)]);
         let owner = scripted_owner(&home, &["matrix-start"], runner.clone());
         let result = owner.start("matrix-start").unwrap();
         assert_eq!(result["operation"], "start");
         assert_eq!(result["status"]["case"], "running");
         assert_eq!(
-            runner.calls().iter().map(|call| call[0].as_str()).collect::<Vec<_>>(),
+            runner
+                .calls()
+                .iter()
+                .map(|call| call[0].as_str())
+                .collect::<Vec<_>>(),
             vec!["print", "bootstrap", "print"]
         );
         runner.assert_exhausted();
@@ -889,7 +895,11 @@ mod tests {
         assert_eq!(result["operation"], "stop");
         assert_eq!(result["stopped"], true);
         assert_eq!(
-            runner.calls().iter().map(|call| call[0].as_str()).collect::<Vec<_>>(),
+            runner
+                .calls()
+                .iter()
+                .map(|call| call[0].as_str())
+                .collect::<Vec<_>>(),
             vec!["bootout", "print"]
         );
         runner.assert_exhausted();
@@ -906,7 +916,11 @@ mod tests {
         assert_eq!(result["operation"], "restart");
         assert_eq!(result["status"]["case"], "running");
         assert_eq!(
-            runner.calls().iter().map(|call| call[0].as_str()).collect::<Vec<_>>(),
+            runner
+                .calls()
+                .iter()
+                .map(|call| call[0].as_str())
+                .collect::<Vec<_>>(),
             vec!["bootout", "bootstrap", "print"]
         );
         runner.assert_exhausted();
@@ -918,7 +932,10 @@ mod tests {
         let home = temp_home("matrix-status");
         let runner = ScriptedRunner::new(vec![running(2468)]);
         let owner = scripted_owner(&home, &["matrix-status"], runner.clone());
-        assert_eq!(owner.status("matrix-status").unwrap(), TunnelStatus::Running { pid: Some(2468) });
+        assert_eq!(
+            owner.status("matrix-status").unwrap(),
+            TunnelStatus::Running { pid: Some(2468) }
+        );
         assert_eq!(runner.calls()[0][0], "print");
         runner.assert_exhausted();
         let _ = fs::remove_dir_all(home);
@@ -969,7 +986,9 @@ mod tests {
     fn cancel_serializes_with_lifecycle_commands() {
         let home = temp_home("cancel-lock");
         let paths = TunnelPaths::new(&home);
-        ConfigStore::new(paths.clone()).save(&config(&["cancel-lock"])).unwrap();
+        ConfigStore::new(paths.clone())
+            .save(&config(&["cancel-lock"]))
+            .unwrap();
         let (runner, entered_rx, release_tx) = BlockingRunner::new();
         let owner = Arc::new(CoreOwner::new(paths, LaunchCtlExecutor::new(runner, 501)).unwrap());
         let generation = owner.begin("cancel-lock").unwrap()["generation"]
@@ -993,9 +1012,13 @@ mod tests {
             let response = cancel_owner.cancel("cancel-lock", generation).unwrap();
             cancel_done_tx.send(response).unwrap();
         });
-        cancel_started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        cancel_started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
         assert!(
-            cancel_done_rx.recv_timeout(Duration::from_millis(25)).is_err(),
+            cancel_done_rx
+                .recv_timeout(Duration::from_millis(25))
+                .is_err(),
             "cancel 不应在同隧道生命周期持锁时完成"
         );
 
@@ -1074,14 +1097,21 @@ mod tests {
         assert_eq!(result["operation"], "shutdown");
         assert_eq!(result["stopped"], 1);
         assert_eq!(
-            runner.calls().iter().map(|call| call[0].as_str()).collect::<Vec<_>>(),
+            runner
+                .calls()
+                .iter()
+                .map(|call| call[0].as_str())
+                .collect::<Vec<_>>(),
             vec!["print", "bootout", "print"]
         );
         runner.assert_exhausted();
         let _ = fs::remove_dir_all(home);
 
         let home = temp_home("matrix-shutdown-error");
-        let runner = ScriptedRunner::new(vec![running(987), process(8, "", "Operation not permitted")]);
+        let runner = ScriptedRunner::new(vec![
+            running(987),
+            process(8, "", "Operation not permitted"),
+        ]);
         let owner = scripted_owner(&home, &["matrix-shutdown-error"], runner.clone());
         let error = owner.shutdown().unwrap_err();
         assert_eq!(error.code, error_code::EXECUTOR);

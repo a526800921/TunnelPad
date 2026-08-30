@@ -12,12 +12,15 @@ pub struct TunnelPaths {
 
 impl TunnelPaths {
     pub fn new(home_directory: impl Into<PathBuf>) -> Self {
-        TunnelPaths { home_directory: home_directory.into() }
+        TunnelPaths {
+            home_directory: home_directory.into(),
+        }
     }
 
     /// TunnelPad 自己的 Application Support 目录（生成的 launchd plist 存这里）。
     pub fn support_directory(&self) -> PathBuf {
-        self.home_directory.join("Library/Application Support/TunnelPad")
+        self.home_directory
+            .join("Library/Application Support/TunnelPad")
     }
 
     pub fn config_url(&self) -> PathBuf {
@@ -51,7 +54,8 @@ impl TunnelPaths {
     }
 
     pub fn launchd_plist_url(&self, tunnel: &TunnelConfig) -> PathBuf {
-        self.launchd_directory().join(format!("{}.plist", tunnel.launchd_label()))
+        self.launchd_directory()
+            .join(format!("{}.plist", tunnel.launchd_label()))
     }
 
     pub fn log_url(&self, tunnel: &TunnelConfig) -> PathBuf {

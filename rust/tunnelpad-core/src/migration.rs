@@ -57,24 +57,30 @@ impl<L: LaunchdExecuting> MigrationService<L> {
         poll_delay: Arc<dyn Fn() + Send + Sync>,
         timestamp: TimestampFn,
     ) -> Self {
-        MigrationService { paths, executor, poll_delay, timestamp }
+        MigrationService {
+            paths,
+            executor,
+            poll_delay,
+            timestamp,
+        }
     }
 
     /// 接管单个旧 agent。任一步失败即回滚该条（恢复备份 plist 并 bootstrap 旧 agent）。
     pub fn takeover(&self, agent: &LegacyAgent) -> Result<MigrationOutcome, TakeoverError> {
-        let tunnel =
-            legacy::tunnel_config(agent).filter(|t| !t.command.is_empty()).ok_or_else(|| {
-                TakeoverError::InvalidAgent {
-                    label: agent.label.clone(),
-                    reason: "无法从 Label 派生合法隧道 id，或 ProgramArguments 为空".into(),
-                }
+        let tunnel = legacy::tunnel_config(agent)
+            .filter(|t| !t.command.is_empty())
+            .ok_or_else(|| TakeoverError::InvalidAgent {
+                label: agent.label.clone(),
+                reason: "无法从 Label 派生合法隧道 id，或 ProgramArguments 为空".into(),
             })?;
 
         // 备份先行；备份失败直接抛出，不进入回滚分支。
-        let backup_path = self.backup(agent).map_err(|e| TakeoverError::BackupFailed {
-            label: agent.label.clone(),
-            underlying: e,
-        })?;
+        let backup_path = self
+            .backup(agent)
+            .map_err(|e| TakeoverError::BackupFailed {
+                label: agent.label.clone(),
+                underlying: e,
+            })?;
 
         let new_label = tunnel.launchd_label();
         let tunnel_name = tunnel.name.clone();
@@ -110,8 +116,9 @@ impl<L: LaunchdExecuting> MigrationService<L> {
         self.executor
             .bootout(&agent.label)
             .map_err(|error| TakeoverError::Executor { error })?;
-        let new_plist = write_plist(tunnel, &self.paths)
-            .map_err(|e| TakeoverError::Io { underlying: e.to_string() })?;
+        let new_plist = write_plist(tunnel, &self.paths).map_err(|e| TakeoverError::Io {
+            underlying: e.to_string(),
+        })?;
         self.executor
             .bootstrap(new_label, &new_plist)
             .map_err(|error| TakeoverError::Executor { error })?;
@@ -146,10 +153,17 @@ impl<L: LaunchdExecuting> MigrationService<L> {
             }
             (self.poll_delay)();
         }
-        Err(TakeoverError::VerifyFailed { label: label.to_string() })
+        Err(TakeoverError::VerifyFailed {
+            label: label.to_string(),
+        })
     }
 
-    fn rollback(&self, agent: &LegacyAgent, backup_path: &PathBuf, new_label: &str) -> Result<(), String> {
+    fn rollback(
+        &self,
+        agent: &LegacyAgent,
+        backup_path: &PathBuf,
+        new_label: &str,
+    ) -> Result<(), String> {
         let _ = self.executor.bootout(new_label);
         // 若旧实例此前 bootout 失败仍在运行，这里补一次；已卸载则 not-found 不算错误。
         let _ = self.executor.bootout(&agent.label);
@@ -164,7 +178,9 @@ impl<L: LaunchdExecuting> MigrationService<L> {
 /// 人类可读的错误描述（对应 Swift `String(describing:)`，仅用于文案，不参与差分判定）。
 fn describe(error: &TakeoverError) -> String {
     match error {
-        TakeoverError::InvalidAgent { label, reason } => format!("invalidAgent(label: {label}, reason: {reason})"),
+        TakeoverError::InvalidAgent { label, reason } => {
+            format!("invalidAgent(label: {label}, reason: {reason})")
+        }
         TakeoverError::BackupFailed { label, underlying } => {
             format!("backupFailed(label: {label}, underlying: {underlying})")
         }

@@ -62,7 +62,10 @@ pub struct TpError {
 
 impl TpError {
     pub fn new(code: u32, message: impl Into<String>) -> Self {
-        TpError { code, message: message.into() }
+        TpError {
+            code,
+            message: message.into(),
+        }
     }
 }
 
@@ -117,7 +120,9 @@ impl TunnelConfig {
     /// 与 Swift `TunnelConfig.idPattern` 一致：`^[a-z0-9-]+$`。
     pub fn is_valid_id(id: &str) -> bool {
         !id.is_empty()
-            && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
     }
 
     /// 与 Swift `TunnelConfig.launchdLabelPrefix` 一致。
@@ -140,14 +145,22 @@ pub struct AppConfig {
 /// command 为空或首元素为空 → `INVALID_COMMAND`。
 pub fn parse_app_config(input: &str) -> Result<String, TpError> {
     let config = parse_config_envelope(input)?;
-    serde_json::to_string(&config)
-        .map_err(|e| TpError::new(error_code::INVALID_JSON, format!("config.json 序列化失败：{e}")))
+    serde_json::to_string(&config).map_err(|e| {
+        TpError::new(
+            error_code::INVALID_JSON,
+            format!("config.json 序列化失败：{e}"),
+        )
+    })
 }
 
 /// 解析 config.json 结构（供 ConfigStore 等复用）：version 检查 + id/command 校验。
 pub fn parse_config_envelope(input: &str) -> Result<AppConfig, TpError> {
-    let value: serde_json::Value = serde_json::from_str(input)
-        .map_err(|e| TpError::new(error_code::INVALID_JSON, format!("config.json 解析失败：{e}")))?;
+    let value: serde_json::Value = serde_json::from_str(input).map_err(|e| {
+        TpError::new(
+            error_code::INVALID_JSON,
+            format!("config.json 解析失败：{e}"),
+        )
+    })?;
 
     let version = value
         .get("version")
@@ -160,8 +173,12 @@ pub fn parse_config_envelope(input: &str) -> Result<AppConfig, TpError> {
         ));
     }
 
-    let config: AppConfig = serde_json::from_value(value)
-        .map_err(|e| TpError::new(error_code::INVALID_JSON, format!("config.json 解析失败：{e}")))?;
+    let config: AppConfig = serde_json::from_value(value).map_err(|e| {
+        TpError::new(
+            error_code::INVALID_JSON,
+            format!("config.json 解析失败：{e}"),
+        )
+    })?;
 
     for tunnel in &config.tunnels {
         if !TunnelConfig::is_valid_id(&tunnel.id) {
@@ -184,7 +201,12 @@ pub fn parse_config_envelope(input: &str) -> Result<AppConfig, TpError> {
 /// `{"case":"running","pid":1234}` / `{"case":"notRunning"}` /
 /// `{"case":"notLoaded"}` / `{"case":"other","state":"..."}`。
 /// `has_pid=false` 时 `running` 编码为 `"pid":null`。
-pub fn status_to_json(status_case: u32, has_pid: bool, pid: i32, state: Option<&str>) -> Result<String, TpError> {
+pub fn status_to_json(
+    status_case: u32,
+    has_pid: bool,
+    pid: i32,
+    state: Option<&str>,
+) -> Result<String, TpError> {
     let value = match status_case {
         0 => serde_json::json!({
             "case": "running",
@@ -194,11 +216,19 @@ pub fn status_to_json(status_case: u32, has_pid: bool, pid: i32, state: Option<&
         2 => serde_json::json!({ "case": "notLoaded" }),
         3 => {
             let state = state.ok_or_else(|| {
-                TpError::new(error_code::INVALID_ARGUMENT, "other 状态必须携带 state 字符串")
+                TpError::new(
+                    error_code::INVALID_ARGUMENT,
+                    "other 状态必须携带 state 字符串",
+                )
             })?;
             serde_json::json!({ "case": "other", "state": state })
         }
-        _ => return Err(TpError::new(error_code::INVALID_ARGUMENT, "未知的 TunnelStatus case")),
+        _ => {
+            return Err(TpError::new(
+                error_code::INVALID_ARGUMENT,
+                "未知的 TunnelStatus case",
+            ))
+        }
     };
     serde_json::to_string(&value).map_err(|e| TpError::new(error_code::INVALID_JSON, e.to_string()))
 }
@@ -206,17 +236,29 @@ pub fn status_to_json(status_case: u32, has_pid: bool, pid: i32, state: Option<&
 /// `ProbeResult` 的规范 JSON（阶段 1 契约）：
 /// `{"case":"satisfied","status":200}` / `{"case":"unexpected","status":502}` /
 /// `{"case":"failed","reason":"..."}`。
-pub fn probe_result_to_json(kind: u32, status: i32, reason: Option<&str>) -> Result<String, TpError> {
+pub fn probe_result_to_json(
+    kind: u32,
+    status: i32,
+    reason: Option<&str>,
+) -> Result<String, TpError> {
     let value = match kind {
         0 => serde_json::json!({ "case": "satisfied", "status": status }),
         1 => serde_json::json!({ "case": "unexpected", "status": status }),
         2 => {
             let reason = reason.ok_or_else(|| {
-                TpError::new(error_code::INVALID_ARGUMENT, "failed 结果必须携带 reason 字符串")
+                TpError::new(
+                    error_code::INVALID_ARGUMENT,
+                    "failed 结果必须携带 reason 字符串",
+                )
             })?;
             serde_json::json!({ "case": "failed", "reason": reason })
         }
-        _ => return Err(TpError::new(error_code::INVALID_ARGUMENT, "未知的 ProbeResult kind")),
+        _ => {
+            return Err(TpError::new(
+                error_code::INVALID_ARGUMENT,
+                "未知的 ProbeResult kind",
+            ))
+        }
     };
     serde_json::to_string(&value).map_err(|e| TpError::new(error_code::INVALID_JSON, e.to_string()))
 }
@@ -230,7 +272,8 @@ mod tests {
     const FULL: &str = r#"{"version":1,"tunnels":[{"id":"admin-tunnel","name":"管理隧道","command":["/usr/bin/ssh","-N","-L","8080:127.0.0.1:80","host"],"executor":"launchd","keepAlive":true,"throttleInterval":10,"probe":{"url":"http://127.0.0.1:8080/health","expectedStatuses":[200,204]}}]}"#;
 
     /// Swift 手写配置允许省略默认字段；编码时补全为默认值。
-    const MINIMAL_INPUT: &str = r#"{"version":1,"tunnels":[{"id":"web","name":"web","command":["/usr/bin/ssh","-N"]}]}"#;
+    const MINIMAL_INPUT: &str =
+        r#"{"version":1,"tunnels":[{"id":"web","name":"web","command":["/usr/bin/ssh","-N"]}]}"#;
     const MINIMAL_CANONICAL: &str = r#"{"version":1,"tunnels":[{"id":"web","name":"web","command":["/usr/bin/ssh","-N"],"executor":"launchd","keepAlive":true,"throttleInterval":10}]}"#;
 
     fn canon(s: &str) -> serde_json::Value {
@@ -270,17 +313,29 @@ mod tests {
     #[test]
     fn rejects_empty_command_and_empty_first_element() {
         let empty = r#"{"version":1,"tunnels":[{"id":"a","name":"a","command":[]}]}"#;
-        assert_eq!(parse_app_config(empty).unwrap_err().code, error_code::INVALID_COMMAND);
+        assert_eq!(
+            parse_app_config(empty).unwrap_err().code,
+            error_code::INVALID_COMMAND
+        );
 
         let blank_first = r#"{"version":1,"tunnels":[{"id":"a","name":"a","command":["","x"]}]}"#;
-        assert_eq!(parse_app_config(blank_first).unwrap_err().code, error_code::INVALID_COMMAND);
+        assert_eq!(
+            parse_app_config(blank_first).unwrap_err().code,
+            error_code::INVALID_COMMAND
+        );
     }
 
     #[test]
     fn rejects_malformed_json_and_missing_required_fields() {
-        assert_eq!(parse_app_config("{not json").unwrap_err().code, error_code::INVALID_JSON);
+        assert_eq!(
+            parse_app_config("{not json").unwrap_err().code,
+            error_code::INVALID_JSON
+        );
         let missing = r#"{"version":1,"tunnels":[{"id":"a","name":"a"}]}"#;
-        assert_eq!(parse_app_config(missing).unwrap_err().code, error_code::INVALID_JSON);
+        assert_eq!(
+            parse_app_config(missing).unwrap_err().code,
+            error_code::INVALID_JSON
+        );
     }
 
     #[test]
@@ -295,8 +350,10 @@ mod tests {
 
     #[test]
     fn launchd_label_matches_swift_prefix() {
-        let mut config: TunnelConfig =
-            serde_json::from_value(serde_json::json!({"id":"a1","name":"n","command":["/bin/true"]})).unwrap();
+        let mut config: TunnelConfig = serde_json::from_value(
+            serde_json::json!({"id":"a1","name":"n","command":["/bin/true"]}),
+        )
+        .unwrap();
         assert_eq!(config.launchd_label(), "com.jafish.tunnelpad.a1");
         config.executor = ExecutorKind::App;
         assert_eq!(config.launchd_label(), "com.jafish.tunnelpad.a1");
@@ -312,14 +369,26 @@ mod tests {
             status_to_json(0, false, 0, None).unwrap(),
             r#"{"case":"running","pid":null}"#
         );
-        assert_eq!(status_to_json(1, false, 0, None).unwrap(), r#"{"case":"notRunning"}"#);
-        assert_eq!(status_to_json(2, false, 0, None).unwrap(), r#"{"case":"notLoaded"}"#);
+        assert_eq!(
+            status_to_json(1, false, 0, None).unwrap(),
+            r#"{"case":"notRunning"}"#
+        );
+        assert_eq!(
+            status_to_json(2, false, 0, None).unwrap(),
+            r#"{"case":"notLoaded"}"#
+        );
         assert_eq!(
             status_to_json(3, false, 0, Some("weird-state")).unwrap(),
             r#"{"case":"other","state":"weird-state"}"#
         );
-        assert_eq!(status_to_json(9, false, 0, None).unwrap_err().code, error_code::INVALID_ARGUMENT);
-        assert_eq!(status_to_json(3, false, 0, None).unwrap_err().code, error_code::INVALID_ARGUMENT);
+        assert_eq!(
+            status_to_json(9, false, 0, None).unwrap_err().code,
+            error_code::INVALID_ARGUMENT
+        );
+        assert_eq!(
+            status_to_json(3, false, 0, None).unwrap_err().code,
+            error_code::INVALID_ARGUMENT
+        );
     }
 
     #[test]
@@ -336,7 +405,13 @@ mod tests {
             probe_result_to_json(2, 0, Some("连接被拒绝")).unwrap(),
             r#"{"case":"failed","reason":"连接被拒绝"}"#
         );
-        assert_eq!(probe_result_to_json(2, 0, None).unwrap_err().code, error_code::INVALID_ARGUMENT);
-        assert_eq!(probe_result_to_json(9, 0, None).unwrap_err().code, error_code::INVALID_ARGUMENT);
+        assert_eq!(
+            probe_result_to_json(2, 0, None).unwrap_err().code,
+            error_code::INVALID_ARGUMENT
+        );
+        assert_eq!(
+            probe_result_to_json(9, 0, None).unwrap_err().code,
+            error_code::INVALID_ARGUMENT
+        );
     }
 }
