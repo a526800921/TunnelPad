@@ -1,11 +1,11 @@
 # 计划：TunnelPad Rust Core 迁移
 
 - 状态：实施中
-- 当前阶段：阶段 2
+- 当前阶段：阶段 3
 - 最后更新：2026-08-30
 - 前置：`tunnelpad-v1`、`tunnelpad-ui-refinements` 与 `tunnelpad-code-quality-refactor` 已完成；本计划只在现有 Swift 行为基线上设计 Rust Core 的渐进替换
 
-当前说明：用户已确认迁移边界为“保留 SwiftUI/AppKit 菜单栏与窗口 UI，逐步用 Rust 替换 `TunnelPadCore`”，并确认以“C ABI 主路径 + Swift Core 可回退”作为默认 bridge 方案（sidecar IPC 为备选）。阶段 0、1 均已通过独立准入复核；阶段 2（9 类组件 parity + 差分测试）已实现并全绿，等待独立完成复核。本计划不直接修改现有 Swift 行为，不接管真实用户隧道。
+当前说明：用户已确认迁移边界为“保留 SwiftUI/AppKit 菜单栏与窗口 UI，逐步用 Rust 替换 `TunnelPadCore`”，并确认以“C ABI 主路径 + Swift Core 可回退”作为默认 bridge 方案（sidecar IPC 为备选）。阶段 0–2 均已通过独立准入复核；阶段 3（隔离 demo 生命周期 + 全生命周期差分）达到待实施标准并进入实施。本计划不直接修改现有 Swift 行为，不接管真实用户隧道。
 
 ## 背景
 
@@ -102,81 +102,74 @@ TunnelPad 当前是 SwiftUI/AppKit + SwiftPM 的 macOS 菜单栏应用。Swift U
 |---|---|---|---|---|
 | 阶段 0 | 迁移基线、行为契约、边界与候选连接方式冻结 | 用户确认迁移范围 | Swift/Rust 工具链、现有测试/构建、调用边界、风险和安全样本 | 已完成 |
 | 阶段 1 | 最小 bridge/sidecar 原型与 DTO/错误/取消契约 | 阶段 0 独立准入复核通过 | FFI/IPC 原型、Swift 兼容调用、发布链接样本 | 已完成 |
-| 阶段 2 | Rust Core 组件 parity：配置、ID、命令、执行器、探针、日志、迁移、退出 | 阶段 1 契约冻结 | fake executor、故障注入、差分测试 | 实施中 |
-| 阶段 3 | 隔离 demo 生命周期与 shadow/differential 回归 | 阶段 2 组件 parity 通过 | demo 启停/重启/删除/退出、取消竞态、产物清理 | 设计中 |
+| 阶段 2 | Rust Core 组件 parity：配置、ID、命令、执行器、探针、日志、迁移、退出 | 阶段 1 契约冻结 | fake executor、故障注入、差分测试 | 已完成 |
+| 阶段 3 | 隔离 demo 生命周期与 shadow/differential 回归 | 阶段 2 组件 parity 通过 | demo 启停/重启/删除/退出、取消竞态、产物清理 | 实施中 |
 | 阶段 4 | SwiftUI App 可选接入 Rust Core，保持一键回退 Swift | 阶段 3 独立复核通过 | Release `.app`、AX 冒烟、demo 实机与回滚 | 设计中 |
 | 阶段 5 | 观察窗口、Swift Core 收缩或删除（可选） | 阶段 4 用户验收与独立复核通过 | 真实隧道经明确授权的分批验证、发布和回滚 | 粗粒度 |
 
 ## 当前阶段
 
-当前阶段为阶段 2（Rust Core 组件 parity）。阶段 1 已通过独立完成复核（2026-08-30），阶段 2 达到待实施标准并进入实施。阶段 2 只在 `rust/` 与新增 Swift 差分 harness 中工作，不修改既有 Swift 行为，不操作真实隧道。阶段 1 证据见[阶段 1 证据](../data-quality/tunnelpad-rust-migration-stage1-20260830.md)；冻结契约见下文「契约冻结记录」章节。
+当前阶段为阶段 3（隔离 demo 生命周期与 shadow/differential 回归）。阶段 2 已通过独立完成复核（2026-08-30），阶段 3 达到待实施标准并进入实施。阶段 3 只在 `rust/` 与新增 Swift 差分 harness 场景中工作，不修改既有 Swift 行为，不操作真实隧道。阶段 2 证据见[阶段 2 证据](../data-quality/tunnelpad-rust-migration-stage2-20260830.md)；冻结契约见下文「契约冻结记录」章节。
 
 ### 目标与范围
 
-- 在 `rust/tunnelpad-core` 内实现与 Swift `TunnelPadCore` 组件对等的纯逻辑与注入式执行器：
-  - 配置：ConfigStore 读写与损坏恢复（损坏留档 `config.json.corrupt-<timestamp>`、重建空配置、保存编码对齐）
-  - ID：TunnelID slug 生成与冲突追加 `-2/-3`、launchd label 前缀
-  - SSH 命令：`-v` 精确增删（不碰 `-vv`）、isSSH/hasVerboseFlag 语义
-  - plist：LaunchdPlistRenderer 渲染（以 Swift 实现为准逐字段对齐）
-  - 执行器：LaunchCtlExecutor（bootstrap/bootout/status 解析）与 AppProcessExecutor（pidfile start/stop/restart/status）——全部通过注入 fake runner，不触碰真实 launchctl/SSH
-  - 探针：ProbeService 判定逻辑（satisfied/unexpected/failed），HTTP 传输注入（fake 传输）
-  - 日志：LogTail 尾部读取（含结尾换行处理）
-  - 迁移：LegacyImporter/MigrationService 接管逻辑（fake 文件布局）
-  - 退出：stop-all 编排语义（fake 执行器）
-- 差分测试：同一 fixture 输入分别驱动 Swift 差分 harness（新增测试文件）与 Rust 实现，比较状态序列、错误类别、文件副作用（plist/pidfile/config.json 内容等价）。
-- Swift 侧仅允许新增差分 harness 文件，不修改既有行为。
+- 在 `rust/tunnelpad-core` 新增 demo 生命周期编排模块，对隔离 demo 配置（固定 `demo-` ID 前缀、独立临时 home）执行完整生命周期序列：
+  - install：写 config.json + plist 渲染
+  - start / stop / restart：launchd 路径走 fake runner，app 路径走真实 `/bin/sleep` 子进程
+  - remove：停止实例 + 从 config 移除 + 清理 plist/pidfile
+  - takeover：legacy 迁移接管进 demo 配置
+  - shutdown-all：退出清理语义
+- 产物清理验证：每步操作后 config.json/plist/pidfile/日志/migration-backup 的存在性与内容符合预期。
+- 竞态与取消注入：generation 失配场景（stop 后迟到的意外退出、删除后迟到的 keepAlive 重启计划被 generation 拦截）验证单一 owner、无残留产物。
+- 全生命周期差分：同一 lifecycle fixture 驱动 Swift（真实 TunnelLifecycleCoordinator/ConfigStore/LaunchdPlistRenderer/MigrationService/AppProcessExecutor 组件组合编排）与 Rust demo 模块，事件流一致。
+- **kill_by_pidfile 对齐（复核要求的首项，已完成）**：Rust `Shutdown::kill_by_pidfile` 已按 Swift `killByPidfile` 对齐（默认 SIGTERM、kill(pid,0) 预检、全路径清理 pidfile）并补直接测试。
 
 ### 非目标
 
-- 不接入 SwiftUI App 产品路径（阶段 4）；不删除/收缩 Swift Core。
-- 不操作真实隧道、launchd、SSH、网络探针；全部 fake/fixture + 隔离目录。
-- 不改变 config.json schema、launchd label、路径规则与现有语义。
+- 不接入 SwiftUI 产品路径（阶段 4）；不操作真实隧道/真实 launchctl/SSH；不执行 ECS 操作。
+- 不改变现有 Swift 行为；Swift 侧仅扩展差分 harness 场景。
+- shutdown-all 差分不得驱动真实 `Shutdown.stopAllManagedTunnels` 的 launchctl 路径（Swift 事实源硬编码 SystemProcessRunner）；只覆盖 app 分支（pidfile + /bin/sleep）或按组件组合注入 fake launchd。
 
 ### Step 0
 
-类型：组件 parity 基线。基线 = 阶段 1 完成态（HEAD `adfb12e`：ABI v1 契约冻结、rust workspace、`swift test` 74/74、Rust 15 项测试）+ 各组件的 Swift 行为快照（以现有 74 项 Swift 测试与组件源码为准）。
-
-判定口径（2026-08-30 独立复核要求）：
-
-- config.json 差分按“解码后语义等价”判定，不按无 sortKeys 的 Swift `JSONEncoder` 字节比较（实测其键序不确定且转义 `/`）。
-- 保存编码（ConfigStore 的 `[.prettyPrinted, .sortedKeys]`）为确定输出但属 Apple 风格（`\/` 转义、`"key" : value` 分隔、2 空格缩进）；Rust 侧字节对齐需自定义序列化格式器，可行性须在阶段 2 早期验证：可行则字节对齐，不可行则该项差分退化为解码后语义等价并单独记录格式差异，不得静默放宽。
+类型：隔离 demo 生命周期基线。基线 = 阶段 2 完成态（HEAD `e599a58`：9 类组件 parity、差分全绿、swift test 75、Rust 31 项测试）+ Swift 编排事实源（TunnelLifecycleCoordinator 同步入口、ConfigStore、LaunchdPlistRenderer、MigrationService、AppProcessExecutor、Shutdown 编排语义；remove 编排以 TunnelManager.removeTunnel 既有序列为准：停止实例 → 配置更新与落盘失败回滚 → 产物清理，差分中按组件组合执行）。
 
 ### 样本矩阵
 
 | # | 输入/基线 | 可执行命令或操作 | 预期结果 | 失败判定 | 输出位置 |
 |---|---|---|---|---|---|
-| 1 | Rust 组件测试 | `cargo test` | 新增组件 parity 测试全过 | 任一失败 | cargo 输出/阶段 2 证据 |
-| 2 | 差分 harness | Swift harness 与 Rust harness 在同一 fixture 上运行并对比 | 状态序列/错误类别/文件副作用一致（config.json 按 Step 0 判定口径） | 任一不一致 | 差分报告/阶段 2 证据 |
-| 3 | 故障注入 | fake runner 失败/损坏 fixture | 错误类别与恢复路径与 Swift 一致（损坏留档、重建、回滚） | 行为分叉 | 阶段 2 证据 |
-| 4 | 既有回归 | `swift test` | 74/74 保持通过 | 任一失败 | 测试输出 |
-| 5 | 边界隔离 | `git status`/diff 审计 | 变更只含 `rust/`、新增 Swift harness 文件、docs | 计划外行为改动 | 阶段 2 证据 |
+| 1 | 阶段 2 完成态 + demo lifecycle 模块 | `cargo test` | demo lifecycle 单元/集成测试全过 | 任一失败 | cargo 输出/阶段 3 证据 |
+| 2 | lifecycle fixture（install→start→status→restart→stop→remove→takeover→shutdown-all 组合 × launchd/app 执行器） | Swift/Rust harness 执行同一 fixture 并对比 | 事件流一致（状态序列、文件副作用、产物清理） | 任一不一致 | 差分报告/阶段 3 证据 |
+| 3 | 竞态 fixture（generation 失配、迟到回调/重启计划） | 两侧注入竞态场景并对比 | 单一 owner、无残留 pidfile/迟到重启，行为一致 | 行为分叉 | 阶段 3 证据 |
+| 4 | 既有回归 | `swift test` | 74 项既有 + harness 全过 | 任一失败 | 测试输出 |
+| 5 | 边界隔离 | `git status`/diff 审计 | 变更只含 `rust/`、新增 Swift harness 场景、docs | 计划外行为改动 | 阶段 3 证据 |
 
 ### 验证方式
 
-`cargo test` + 差分 harness 对比 + `swift test` 回归；证据写入 `docs/data-quality` 阶段 2 文档；完成后由独立复核确认 parity 与阶段 3 准入。
+`cargo test` + 全生命周期差分 + `swift test` 回归；证据写入 `docs/data-quality` 阶段 3 文档；完成后由独立复核确认阶段 3 完成与阶段 4 准入。
 
 ### 完成条件
 
-- 9 类组件（配置/ID/SSH 命令/plist/launchd 执行器/app 执行器/探针/日志/迁移+退出）parity 实现并有 cargo 测试覆盖。
-- 差分测试在全部 fixture 矩阵上一致（状态序列、错误类别、文件副作用）。
-- Swift 既有测试保持 74/74；边界隔离满足。
-- 独立复核确认阶段 2 完成且阶段 3 达到待实施标准。
+- demo lifecycle 模块全操作在隔离目录跑通并有测试覆盖。
+- 全生命周期差分一致；竞态/取消场景一致。
+- Swift 既有测试保持全过；边界隔离满足。
+- 独立复核确认阶段 3 完成且阶段 4 达到待实施标准。
 
 ### 失败与回滚边界
 
-任一差分不一致：暂停该组件替换、定位差异后重跑；Rust 代码未接入产品路径，失败不影响 Swift 运行。
+差分不一致 → 暂停该场景、定位后重跑；Rust 未接产品路径，失败不影响 Swift 运行；隔离 demo 使用独立目录与 `demo-` 前缀 ID，不与真实配置接触。
 
 ### 阶段准入摘要
 
 | 字段 | 内容 |
 |---|---|
 | 准入状态 | 实施中 |
-| Step 0 | 继承阶段 1 完成态（HEAD `adfb12e`：ABI v1 契约冻结、74/74、Rust 15 项测试）+ Swift 组件行为快照；含两条差分判定口径 |
-| 样本矩阵 | 5 行：cargo test、差分 harness、故障注入、既有回归、边界隔离 |
-| 验证方式 | `cargo test`、差分 harness 对比、`swift test` 回归与独立复核 |
-| 失败/回滚边界 | 差分不一致即暂停该组件替换；Rust 未接入产品路径，失败不影响 Swift 运行 |
+| Step 0 | 继承阶段 2 完成态（HEAD `e599a58`）+ Swift 编排事实源锚点；复核要求的首项（kill_by_pidfile 对齐）已完成 |
+| 样本矩阵 | 5 行（6 列）：cargo test、全生命周期差分、竞态注入、既有回归、边界隔离 |
+| 验证方式 | `cargo test`、全生命周期差分、`swift test` 回归与独立复核 |
+| 失败/回滚边界 | 差分不一致即暂停该场景；隔离目录 + `demo-` 前缀 ID；Rust 未接产品路径 |
 | 当前阻塞项 | 无当前阶段阻塞项 |
-| 最新独立准入复核 | 2026-08-30 通过（阶段 1 完成复核 + 阶段 2 准入草案复核，见独立复核记录） |
+| 最新独立准入复核 | 2026-08-30 通过（阶段 2 完成复核 + 阶段 3 准入草案复核，见独立复核记录） |
 
 ## 契约冻结记录（阶段 1 冻结，阶段 2+ 事实源）
 
@@ -247,9 +240,9 @@ C ABI 最小原型在阶段 1 必须逐项证明以下门槛；任一不成立�
 | 字段 | 内容 |
 |---|---|
 | 日期 | 2026-08-30 |
-| 阶段 | 阶段 2 |
-| 结论 | 通过：阶段 1 达到完成标准；阶段 2 达到待实施标准（本次复核同时覆盖两者） |
-| 证据 | 复核者独立复跑 HEAD `adfb12e`（工作树干净）：`smoke.sh` 全绿（cargo test 15/15、Swift 29 项断言、codesign --verify --strict、arm64 产物）、`swift test` 74/74、`adfb12e` 边界审计 rust/ 全为新增且无既有 Swift 行为改动、头文件与 ffi.rs 6 函数一一对应、错误码与缺省值/id 校验/TunnelStatus/ProbeResult 与 Swift 事实源逐项一致。两条披露随落盘修复：D1 准入摘要与 PLAN_MAP 状态同步；D2 契约键序表述修正（规范形状以 CodingKeys 声明序为准，不作 JSONEncoder 字节参照） |
+| 阶段 | 阶段 3 |
+| 结论 | 通过：阶段 2 达到完成标准；阶段 3 达到待实施标准（本次复核同时覆盖两者） |
+| 证据 | 复核者独立复跑 HEAD `e599a58`（工作树干净）：differential.sh 全绿（事件流现场重产出，13 fixture/59 用例条目）、cargo test 31/31、swift test 75/75、strict-readiness 通过、边界审计无 Sources/ 改动；以突变法证实差分 harness 非恒真（临时改动 Rust parse_status → 差分如期失败 → 还原回绿）。披露随落盘处置：D1 kill_by_pidfile 语义分叉已作为阶段 3 首项修复（SIGTERM + kill(pid,0) 预检 + 全路径清理 + 直接测试）；D2 时区差异（Rust UTC vs Swift 本地）标记为阶段 4 前置；D3 fixture 计数已更正 |
 | 复核者 | 独立复核 subagent |
 
 ## 独立复核记录
@@ -263,6 +256,8 @@ C ABI 最小原型在阶段 1 必须逐项证明以下门槛；任一不成立�
 | 2026-08-30 | 阶段 1 准入草案复核 | 阶段 1 | 达到待实施标准 | 草案目标/非目标、Step 0（FFI 契约原型基线 = 64e126fa 复验基线 + Rust 1.96.0）、5 行样本矩阵（含 74/74 回归与 git 边界审计）、验证方式、完成条件（引用阶段 0 冻结的 5 项门槛）、失败/回滚边界齐备自洽；落盘时须同步 `PLAN_MAP.md` 并提交未提交的治理文档编辑 | 独立复核 subagent |
 | 2026-08-30 | 阶段 1 完成准入复核 | 阶段 1 | 通过 | 独立复跑 HEAD `adfb12e`（工作树干净）：smoke.sh 全绿（cargo test 15/15、Swift 29 项断言、codesign --verify --strict、arm64 产物）、swift test 74/74、adfb12e 边界审计 rust/ 全为新增且无既有 Swift 行为改动、头文件与 ffi.rs 6 函数一一对应、错误码 0-5 与缺省值/id 校验/TunnelStatus/ProbeResult 与 Swift 事实源逐项一致；完成条件 4/4 满足；两条披露随阶段 2 落盘修复：strict-readiness ERROR（阶段准入摘要.准入状态与 PLAN_MAP 同步）、契约键序表述修正（实测 Swift JSONEncoder 无 sortKeys 时键序不确定且转义 /，规范形状以 CodingKeys 声明序为准） | 独立复核 subagent |
 | 2026-08-30 | 阶段 2 准入草案复核 | 阶段 2 | 达到待实施标准 | 草案 9 类组件语义锚点与 ConfigStore（corrupt-<timestamp>、prettyPrinted+sortedKeys）/SSHCommand（-v 精确增删）/TunnelID（slug 冲突 -2/-3）等事实源一致，Step 0/5 行样本矩阵/验证方式/完成条件/回滚边界齐备自洽，与阶段 1 冻结契约（注入式执行器、Rust 不发起真实操作）衔接一致；落盘前提：同步修复 D1/D2，并在 Step 0 写明 config.json 差分按解码后语义等价判定、写盘字节对齐基准为 Swift sortedKeys 确定输出（含 \/ 转义的 Apple 风格，serde_json 需自定义格式器，可行性需先行验证） | 独立复核 subagent |
+| 2026-08-30 | 阶段 2 完成准入复核 | 阶段 2 | 通过 | 独立复跑 HEAD `e599a58`（工作树干净）：differential.sh 全绿（事件流现场重产出，13 fixture/59 用例条目，Swift 真实 Core API 产出 vs Rust 实现）、cargo test 31/31、swift test 75/75、strict-readiness 通过、边界审计无 Sources/ 与既有测试改动；反证证实 harness 非恒真（突变 Rust parse_status → 差分如期失败 → 还原回绿）；逐组件对读语义一致。披露：D1 kill_by_pidfile 语义分叉（随落盘修复）、D2 归一化掩盖 Rust UTC vs Swift 本地时区（阶段 4 前须对齐）、D3 fixture 计数更正为 13/59 | 独立复核 subagent |
+| 2026-08-30 | 阶段 3 准入草案复核 | 阶段 3 | 达到待实施标准 | 草案目标/非目标、Step 0（基线 = `e599a58` 复验一致；事实源锚点 TunnelLifecycleCoordinator 同步入口、TunnelManager.removeTunnel 序列经仓库核实）、6 列样本矩阵、验证方式、完成条件、回滚边界齐备，与阶段 2 差分设施/注入式执行器/阶段 1 冻结契约衔接自洽；落盘前提：①矩阵补「输入/基线」列并补「阶段准入摘要」表同步 PLAN_MAP；②首项修复 kill_by_pidfile 对齐 Swift（不得归一化掩盖）；③shutdown-all 差分仅覆盖 app 分支或按组件注入 fake launchd，不得驱动真实 launchctl | 独立复核 subagent |
 
 ## 关联计划、ADR、迁移、spec 或 issue
 

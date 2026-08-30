@@ -25,7 +25,7 @@
 | `migration.rs` | MigrationService.swift | 备份→bootout→bootstrap→验证→回滚编排 |
 | `shutdown.rs` | Shutdown.swift | stop-all 编排（fake 执行器单元测试覆盖） |
 
-差分设施：`rust/differential/fixtures/`（12 个 fixture 文件、约 40 个用例）、
+差分设施：`rust/differential/fixtures/`（13 个 fixture 文件、59 个用例条目）、
 `Tests/TunnelPadCoreTests/DifferentialHarnessTests.swift`（Swift 侧事件产出）、
 `rust/tunnelpad-core/tests/differential.rs`（Rust 侧执行 + 语义等价对比）、
 `rust/scripts/differential.sh`（门禁脚本）。
@@ -51,11 +51,14 @@
 - 临时 home 路径 → `<home>`；`yyyyMMdd-HHmmss` 时间戳 → `<stamp>`（本地时区 vs Rust UTC 的差异归一化）；app 执行器日志时间戳 → `[<ts>]`；真实 pid → `<pid>`（pidfile 内容与 running 状态）。
 - 错误文案文本（`String(describing:)` 与 Rust `Debug`）不作等价判定；判定对象为错误 case 与结构化载荷（label/exit_code/stderr/message 原文）。
 
-## 已知边界（记录，不阻塞）
+## 已知边界（阶段 2 独立复核披露与处置）
 
-- `Shutdown.stopAllManagedTunnels` 的 launchd 分支：Swift 事实源硬编码 SystemProcessRunner，无法在不触碰真实 launchctl 的前提下差分（阶段 0–3 禁止），以 Rust 单元测试（fake 执行器）覆盖编排语义；app 分支 killByPidfile 语义在 Rust 对等实现并有测试。
+- **kill_by_pidfile 语义分叉（复核发现，已修复）**：阶段 2 交付时 Rust `kill_by_pidfile` 为 SIGKILL、无 kill(pid,0) 预检、不清理 pidfile，与 Swift `Shutdown.killByPidfile`（默认 SIGTERM、预检、全路径清理）真实分叉；且原证据"app 分支对等实现并有测试"表述不实。已作为阶段 3 首项修复：Rust 按 Swift 语义对齐并补 4 组直接测试（存活进程终止+清理、预检失败、内容非法、文件缺失）。
 - legacy plist 解析覆盖 XML 子集（差分 fixture 均为 XML）；二进制 plist 不在矩阵内。
 - app 执行器 keepAlive 的延迟重启：Swift 为 terminationHandler 事件驱动，Rust 为 `handle_exits()` 轮询驱动（返回待重启计划，由并发所有者执行）——并发所有权在 Swift 的契约映射不变。
+- **时区差异（复核披露，阶段 4 前必须处理）**：Rust 时间戳为 UTC，Swift 为本地时区，影响 corrupt 留档/备份文件名与 app 日志时间戳的小时值；差分归一化掩盖了该差异。阶段 4 切换产品路径前须对齐或经用户显式接受。
+- **归一化不掩盖行为差异（复核验证）**：复核者以突变法临时改动 Rust `parse_status` 的 `not running` 映射，差分如期失败、还原回绿，证实 harness 为真实行为对比；pid 归一化只掩盖数值，running/notRunning case 与 pidfile 存在性仍被比较。
+- 差分 fixture 实测 13 个文件、59 个用例条目（初稿误记 12/约 40，复核更正）。
 
 ## 安全边界
 
@@ -65,3 +68,9 @@
 ## 结论
 
 阶段 2 完成条件中的实现与验证部分已全部满足；等待独立完成复核确认 parity 与阶段 3 准入。
+
+## 阶段 2 收尾
+
+- 2026-08-30 独立完成复核通过（复核者：独立复核 subagent）：独立复跑 differential.sh（现场重产出事件流）、cargo test 31/31、swift test 75/75、strict-readiness 通过、e599a58 边界审计无 Sources/ 改动；并以突变法证实差分 harness 非恒真（临时改动 Rust parse_status → 差分如期失败 → 还原回绿）。
+- 复核披露 D1（kill_by_pidfile 语义分叉）、D3（fixture 计数）已随本文件修正；D1 的代码修复作为阶段 3 首项完成（SIGTERM + kill(pid,0) 预检 + 全路径清理 + 直接测试）；D2（时区差异）标记为阶段 4 前置。
+- 复核记录见专项计划「最新独立准入复核」与「独立复核记录」。

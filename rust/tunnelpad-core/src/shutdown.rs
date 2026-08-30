@@ -37,17 +37,27 @@ pub fn stop_all_managed_tunnels(
     }
     stopped
 }
-
-/// Swift `Shutdown.killByPidfile` 对等：读 pidfile → SIGKILL。
-pub fn kill_by_pidfile(at: &Path) -> bool {
-    let Ok(content) = std::fs::read_to_string(at) else {
+/// Swift `Shutdown.killByPidfile` 对等：读 pidfile → kill(pid,0) 预检 →
+/// 默认 SIGTERM；所有路径都清理 pidfile（进程已不存在/文件不可读也算清理）。
+pub fn kill_by_pidfile(at: &Path, signal_number: i32) -> bool {
+    let Some(content) = std::fs::read_to_string(at).ok() else {
+        let _ = std::fs::remove_file(at);
         return false;
     };
     let Ok(pid) = content.trim().parse::<i32>() else {
+        let _ = std::fs::remove_file(at);
         return false;
     };
-    // # Safety: kill 仅接受合法 pid；SIGKILL 无失败重试语义，与 Swift 一致。
-    unsafe { libc::kill(pid, libc::SIGKILL) == 0 }
+    // # Safety: kill(pid, 0) 为存在性预检，无副作用。
+    unsafe {
+        if libc::kill(pid, 0) != 0 {
+            let _ = std::fs::remove_file(at);
+            return false;
+        }
+        libc::kill(pid, signal_number);
+    }
+    let _ = std::fs::remove_file(at);
+    true
 }
 
 #[cfg(test)]
@@ -115,6 +125,44 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
+    #[test]
+    fn kill_by_pidfile_mirrors_swift_semantics() {
+        let home = std::env::temp_dir().join(format!("tp-killpid-test-{}", std::process::id()));
+        let paths = TunnelPaths::new(&home);
+        std::fs::create_dir_all(paths.run_directory()).unwrap();
+
+        // 存活子进程：SIGTERM 终止 + pidfile 被清理
+        let mut child = std::process::Command::new("/bin/sleep")
+            .arg("2")
+            .spawn()
+            .unwrap();
+        let live_pidfile = paths.run_directory().join("live.pid");
+        std::fs::write(&live_pidfile, format!("{}\n", child.id())).unwrap();
+        assert!(kill_by_pidfile(&live_pidfile, libc::SIGTERM));
+        assert!(!live_pidfile.exists());
+        child.wait().unwrap();
+
+        // 已退出的进程：预检失败 → false + pidfile 清理
+        let mut exited = std::process::Command::new("/usr/bin/true").spawn().unwrap();
+        let exited_pid = exited.id() as i32;
+        exited.wait().unwrap();
+        let dead_pidfile = paths.run_directory().join("dead.pid");
+        std::fs::write(&dead_pidfile, format!("{exited_pid}\n")).unwrap();
+        assert!(!kill_by_pidfile(&dead_pidfile, libc::SIGTERM));
+        assert!(!dead_pidfile.exists());
+
+        // 内容非法 → false + pidfile 清理
+        let garbage = paths.run_directory().join("garbage.pid");
+        std::fs::write(&garbage, "not-a-pid").unwrap();
+        assert!(!kill_by_pidfile(&garbage, libc::SIGTERM));
+        assert!(!garbage.exists());
+
+        // 文件缺失 → false
+        assert!(!kill_by_pidfile(&paths.run_directory().join("missing.pid"), libc::SIGTERM));
+
+        std::fs::remove_dir_all(&home).ok();
+    }
+
     struct AppConfigHelper;
     impl AppConfigHelper {
         fn config_with(items: Vec<(&str, &str)>) -> crate::AppConfig {
@@ -123,8 +171,7 @@ mod tests {
                 .map(|(id, executor)| {
                     serde_json::from_value(serde_json::json!({
                         "id": id, "name": id, "command": ["/bin/true"], "executor": executor
-                    }))
-                    .unwrap()
+                    }))                    .unwrap()
                 })
                 .collect();
             crate::AppConfig { version: 1, tunnels }
