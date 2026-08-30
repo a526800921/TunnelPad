@@ -10,12 +10,11 @@ import TunnelPadCore
 struct LogView: View {
     let tunnel: TunnelConfig
     @EnvironmentObject private var manager: TunnelManager
+    @EnvironmentObject private var appDelegate: AppDelegate
 
     @State private var text = ""
     @State private var fileMissing = false
     @State private var autoScroll = true
-
-    private let timer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -26,7 +25,7 @@ struct LogView: View {
                 Toggle("自动滚动", isOn: $autoScroll)
                     .toggleStyle(.checkbox)
                 Button {
-                    load()
+                    Task { await load() }
                 } label: {
                     Label("刷新", systemImage: "arrow.clockwise")
                 }
@@ -46,9 +45,18 @@ struct LogView: View {
                 .lineLimit(1)
                 .truncationMode(.head)
         }
-        .onAppear(perform: load)
-        .onReceive(timer) { _ in
-            load()
+        .task(id: appDelegate.isMainWindowVisible) {
+            guard appDelegate.isMainWindowVisible else { return }
+            await load()
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 2_000_000_000)
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled, appDelegate.isMainWindowVisible else { return }
+                await load()
+            }
         }
     }
 
@@ -60,9 +68,13 @@ struct LogView: View {
     }
 
     /// 静默读取日志尾部：内容未变化时不写 @State，避免每个刷新周期都触发重绘。
-    private func load() {
+    private func load() async {
         let url = manager.paths.logURL(for: tunnel)
-        if let tail = LogTail.lastLines(of: url, maxLines: 500) {
+        let tail = await Task.detached(priority: .utility) {
+            LogTail.lastLines(of: url, maxLines: 500)
+        }.value
+        guard !Task.isCancelled else { return }
+        if let tail {
             guard tail != text || fileMissing else { return }
             text = tail
             fileMissing = false

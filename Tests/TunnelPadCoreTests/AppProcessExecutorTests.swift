@@ -102,6 +102,40 @@ final class AppProcessExecutorTests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.5)
         XCTAssertEqual(executor.status(id: tunnel.id), .notLoaded, "手动停止后不应被 keepAlive 拉起")
     }
+
+    func testStopDuringKeepAliveDelayInvalidatesPendingRestart() throws {
+        executor = makeExecutor(restartDelay: 0.4)
+        let tunnel = sleepTunnel(keepAlive: true)
+        try executor.start(tunnel)
+        guard case .running(let pid?) = executor.status(id: tunnel.id) else {
+            return XCTFail("期待首次 running")
+        }
+
+        kill(pid, SIGKILL)
+        XCTAssertTrue(waitUntil { self.executor.status(id: tunnel.id) == .notLoaded })
+
+        // 进程已经退出、contexts 已清空，但 keepAlive 任务尚未执行；stop
+        // 仍必须使这次迟到的重启失效。
+        executor.stop(tunnel)
+        Thread.sleep(forTimeInterval: 0.7)
+        XCTAssertEqual(executor.status(id: tunnel.id), .notLoaded)
+    }
+
+    func testShutdownAllInvalidatesKeepAliveDelayWithoutLiveContext() throws {
+        executor = makeExecutor(restartDelay: 0.4)
+        let tunnel = sleepTunnel(keepAlive: true)
+        try executor.start(tunnel)
+        guard case .running(let pid?) = executor.status(id: tunnel.id) else {
+            return XCTFail("期待首次 running")
+        }
+
+        kill(pid, SIGKILL)
+        XCTAssertTrue(waitUntil { self.executor.status(id: tunnel.id) == .notLoaded })
+        executor.shutdownAll()
+        Thread.sleep(forTimeInterval: 0.7)
+
+        XCTAssertEqual(executor.status(id: tunnel.id), .notLoaded)
+    }
     func testShutdownAllKillsChildren() throws {
         executor = makeExecutor()
         let tunnel = sleepTunnel()
@@ -130,5 +164,19 @@ final class AppProcessExecutorTests: XCTestCase {
         }
         XCTAssertEqual(firstPid, secondPid, "重复 start 不应再拉起新进程")
         executor.stop(tunnel)
+    }
+
+    func testStartFailureCleansResourcesAndLeavesNoManagedProcess() {
+        executor = makeExecutor()
+        let tunnel = TunnelConfig(
+            id: "missing-executable",
+            name: "missing-executable",
+            command: ["/path/that/does/not/exist"],
+            executor: .app
+        )
+
+        XCTAssertThrowsError(try executor.start(tunnel))
+        XCTAssertEqual(executor.status(id: tunnel.id), .notLoaded)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.pidfileURL(for: tunnel).path))
     }
 }

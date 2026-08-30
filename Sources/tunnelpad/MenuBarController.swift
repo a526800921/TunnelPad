@@ -50,7 +50,6 @@ final class MenuBarController: NSObject {
 
     private func rebuildMenu(_ menu: NSMenu) {
         menu.removeAllItems()
-        manager.refresh()
 
         let tunnels = manager.config.tunnels
         if tunnels.isEmpty {
@@ -89,9 +88,9 @@ final class MenuBarController: NSObject {
         guard let id = sender.representedObject as? String else { return }
         switch manager.statuses[id] {
         case .running, .notRunning, .other:
-            manager.stop(id)
+            Task { await manager.stopAsync(id) }
         case .notLoaded, nil:
-            manager.start(id)
+            Task { await manager.startAsync(id) }
         }
     }
 
@@ -159,5 +158,11 @@ final class MenuBarController: NSObject {
 extension MenuBarController: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         rebuildMenu(menu)
+        // 菜单打开不能等待 launchctl；先展示最近缓存，再在后台刷新一次。
+        Task { [weak self, weak menu] in
+            guard let self else { return }
+            await manager.refreshAsync()
+            if let menu { rebuildMenu(menu) }
+        }
     }
 }

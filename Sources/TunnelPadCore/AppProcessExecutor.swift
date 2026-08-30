@@ -42,6 +42,9 @@ public final class AppProcessExecutor: @unchecked Sendable {
     }
 
     private var contexts: [String: Context] = [:]
+    /// 独立于 contexts 的代际计数：进程意外退出后，用户可能在 keepAlive
+    /// 延迟窗口内手动停止或删除隧道，此计数用于使迟到的重启任务失效。
+    private var generations: [String: Int] = [:]
     private let lock = NSLock()
     private let paths: TunnelPaths
     /// 测试注入：覆盖 keepAlive 重启延迟（秒）；nil 用 tunnel.throttleInterval。
@@ -64,17 +67,32 @@ public final class AppProcessExecutor: @unchecked Sendable {
 
         let logWriter = try openLogWriter(for: tunnel)
         let generation = nextGeneration(for: tunnel.id)
-        let process = try spawn(tunnel, logWriter: logWriter, generation: generation)
+        let process: Process
+        do {
+            process = try spawn(tunnel, logWriter: logWriter, generation: generation)
+        } catch {
+            // spawn 失败时没有 terminationHandler 可以负责收尾，必须主动关闭
+            // 已打开的日志句柄，避免重复编辑/启动后句柄泄漏。
+            logWriter.close()
+            throw error
+        }
 
         lock.lock()
         contexts[tunnel.id] = Context(process: process, tunnel: tunnel, logWriter: logWriter, generation: generation)
         lock.unlock()
 
-        try writePidfile(pid: process.processIdentifier, tunnel: tunnel)
+        do {
+            try writePidfile(pid: process.processIdentifier, tunnel: tunnel)
+        } catch {
+            // pidfile 写入失败时不能留下无记录的子进程。
+            stop(tunnel)
+            throw error
+        }
     }
 
     public func stop(_ tunnel: TunnelConfig) {
         lock.lock()
+        invalidateGenerationLocked(for: tunnel.id)
         guard let ctx = contexts.removeValue(forKey: tunnel.id) else {
             lock.unlock()
             removePidfile(tunnel)
@@ -115,7 +133,9 @@ public final class AppProcessExecutor: @unchecked Sendable {
     public func shutdownAll() {
         lock.lock()
         let all = Array(contexts.values)
+        let managedIDs = Set(contexts.keys).union(generations.keys)
         contexts.removeAll()
+        for id in managedIDs { invalidateGenerationLocked(for: id) }
         for ctx in all { ctx.manualStop = true }
         lock.unlock()
 
@@ -147,7 +167,19 @@ public final class AppProcessExecutor: @unchecked Sendable {
     private func nextGeneration(for id: String) -> Int {
         lock.lock()
         defer { lock.unlock() }
-        return (contexts[id]?.generation ?? 0) + 1
+        let generation = (generations[id] ?? 0) + 1
+        generations[id] = generation
+        return generation
+    }
+
+    private func invalidateGenerationLocked(for id: String) {
+        generations[id] = (generations[id] ?? 0) + 1
+    }
+
+    private func isCurrentGeneration(_ generation: Int, for id: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return generations[id] == generation
     }
 
     private func openLogWriter(for tunnel: TunnelConfig) throws -> LogWriter {
@@ -227,7 +259,9 @@ public final class AppProcessExecutor: @unchecked Sendable {
         let delay = restartDelayOverride ?? TimeInterval(ctx.tunnel.throttleInterval)
         let tunnel = ctx.tunnel
         let executor = self
+        let generation = ctx.generation
         DispatchQueue.global().asyncAfter(deadline: .now() + delay) {
+            guard executor.isCurrentGeneration(generation, for: tunnel.id) else { return }
             try? executor.start(tunnel)
         }
     }

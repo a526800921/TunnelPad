@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var menuBarController: MenuBarController?
     private var mainWindow: NSWindow?
     private var isTerminating = false
+    @Published private(set) var isMainWindowVisible = false
 
     override init() {
         self.manager = TunnelManager(paths: .standard())
@@ -62,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
         mainWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        isMainWindowVisible = true
     }
 }
 
@@ -70,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 extension AppDelegate: NSWindowDelegate {
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         sender.orderOut(nil)
+        isMainWindowVisible = false
         return false
     }
 }

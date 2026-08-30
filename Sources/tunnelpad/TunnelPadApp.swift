@@ -10,6 +10,7 @@ struct TunnelPadApp: App {
         WindowGroup("TunnelPad") {
             MainPanelView()
                 .environmentObject(appDelegate.manager)
+                .environmentObject(appDelegate)
                 .frame(minWidth: 900, minHeight: 560)
         }
         .windowResizability(.contentMinSize)
