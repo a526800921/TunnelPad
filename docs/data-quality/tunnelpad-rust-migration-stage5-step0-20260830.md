@@ -45,9 +45,11 @@ opaque handle、UTF-8 JSON 命令、配置 owner、launchd 生命周期和并发
 - `swift test`：79/79 通过；新增 `RustCoreClientTests` 2 项，覆盖真实 release dylib 的 snapshot、shutdown 后 owner closed 和 `app` 配置 fail-closed。
 - `./scripts/build_app.sh`：Rust release、Swift 测试、Swift release、动态库复制、`@rpath`、ad-hoc 签名和 `Info.plist` 校验全部通过。
 - Rust shutdown 已修复：未加载的 launchd 服务先由 owner 判定为 `notLoaded`，不再把真实 `launchctl` 的 `No such process` 误报为退出失败。
+- 生产退出路径已切换：`TunnelManager` 暴露绑定同一 Rust handle 的 `Shutdown.OwnerHandle`，`AppDelegate` 将其交给 SIGTERM/SIGINT handler；默认无 owner 的工具入口也只创建 Rust owner，旧 Swift executor 仅保留在 DEBUG 历史差分 fixture 中。
+- Rust FFI shutdown 现在返回并校验实际停止数量；Swift manager 关闭路径和信号句柄共用该结果通道。
 - fixture 明确验证：version=1 配置读写、`app` 配置拒绝且不自动转换、JSON 生命周期结果、同隧道串行、不同隧道并行，以及 shutdown 后拒绝新命令。
 
-该结果只代表 owner 适配与 Release 构建验证通过，不代表阶段 5 已完成。当前仍缺少 Rust owner 的后台任务/取消/过期代次、完整 fake `launchd` 故障矩阵、app 入口删除后的 UI/AX 回归、真实隧道 Rust owner 验证、退出路径独立复核和阶段 5 独立准入复核。
+该结果只代表 owner 适配、生产退出路由与 Release 构建验证通过，不代表阶段 5 已完成。当前仍缺少 Rust owner 的后台任务/取消/过期代次、完整 fake `launchd` 故障矩阵、app 入口删除后的 UI/AX 回归、真实隧道 Rust owner 验证、隔离 app/AX/退出操作复核和阶段 5 独立准入复核。
 
 ## Step 0 尚缺证据
 
@@ -55,4 +57,4 @@ opaque handle、UTF-8 JSON 命令、配置 owner、launchd 生命周期和并发
 - fake `launchd` 的完整启动、停止、重启、删除、错误注入和 shutdown 矩阵；
 - 后台任务、取消和过期任务保护测试；
 - 隐藏/删除 app 执行器入口后的 UI/AX 回归；
-- Rust owner 版本的 Release 启动、退出清理和独立准入复核；当前只完成构建/签名，尚未在隔离 app 环境执行 UI/AX 启动与退出操作。
+- Rust owner 版本的 Release 启动、退出清理和独立准入复核；当前只完成构建/签名及退出路由代码/单测，尚未在隔离 app 环境执行 UI/AX 启动与退出操作。

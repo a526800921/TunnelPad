@@ -8,6 +8,7 @@ public final class TunnelManager: ObservableObject {
     public let executor: LaunchCtlExecutor
     public let appExecutor: AppProcessExecutor
     public let migrationService: MigrationService
+    public let shutdownHandle: Shutdown.OwnerHandle
 
     @Published public private(set) var config: AppConfig
     @Published public private(set) var statuses: [String: TunnelStatus] = [:]
@@ -77,6 +78,10 @@ public final class TunnelManager: ObservableObject {
         )
         self.probeCoordinator = ProbeCoordinator(service: probeService)
         self.rustCore = rustCore
+        self.shutdownHandle = Shutdown.OwnerHandle {
+            guard let rustCore else { return 0 }
+            return (try? rustCore.shutdown()) ?? 0
+        }
         if let rustCore {
             do {
                 self.config = try rustCore.loadConfig()
@@ -719,7 +724,7 @@ public final class TunnelManager: ObservableObject {
         probeTask?.cancel()
         if let rustCore {
             do {
-                try await Task.detached(priority: .userInitiated) {
+                _ = try await Task.detached(priority: .userInitiated) {
                     try rustCore.shutdown()
                 }.value
             } catch is CancellationError {

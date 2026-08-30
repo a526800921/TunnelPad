@@ -21,7 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     // MARK: - 应用生命周期
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        Shutdown.installSignalHandlers()
+        Shutdown.installSignalHandlers(owner: manager.shutdownHandle)
         menuBarController = MenuBarController(manager: manager) { [weak self] in
             self?.showMainWindow()
         }

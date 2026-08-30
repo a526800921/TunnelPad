@@ -8,23 +8,63 @@ import Darwin
 /// 会在全局队列触发时被 dispatch_assert_queue 断言崩溃。
 public enum Shutdown {
 
+    /// 由唯一 Rust owner 提供的同步退出句柄。它是 Sendable 的，因为信号
+    /// dispatch source 不在 MainActor 上执行；句柄本身不创建第二个 owner。
+    public final class OwnerHandle: @unchecked Sendable {
+        private let action: @Sendable () -> Int
+
+        public init(action: @escaping @Sendable () -> Int) {
+            self.action = action
+        }
+
+        @discardableResult
+        public func stopAllManagedTunnels() -> Int {
+            action()
+        }
+    }
+
     private nonisolated(unsafe) static var signalSources: [DispatchSourceSignal] = []
 
     /// 安装 SIGTERM/SIGINT 处理：与正常退出同语义（停全部托管隧道后退出）。
-    public static func installSignalHandlers() {
+    public static func installSignalHandlers(owner: OwnerHandle? = nil) {
+        let owner = owner ?? OwnerHandle { stopAllManagedTunnels() }
         for signalNumber: Int32 in [SIGTERM, SIGINT] {
             signal(signalNumber, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: signalNumber, queue: DispatchQueue.global())
-            source.setEventHandler { stopAllAndExit() }
+            source.setEventHandler { stopAllAndExit(owner: owner) }
             source.resume()
             signalSources.append(source)
         }
     }
 
-    /// 停止全部托管隧道：launchd 执行器 bootout，app 执行器按 pidfile 终止。
-    /// 返回成功停止的条数。
+    /// 通过一个临时 Rust owner 停止全部托管 launchd 隧道。应用正常运行时
+    /// 应传入 TunnelManager 持有的 OwnerHandle，避免同一进程创建第二个 owner。
     @discardableResult
     public static func stopAllManagedTunnels(paths: TunnelPaths = .standard()) -> Int {
+        guard let owner = try? RustCoreClient(paths: paths) else { return 0 }
+        return (try? owner.shutdown()) ?? 0
+    }
+
+    /// 信号处理入口：停完全部隧道后立即退出进程。
+    public static func stopAllAndExit(
+        paths: TunnelPaths = .standard(),
+        code: Int32 = 0,
+        owner: OwnerHandle? = nil
+    ) -> Never {
+        if let owner {
+            owner.stopAllManagedTunnels()
+        } else {
+            stopAllManagedTunnels(paths: paths)
+        }
+        exit(code)
+    }
+
+#if DEBUG
+    /// 仅供阶段 1–4 历史差分 fixture 使用；正式 app 和生产退出路径不再
+    /// 调用 Swift executor。旧差分 fixture 含 app 执行器，待旧 Core 删除时
+    /// 与对应历史 fixture 一并移除。
+    @discardableResult
+    static func stopAllManagedTunnelsForLegacyDifferential(paths: TunnelPaths) -> Int {
         let executor = LaunchCtlExecutor()
         let config = ConfigStore(paths: paths).load().config
         var stopped = 0
@@ -42,12 +82,7 @@ public enum Shutdown {
         }
         return stopped
     }
-
-    /// 信号处理入口：停完全部隧道后立即退出进程。
-    public static func stopAllAndExit(paths: TunnelPaths = .standard(), code: Int32 = 0) -> Never {
-        stopAllManagedTunnels(paths: paths)
-        exit(code)
-    }
+#endif
 
     /// 按 pidfile 终止进程（SIGTERM）；进程已不存在时清理 pidfile。
     @discardableResult

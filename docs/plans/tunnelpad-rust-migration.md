@@ -158,7 +158,7 @@ TunnelPad 当前是 SwiftUI/AppKit + SwiftPM 的 macOS 菜单栏应用。Swift U
 
 已确认的本机基线：当前配置包含 `admin-tunnel` 和 `reverse-ssh` 两条隧道，均为 `launchd`；没有 `app` 配置。对 `admin-tunnel` 的一次受控 bootout/bootstrap 闭环成功，旧 PID 已退出，新 PID 正常运行，`reverse-ssh` 保持运行；配置的 HTTP 探针当次返回连接失败，需要在 Rust owner 切换前完成原因分类或明确记录为已知基线。
 
-已完成的 Step 0 证据：owner ABI/配置/并发隔离原型、Swift FFI 适配、Rust/Swift smoke、42 个 Rust 单测 + 1 个差分测试、Swift 79/79、Release `.app` 构建与签名；细节见[阶段 5 Step 0 证据](../data-quality/tunnelpad-rust-migration-stage5-step0-20260830.md)。尚缺完整 launchd 故障矩阵、取消/过期任务、隐藏 app 入口后的 UI/AX 回归、真实 Rust owner 验证、退出路径复核和阶段 5 独立准入复核。
+已完成的 Step 0 证据：owner ABI/配置/并发隔离原型、Swift FFI 适配、Rust/Swift smoke、42 个 Rust 单测 + 1 个差分测试、Swift 79/79、Release `.app` 构建与签名；生产信号处理已绑定 `TunnelManager` 持有的同一 Rust owner 句柄，未再创建第二套 Swift 生命周期 owner；细节见[阶段 5 Step 0 证据](../data-quality/tunnelpad-rust-migration-stage5-step0-20260830.md)。尚缺完整 launchd 故障矩阵、取消/过期任务、隐藏 app 入口后的 UI/AX 回归、真实 Rust owner 验证、隔离 app/AX/退出操作复核和阶段 5 独立准入复核。
 
 ### 样本矩阵
 
@@ -204,7 +204,7 @@ TunnelPad 当前是 SwiftUI/AppKit + SwiftPM 的 macOS 菜单栏应用。Swift U
 | 样本矩阵 | 8 行（6 列）：现有回归、配置 owner、fake launchd、并发、admin-tunnel、其他 launchd、UI/退出、旧 owner 删除审计 |
 | 验证方式 | cargo/swift 回归、Rust/Swift 差分、fake launchd、并发/退出 fixture、真实隧道逐条验证、Release/AX 和治理检查 |
 | 失败/回滚边界 | 不保留 App 内 Swift fallback；验证失败停止扩大范围并修复 Rust；独立复核通过前不得删除 Swift Core |
-| 当前阻塞项 | HTTP 探针连接失败尚未分类；完整故障/取消矩阵、app 入口删除后的 UI/AX 回归、真实 Rust owner 验证、退出路径复核和独立准入复核尚未完成 |
+| 当前阻塞项 | HTTP 探针连接失败尚未分类；完整故障/取消矩阵、app 入口删除后的 UI/AX 回归、真实 Rust owner 验证、隔离 app/AX/退出操作复核和独立准入复核尚未完成 |
 | 最新独立准入复核 | 阶段 4 于 2026-08-30 通过；阶段 5 尚无独立准入复核 |
 
 ## 阶段 4 完成摘要

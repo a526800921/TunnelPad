@@ -306,7 +306,7 @@ private func runDemoLifecycle(_ fixture: [String: Any], home: URL) throws -> [[S
                 "label": outcome.tunnel.launchdLabel,
             ])
         case "shutdown-all":
-            let stopped = Shutdown.stopAllManagedTunnels(paths: paths)
+            let stopped = Shutdown.stopAllManagedTunnelsForLegacyDifferential(paths: paths)
             events.append(["op": "shutdown-all", "stopped": stopped])
         default:
             throw HarnessSpawnError(message: "demo-lifecycle 不支持操作 \(op)")

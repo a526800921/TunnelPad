@@ -176,8 +176,12 @@ final class RustCoreClient: @unchecked Sendable {
         _ = try send(["op": "remove", "id": id])
     }
 
-    func shutdown() throws {
-        _ = try invokeShutdown()
+    func shutdown() throws -> Int {
+        let result = try invokeShutdown()
+        guard let stopped = result["stopped"] as? NSNumber, stopped.intValue >= 0 else {
+            throw ClientError.invalidResponse("shutdown 缺少合法 stopped 数量")
+        }
+        return stopped.intValue
     }
 
     private func lifecycle(op: String, id: String) throws -> TunnelStatus {

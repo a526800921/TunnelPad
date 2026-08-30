@@ -24,7 +24,7 @@ final class RustCoreClientTests: XCTestCase {
         XCTAssertEqual(snapshot.config.tunnels, [tunnel])
         XCTAssertEqual(snapshot.statuses[tunnel.id], .notLoaded)
 
-        try client.shutdown()
+        XCTAssertEqual(try client.shutdown(), 0)
         XCTAssertThrowsError(try client.snapshot()) { error in
             guard case let RustCoreClient.ClientError.remote(code, _) = error else {
                 return XCTFail("shutdown 后应返回 owner closed，实际为：\(error)")
