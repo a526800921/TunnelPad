@@ -2,7 +2,7 @@ import AppKit
 import TunnelPadCore
 
 /// 菜单栏图标控制器：打开菜单时按当前隧道与状态重绘全部菜单项
-///（状态点 + 名称，点击切换启停），并提供全部启动/停止、主面板与退出。
+///（状态点 + 名称，点击切换启停），并提供主面板与退出入口。
 @MainActor
 final class MenuBarController: NSObject {
 
@@ -68,15 +68,10 @@ final class MenuBarController: NSObject {
             item.target = self
             item.representedObject = tunnel.id
             item.image = Self.dotImage(for: status, busy: manager.busyIDs.contains(tunnel.id))
-            item.isEnabled = tunnel.executor == .launchd
+            item.isEnabled = !manager.busyIDs.contains(tunnel.id)
             menu.addItem(item)
         }
 
-        if !tunnels.isEmpty {
-            menu.addItem(NSMenuItem.separator())
-            menu.addItem(self.item(title: "启动全部", action: #selector(startAll)))
-            menu.addItem(self.item(title: "停止全部", action: #selector(stopAll)))
-        }
         menu.addItem(NSMenuItem.separator())
         menu.addItem(self.item(title: "打开主面板", action: #selector(showPanel)))
         menu.addItem(self.item(title: "退出 TunnelPad", action: #selector(quitApp)))
@@ -100,8 +95,6 @@ final class MenuBarController: NSObject {
         }
     }
 
-    @objc private func startAll() { manager.startAll() }
-    @objc private func stopAll() { manager.stopAll() }
     @objc private func showPanel() { onShowPanel() }
     @objc private func quitApp() { NSApp.terminate(nil) }
 

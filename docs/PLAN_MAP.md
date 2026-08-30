@@ -21,7 +21,8 @@
 |---|---|---|---|---|---|
 | [TunnelPad v1 隧道管理应用](plans/tunnelpad-v1.md) | 已完成 | - | 2026-08-29 | - | [阶段 2 功能与验收记录](data-quality/tunnelpad-v1-stage2-features-20260829.md) |
 | [ECS 动态 SSH 公网 IP 同步](plans/ecs-dynamic-ssh-ip.md) | 实施中 | 阶段 1 | 2026-08-29 | - | [阶段 0 本机预检](data-quality/ecs-dynamic-ssh-ip-stage0-local-preflight-20260829.md)；[CLI 与凭证准备](data-quality/ecs-dynamic-ssh-ip-stage0-cli-credential-prep-20260829.md)；[云端只读验证](data-quality/ecs-dynamic-ssh-ip-stage0-cloud-readonly-20260829.md)；[控制台拓扑基线](data-quality/ecs-dynamic-ssh-ip-stage0-console-topology-20260829.md)；[项目外受控实跑](data-quality/ecs-dynamic-ssh-ip-stage0-controlled-run-20260829.md)；[阶段 1 实现与验证](data-quality/ecs-dynamic-ssh-ip-stage1-implementation-20260829.md) |
-| [TunnelPad 界面优化](plans/tunnelpad-ui-refinements.md) | 实施中 | 阶段 3 | 2026-08-29 | tunnelpad-v1 | [阶段 1 证据](data-quality/tunnelpad-ui-refinements-stage1-20260829.md)；[阶段 2 证据](data-quality/tunnelpad-ui-refinements-stage2-20260829.md) |
+| [TunnelPad 界面优化](plans/tunnelpad-ui-refinements.md) | 已完成 | - | 2026-08-30 | tunnelpad-v1 | [阶段 1 证据](data-quality/tunnelpad-ui-refinements-stage1-20260829.md)；[阶段 2 证据](data-quality/tunnelpad-ui-refinements-stage2-20260829.md)；[阶段 3 与阶段 1 收尾证据](data-quality/tunnelpad-ui-refinements-stage3-20260830.md)；[阶段 4 证据](data-quality/tunnelpad-ui-refinements-stage4-20260830.md) |
+| [TunnelPad 代码质量重构](plans/tunnelpad-code-quality-refactor.md) | 设计中 | 阶段 0 | 2026-08-30 | tunnelpad-v1, tunnelpad-ui-refinements | [阶段 0 计划与审计范围](plans/tunnelpad-code-quality-refactor.md) |
 
 允许状态：`候选`、`设计中`、`待实施`、`实施中`、`已完成`、`已替代`、`已合并`、`已废弃`。
 
@@ -30,6 +31,7 @@
 1. `tunnelpad-v1` 与 `ecs-dynamic-ssh-ip` 阶段 0 可并行推进。
 2. `ecs-dynamic-ssh-ip` 后续阶段按其自身独立准入复核推进。
 3. `tunnelpad-ui-refinements` 各阶段按其自身独立准入复核推进，可与 `ecs-dynamic-ssh-ip` 并行。
+4. `tunnelpad-code-quality-refactor` 先完成阶段 0 基线与兼容边界确认；实现阶段默认排在 `tunnelpad-ui-refinements` 收尾及阶段 4 独立复核之后，避免重构与 UI 行为同时修改。
 
 ## 依赖关系
 
@@ -38,6 +40,7 @@
 | tunnelpad-v1 | - | - |
 | ecs-dynamic-ssh-ip | - | 用户确认可立即进行本计划的阶段 0 准备；本计划不修改 TunnelPad v1 范围，与 v1 无阶段依赖。 |
 | tunnelpad-ui-refinements | tunnelpad-v1 | 前置 v1 已完成；本计划不修改 config schema 与隧道启停语义，与 ecs-dynamic-ssh-ip 无依赖。 |
+| tunnelpad-code-quality-refactor | tunnelpad-v1, tunnelpad-ui-refinements | v1 提供现有运行契约；界面优化当前仍在修改相同 UI 入口，先完成其阶段 3/4 收尾可减少重构基线漂移。阶段 0 只读审计可先行。 |
 
 ## 替代、合并和废弃
 
@@ -51,6 +54,7 @@
 |---|---|---|---|---|
 | - | - | - | 否 | 已延后 |
 | 阶段 1 实现与独立复核 | 阶段 1 已完成实现、fixture 验证和真实 ECS 只读回归；阶段 2 自动集成尚未启动，需另行准入。运行时任一双端点不一致、规则歧义、API 写入未确认或锁冲突都必须停止或保留新旧规则；Workbench 保留为恢复通道 | ecs-dynamic-ssh-ip 阶段 1 | 否 | 已通过 |
+| - | - | - | 否 | 已完成 |
 
 ## 完成证据
 
@@ -59,3 +63,6 @@
 | tunnelpad-v1 | 阶段 0 | [基线快照](data-quality/tunnelpad-v1-stage0-baseline-20260829.md)（样本矩阵四项通过，2026-08-29） |
 | tunnelpad-v1 | 阶段 1 | [接管与验证记录](data-quality/tunnelpad-v1-stage1-takeover-20260829.md)（双隧道接管/杀进程 1s 重连/退出即停双路径/重启恢复，2026-08-29） |
 | tunnelpad-v1 | 阶段 2 | [功能与验收记录](data-quality/tunnelpad-v1-stage2-features-20260829.md)（9 行矩阵全过、app 执行器/探针/日志/打包，.app 交付，2026-08-29） |
+| tunnelpad-ui-refinements | 阶段 1 | [阶段 1 收尾证据](data-quality/tunnelpad-ui-refinements-stage3-20260830.md)（关闭自动滚动回看保持、信息文案与 UI 收尾补验，2026-08-30） |
+| tunnelpad-ui-refinements | 阶段 3 | [阶段 3 实机闭环证据](data-quality/tunnelpad-ui-refinements-stage3-20260830.md)（新建→删除、配置恢复、产物清理，2026-08-30） |
+| tunnelpad-ui-refinements | 阶段 4 | [阶段 4 菜单栏证据](data-quality/tunnelpad-ui-refinements-stage4-20260830.md)（单项启停实机通过、移除批量启停入口、构建/测试/打包通过，2026-08-30） |
