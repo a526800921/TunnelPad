@@ -30,6 +30,8 @@ public struct ProbeConfig: Codable, Equatable, Sendable {
 public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var name: String
+    /// 用于管理展示的备注；缺失于旧配置时为空字符串。
+    public var remark: String
     /// 等价于 launchd plist 的 ProgramArguments，原样保存、不规范化。
     public var command: [String]
     public var executor: ExecutorKind
@@ -45,6 +47,7 @@ public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
     public init(
         id: String,
         name: String,
+        remark: String = "",
         command: [String],
         executor: ExecutorKind = .launchd,
         keepAlive: Bool = true,
@@ -53,6 +56,7 @@ public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
     ) {
         self.id = id
         self.name = name
+        self.remark = remark
         self.command = command
         self.executor = executor
         self.keepAlive = keepAlive
@@ -68,14 +72,15 @@ public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, command, executor, keepAlive, throttleInterval, probe
+        case id, name, remark, command, executor, keepAlive, throttleInterval, probe
     }
 
-    /// 手写配置允许省略带默认值的字段；缺 `probe` 即不探测（向后兼容）。
+    /// 手写配置允许省略带默认值的字段；缺 `remark` 时为空字符串，缺 `probe` 即不探测。
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
+        remark = try container.decodeIfPresent(String.self, forKey: .remark) ?? ""
         command = try container.decode([String].self, forKey: .command)
         executor = try container.decodeIfPresent(ExecutorKind.self, forKey: .executor) ?? .launchd
         keepAlive = try container.decodeIfPresent(Bool.self, forKey: .keepAlive) ?? true

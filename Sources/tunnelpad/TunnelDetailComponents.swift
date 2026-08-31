@@ -21,7 +21,7 @@ struct TunnelSidebarRow: View {
                         .fontWeight(.semibold)
                     TunnelDisplay.executorBadge(tunnel.executor)
                 }
-                Text(tunnel.launchdLabel)
+                Text(TunnelDisplay.subtitle(for: tunnel))
                     .font(.caption2.monospaced())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -93,6 +93,11 @@ struct TunnelDetailView: View {
 
 /// 状态点、状态文案、徽章等供侧栏与详情复用的展示逻辑。
 enum TunnelDisplay {
+    static func subtitle(for tunnel: TunnelConfig) -> String {
+        let remark = tunnel.remark.trimmingCharacters(in: .whitespacesAndNewlines)
+        return remark.isEmpty ? tunnel.launchdLabel : remark
+    }
+
     static func dotColor(_ status: TunnelStatus?, busy: Bool) -> Color {
         if busy { return .orange }
         switch status {

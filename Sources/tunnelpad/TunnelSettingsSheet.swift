@@ -69,6 +69,8 @@ struct TunnelSettingsSheet: View {
             sectionLabel("基本信息")
             fieldLabel("名称")
             TextField("隧道名称", text: $form.name)
+            fieldLabel("备注说明")
+            TextField("用于说明隧道用途", text: $form.remark)
         }
     }
 

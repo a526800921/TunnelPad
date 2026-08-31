@@ -878,6 +878,7 @@ mod tests {
                 .map(|id| TunnelConfig {
                     id: (*id).into(),
                     name: (*id).into(),
+                    remark: String::new(),
                     command: vec!["/usr/bin/true".into()],
                     executor: ExecutorKind::Launchd,
                     keep_alive: true,

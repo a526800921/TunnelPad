@@ -2,7 +2,7 @@
   "component": "config-store",
   "cases": [
     {"name": "fresh", "fileContent": null},
-    {"name": "valid", "fileContent": "{\"version\":1,\"tunnels\":[{\"id\":\"web\",\"name\":\"web\",\"command\":[\"/usr/bin/ssh\",\"-N\"]}]}"},
+    {"name": "valid", "fileContent": "{\"version\":1,\"tunnels\":[{\"id\":\"web\",\"name\":\"web\",\"remark\":\"用于 🚀 \\\"内网\\\"\",\"command\":[\"/usr/bin/ssh\",\"-N\"]}]}"},
     {"name": "empty", "fileContent": "{\"version\":1,\"tunnels\":[]}"},
     {"name": "corrupt-json", "fileContent": "{not json"},
     {"name": "bad-version", "fileContent": "{\"version\":2,\"tunnels\":[]}"},

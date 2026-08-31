@@ -88,12 +88,15 @@ fn default_expected_statuses() -> Vec<i32> {
 }
 
 /// 隧道配置。解码语义对齐 Swift `TunnelConfig.init(from:)`：
-/// 允许省略带默认值的字段；`probe` 缺省即不探测；id/command 非法时拒绝。
+/// 允许省略带默认值的字段；`remark` 缺省为空字符串；`probe` 缺省即不探测；
+/// id/command 非法时拒绝。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TunnelConfig {
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    pub remark: String,
     pub command: Vec<String>,
     #[serde(default)]
     pub executor: ExecutorKind,
@@ -266,12 +269,12 @@ mod tests {
 
     /// 规范形状 fixture：按 Swift `CodingKeys` 声明顺序书写。
     /// 跨语言等价性按解码后语义判定（Swift JSONEncoder 无 sortKeys 时键序不确定）。
-    const FULL: &str = r#"{"version":1,"tunnels":[{"id":"admin-tunnel","name":"管理隧道","command":["/usr/bin/ssh","-N","-L","8080:127.0.0.1:80","host"],"executor":"launchd","keepAlive":true,"throttleInterval":10,"probe":{"url":"http://127.0.0.1:8080/health","expectedStatuses":[200,204]}}]}"#;
+    const FULL: &str = r#"{"version":1,"tunnels":[{"id":"admin-tunnel","name":"管理隧道","remark":"用于 🚀 \"内网\"","command":["/usr/bin/ssh","-N","-L","8080:127.0.0.1:80","host"],"executor":"launchd","keepAlive":true,"throttleInterval":10,"probe":{"url":"http://127.0.0.1:8080/health","expectedStatuses":[200,204]}}]}"#;
 
     /// Swift 手写配置允许省略默认字段；编码时补全为默认值。
     const MINIMAL_INPUT: &str =
         r#"{"version":1,"tunnels":[{"id":"web","name":"web","command":["/usr/bin/ssh","-N"]}]}"#;
-    const MINIMAL_CANONICAL: &str = r#"{"version":1,"tunnels":[{"id":"web","name":"web","command":["/usr/bin/ssh","-N"],"executor":"launchd","keepAlive":true,"throttleInterval":10}]}"#;
+    const MINIMAL_CANONICAL: &str = r#"{"version":1,"tunnels":[{"id":"web","name":"web","remark":"","command":["/usr/bin/ssh","-N"],"executor":"launchd","keepAlive":true,"throttleInterval":10}]}"#;
 
     fn canon(s: &str) -> serde_json::Value {
         serde_json::from_str(s).expect("fixture 必须是合法 JSON")
@@ -290,6 +293,23 @@ mod tests {
         let out = parse_app_config(MINIMAL_INPUT).expect("最小配置应可解析");
         assert_eq!(canon(&out), canon(MINIMAL_CANONICAL));
         assert_eq!(out, MINIMAL_CANONICAL);
+    }
+
+    #[test]
+    fn remark_defaults_to_empty_and_roundtrips_special_text() {
+        let minimal: TunnelConfig = serde_json::from_value(
+            serde_json::json!({"id":"minimal","name":"最小","command":["/bin/true"]}),
+        )
+        .unwrap();
+        assert_eq!(minimal.remark, "");
+
+        let input =
+            r#"{"id":"remark","name":"备注","remark":"用于 🚀 \"内网\"","command":["/bin/true"]}"#;
+        let tunnel: TunnelConfig = serde_json::from_str(input).unwrap();
+        assert_eq!(tunnel.remark, "用于 🚀 \"内网\"");
+        let encoded = serde_json::to_string(&tunnel).unwrap();
+        let decoded: TunnelConfig = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, tunnel);
     }
 
     #[test]

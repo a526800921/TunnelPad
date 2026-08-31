@@ -69,6 +69,9 @@ struct NewTunnelSheet: View {
             Text("名称")
                 .font(.callout)
             TextField("隧道名称", text: $form.name)
+            Text("备注说明")
+                .font(.callout)
+            TextField("用于说明隧道用途", text: $form.remark)
             if let previewID {
                 Text("保存后 id：\(previewID)（由名称自动生成，launchd 标签与日志文件名都由它派生）")
                     .font(.caption)

@@ -23,6 +23,7 @@ enum TunnelFormValidationError: LocalizedError {
 /// UI 只负责绑定字段与呈现错误，避免两套弹窗的规则逐渐漂移。
 struct TunnelFormState: Equatable {
     var name = ""
+    var remark = ""
     var commandText = ""
     var executor: ExecutorKind = .launchd
     var keepAlive = true
@@ -35,6 +36,7 @@ struct TunnelFormState: Equatable {
 
     init(tunnel: TunnelConfig) {
         name = tunnel.name
+        remark = tunnel.remark
         commandText = tunnel.command.joined(separator: "\n")
         // 阶段 5 当前只允许 launchd；旧 app 配置不会进入生产 owner。
         executor = .launchd
@@ -65,6 +67,7 @@ struct TunnelFormState: Equatable {
 
     func makeTunnel(id: String) throws -> TunnelConfig {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedRemark = remark.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else { throw TunnelFormValidationError.emptyName }
         guard !parsedCommand.isEmpty else { throw TunnelFormValidationError.emptyCommand }
         guard throttleInterval >= 1 else { throw TunnelFormValidationError.invalidThrottle }
@@ -73,6 +76,7 @@ struct TunnelFormState: Equatable {
         return TunnelConfig(
             id: id,
             name: trimmedName,
+            remark: trimmedRemark,
             command: parsedCommand,
             executor: executor,
             keepAlive: keepAlive,

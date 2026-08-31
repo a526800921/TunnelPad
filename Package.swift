@@ -28,7 +28,7 @@ let package = Package(
         ),
         .testTarget(
             name: "TunnelPadCoreTests",
-            dependencies: ["TunnelPadCore"]
+            dependencies: ["TunnelPadCore", "tunnelpad"]
         )
     ]
 )

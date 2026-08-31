@@ -22,6 +22,7 @@ final class TunnelConfigTests: XCTestCase {
         let config = try JSONDecoder().decode(AppConfig.self, from: Data(json.utf8))
         let tunnel = try XCTUnwrap(config.tunnels.first)
         XCTAssertEqual(tunnel.executor, .launchd)
+        XCTAssertEqual(tunnel.remark, "")
         XCTAssertTrue(tunnel.keepAlive)
         XCTAssertEqual(tunnel.throttleInterval, 10)
     }
@@ -38,11 +39,35 @@ final class TunnelConfigTests: XCTestCase {
 
     func testRoundtripPreservesFields() throws {
         let original = AppConfig(tunnels: [
-            TunnelConfig(id: "reverse-ssh", name: "反向", command: ["/usr/bin/ssh", "-N", "-R", "127.0.0.1:22022:127.0.0.1:22", "root@ecs.example.invalid"],
+            TunnelConfig(id: "reverse-ssh", name: "反向", remark: "用于后台 🚀 \"内网\"", command: ["/usr/bin/ssh", "-N", "-R", "127.0.0.1:22022:127.0.0.1:22", "root@ecs.example.invalid"],
                          executor: .launchd, keepAlive: true, throttleInterval: 15)
         ])
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(AppConfig.self, from: data)
         XCTAssertEqual(decoded, original)
+    }
+
+    func testRemarkRoundtripPreservesUnicodeQuotesAndEmptyValue() throws {
+        let json = #"{"version":1,"tunnels":[{"id":"remark","name":"备注","remark":"用于 🚀 \"内网\"","command":["/bin/true"]},{"id":"empty","name":"空","remark":"","command":["/bin/true"]}]}"#
+        let config = try JSONDecoder().decode(AppConfig.self, from: Data(json.utf8))
+
+        XCTAssertEqual(config.tunnels.map(\.remark), ["用于 🚀 \"内网\"", ""])
+        let encoded = try JSONEncoder().encode(config)
+        let encodedObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        let tunnels = try XCTUnwrap(encodedObject["tunnels"] as? [[String: Any]])
+        XCTAssertEqual(tunnels[0]["remark"] as? String, "用于 🚀 \"内网\"")
+        XCTAssertEqual(tunnels[1]["remark"] as? String, "")
+    }
+
+    func testRemarkDoesNotChangeLaunchdLabel() {
+        let withoutRemark = TunnelConfig(id: "stable", name: "稳定", command: ["/bin/true"])
+        let withRemark = TunnelConfig(
+            id: "stable", name: "稳定", remark: "展示说明", command: ["/bin/true"]
+        )
+
+        XCTAssertEqual(withoutRemark.launchdLabel, withRemark.launchdLabel)
+        XCTAssertEqual(withRemark.remark, "展示说明")
     }
 }

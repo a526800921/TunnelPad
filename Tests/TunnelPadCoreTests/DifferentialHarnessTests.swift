@@ -584,6 +584,7 @@ private func runComponent(_ component: String, fixture: [String: Any], home: URL
                 "command": config.command,
                 "executor": config.executor.rawValue,
                 "keepAlive": config.keepAlive,
+                "remark": config.remark,
                 "throttleInterval": NSNumber(value: config.throttleInterval),
             ] as [String: Any]
         }

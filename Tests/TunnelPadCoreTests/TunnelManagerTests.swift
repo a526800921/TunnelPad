@@ -14,7 +14,10 @@ final class TunnelManagerTests: XCTestCase {
         let paths = TunnelPaths(homeDirectory: tempHome)
         let store = ConfigStore(paths: paths)
         try store.save(AppConfig(tunnels: [
-            TunnelConfig(id: "reload-a", name: "A", command: ["/usr/bin/ssh", "-N", "a"])
+            TunnelConfig(
+                id: "reload-a", name: "A", remark: "原备注",
+                command: ["/usr/bin/ssh", "-N", "a"]
+            )
         ]))
 
         let manager = TunnelManager(paths: paths)
@@ -23,11 +26,15 @@ final class TunnelManagerTests: XCTestCase {
         XCTAssertEqual(manager.statuses.keys.sorted(), ["reload-a"])
 
         try store.save(AppConfig(tunnels: [
-            TunnelConfig(id: "reload-b", name: "B", command: ["/usr/bin/ssh", "-N", "b"])
+            TunnelConfig(
+                id: "reload-b", name: "B", remark: "外部说明",
+                command: ["/usr/bin/ssh", "-N", "b"]
+            )
         ]))
         manager.reloadConfig()
 
         XCTAssertEqual(manager.config.tunnels.map(\.id), ["reload-b"], "reload 应读取磁盘上的新配置")
+        XCTAssertEqual(manager.config.tunnels[0].remark, "外部说明", "reload 应更新列表备注")
         XCTAssertEqual(manager.statuses.keys.sorted(), ["reload-b"], "已移除隧道的状态缓存应被清理")
         XCTAssertTrue(manager.lastMessage?.contains("重新加载") == true)
     }
@@ -44,6 +51,7 @@ final class TunnelManagerTests: XCTestCase {
         let tunnel = TunnelConfig(
             id: "edit-a",
             name: "A",
+            remark: "旧说明",
             command: ["/usr/bin/ssh", "-N", "a"],
             probe: ProbeConfig(url: "http://127.0.0.1:1/health", expectedStatuses: [200])
         )
@@ -60,17 +68,20 @@ final class TunnelManagerTests: XCTestCase {
 
         var updated = tunnel
         updated.name = "A2"
+        updated.remark = "新的用途说明"
         updated.throttleInterval = 15
         updated.probe = nil
         manager.updateTunnel(updated)
 
         XCTAssertEqual(manager.config.tunnels[0].name, "A2")
+        XCTAssertEqual(manager.config.tunnels[0].remark, "新的用途说明")
         XCTAssertEqual(manager.config.tunnels[0].throttleInterval, 15)
         XCTAssertNil(manager.probeResults["edit-a"], "移除探针后旧结果应被清理")
         XCTAssertTrue(manager.lastMessage?.contains("已保存") == true)
 
         let reread = store.load().config
         XCTAssertEqual(reread.tunnels[0].name, "A2", "修改应持久化到 config.json")
+        XCTAssertEqual(reread.tunnels[0].remark, "新的用途说明", "备注修改应持久化到 config.json")
         XCTAssertEqual(reread.tunnels[0].command, ["/usr/bin/ssh", "-N", "a"])
         XCTAssertNil(reread.tunnels[0].probe)
     }
