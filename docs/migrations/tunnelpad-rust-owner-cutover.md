@@ -38,7 +38,7 @@
 4. 隐藏并移除 `app` 执行器入口、实现和配置分支；当前配置只允许 `launchd`（已完成）。
 5. 先在隔离 demo 验证 Rust owner，再完成当前两条真实 `launchd` 隧道的状态/重启闭环，以及 `admin-tunnel` 的探针闭环。
 6. 完成 Release、签名、AX、退出清理和 GitNexus 反向引用审计（Release/签名、真实 Release App 退出清理、隔离 App AX/退出操作、app 入口隐藏回归、旧 Swift Core/app 实现删除和最终反向引用审计已完成）。
-7. 阶段 5 独立准入复核通过后删除旧 Swift Core；删除后不保留 App 内 fallback（删除已完成，待独立收尾复核）。
+7. 阶段 5 独立准入复核通过后删除旧 Swift Core；删除后不保留 App 内 fallback（删除、删除后回归、反向引用审计和独立收尾复核均已完成）。
 
 ## 配置兼容边界
 

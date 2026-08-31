@@ -3,7 +3,7 @@
 - 日期：2026-08-30
 - 阶段：阶段 5
 - 类型：行为迁移与真实 `launchd` 受控基线
-- 结论：Step 0 已达到待实施标准；旧 Swift Core/app 实现已删除，阶段 5 完成仍取决于删除后回归与最终反向引用审计
+- 结论：Step 0、阶段 5 实施、删除后回归、最终反向引用审计和独立收尾复核均已完成
 - 关联计划：[TunnelPad Rust Core 迁移](../plans/tunnelpad-rust-migration.md)
 
 ## 当前配置基线
@@ -105,4 +105,4 @@ opaque handle、UTF-8 JSON 命令、配置 owner、launchd 生命周期和并发
 - `node .gitnexus/run.cjs analyze` 重新索引后，旧执行器和差分 fixture 不再出现在有效源码定义中；功能图谱所有 `ref` 均指向现存文件。
 - `plan-governance-cli check .` 与 `plan-governance-cli check . --strict-readiness` 均通过；仅保留既有跨计划影响目标 WARNING。
 
-上述结果代表删除实施和删除后验证已完成；阶段 5 的独立收尾复核仍应基于当前仓库与这些可复现命令单独确认。
+上述结果代表删除实施和删除后验证已完成。2026-08-31，用户在最新打包 App 上确认菜单栏图标和隧道管理无异常；基于当前仓库、上述可复现命令和该实机验证完成独立收尾复核，阶段 5 无未解决阻塞项。
