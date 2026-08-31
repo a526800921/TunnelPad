@@ -4,7 +4,7 @@ project:
   name: TunnelPad
 gitnexus:
   repo: TunnelPad
-  indexed_commit: e34bce7
+  indexed_commit: c7e2d87
 
 nodes:
   - id: business.tunnelpad
@@ -95,6 +95,23 @@ nodes:
       - kind: document
         ref: docs/plans/tunnelpad-stability.md
         locator: "目标与健康恢复状态机"
+
+  - id: function.ecs.ssh.preflight
+    type: function
+    name: ECS 动态 SSH 启动前置同步
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/ECSPreStart.swift
+        locator: "ECSPreStartChecker.check/checkAsync"
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "TunnelManager.start/startAsync/restart/restartAsync"
+      - kind: code
+        ref: scripts/update-ecs-ssh-ip
+        locator: "同步脚本入口、双端点探测与规则收敛"
+      - kind: document
+        ref: docs/plans/ecs-dynamic-ssh-ip.md
+        locator: "阶段 2 实现冻结"
 
   - id: function.log.management
     type: function
@@ -259,6 +276,20 @@ nodes:
         ref: Sources/TunnelPadCore/ProbeCoordinator.swift
         locator: "run"
 
+  - id: process.ecs.ssh.preflight
+    type: process
+    name: SSH 隧道启动/重启前同步 ECS 安全组
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "start/startAsync/restart/restartAsync 的前置检查"
+      - kind: code
+        ref: Sources/TunnelPadCore/ECSPreStart.swift
+        locator: "ECSPreStartChecker.check/checkAsync"
+      - kind: test
+        ref: Tests/TunnelPadCoreTests/ECSPreStartIntegrationTests.swift
+        locator: "前置成功、失败、超时、取消与非 SSH 隔离"
+
   - id: process.log.refresh
     type: process
     name: 日志尾部读取与面板更新
@@ -336,6 +367,39 @@ nodes:
         ref: docs/plans/tunnelpad-stability.md
         locator: "现有 HTTP 探针健康信号"
 
+  - id: external.ecs.security.group
+    type: external_workflow
+    name: ECS 受管 SSH 安全组规则
+    evidence:
+      - kind: code
+        ref: scripts/update-ecs-ssh-ip
+        locator: "DescribeSecurityGroupAttribute/AuthorizeSecurityGroup/RevokeSecurityGroup"
+      - kind: document
+        ref: docs/plans/ecs-dynamic-ssh-ip.md
+        locator: "不变量与规则收敛契约"
+
+  - id: external.ecs.cli.profile
+    type: external_workflow
+    name: 仓库外阿里云 CLI profile 与同步配置
+    evidence:
+      - kind: code
+        ref: scripts/update-ecs-ssh-ip
+        locator: "TUNNELPAD_ALIYUN_CONFIG 与外部配置读取"
+      - kind: document
+        ref: docs/examples/ecs-ssh-ip.env.example
+        locator: "仓库外非秘密配置示例"
+
+  - id: external.public.ip.endpoints
+    type: external_workflow
+    name: 中国直连公网 IPv4 探测端点
+    evidence:
+      - kind: code
+        ref: scripts/update-ecs-ssh-ip
+        locator: "TUNNELPAD_IP_ENDPOINT_1/TUNNELPAD_IP_ENDPOINT_2"
+      - kind: document
+        ref: docs/ecs-dynamic-ssh-ip-operations.md
+        locator: "双端点 IPv4 探测"
+
   - id: external.legacy.launchagents
     type: external_workflow
     name: 旧版 LaunchAgents 与备份文件
@@ -390,6 +454,13 @@ relations:
       - kind: document
         ref: docs/plans/tunnelpad-stability.md
         locator: "健康恢复"
+  - from: business.tunnelpad
+    to: function.ecs.ssh.preflight
+    type: contains
+    evidence:
+      - kind: document
+        ref: docs/plans/ecs-dynamic-ssh-ip.md
+        locator: "阶段 2 SSH 前置同步"
   - from: business.tunnelpad
     to: function.log.management
     type: contains
@@ -549,6 +620,42 @@ relations:
         ref: docs/plans/tunnelpad-stability.md
         locator: "健康恢复复用生命周期边界"
 
+  - from: function.tunnel.lifecycle
+    to: function.ecs.ssh.preflight
+    type: depends_on
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "SSH start/restart 前置检查"
+  - from: function.ecs.ssh.preflight
+    to: process.ecs.ssh.preflight
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/ECSPreStart.swift
+        locator: "ECSPreStartChecker"
+  - from: function.ecs.ssh.preflight
+    to: external.ecs.security.group
+    type: consumes
+    evidence:
+      - kind: code
+        ref: scripts/update-ecs-ssh-ip
+        locator: "安全组规则读取、授权与撤销"
+  - from: function.ecs.ssh.preflight
+    to: external.ecs.cli.profile
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/ECSPreStart.swift
+        locator: "外部路径环境 allowlist"
+  - from: function.ecs.ssh.preflight
+    to: external.public.ip.endpoints
+    type: consumes
+    evidence:
+      - kind: code
+        ref: scripts/update-ecs-ssh-ip
+        locator: "双端点公网 IPv4 探测"
+
   - from: function.log.management
     to: process.log.refresh
     type: orchestrates
@@ -645,6 +752,13 @@ relations:
       - kind: code
         ref: rust/tunnelpad-core/src/owner.rs
         locator: "CoreOwner.start_with_generation"
+  - from: process.tunnel.start
+    to: process.ecs.ssh.preflight
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "start/startAsync 前置同步"
   - from: process.tunnel.stop
     to: external.launchd.service
     type: consumes
@@ -659,6 +773,13 @@ relations:
       - kind: code
         ref: rust/tunnelpad-core/src/owner.rs
         locator: "CoreOwner.restart_with_generation"
+  - from: process.tunnel.restart
+    to: process.ecs.ssh.preflight
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "restart/restartAsync 前置同步"
   - from: process.tunnel.remove
     to: external.config.file
     type: consumes
@@ -687,6 +808,27 @@ relations:
       - kind: code
         ref: Sources/TunnelPadCore/ProbeService.swift
         locator: "check"
+  - from: process.ecs.ssh.preflight
+    to: external.ecs.security.group
+    type: consumes
+    evidence:
+      - kind: code
+        ref: scripts/update-ecs-ssh-ip
+        locator: "ECS 安全组 API 调用"
+  - from: process.ecs.ssh.preflight
+    to: external.ecs.cli.profile
+    type: consumes
+    evidence:
+      - kind: code
+        ref: scripts/update-ecs-ssh-ip
+        locator: "仓库外 env 与 CLI profile"
+  - from: process.ecs.ssh.preflight
+    to: external.public.ip.endpoints
+    type: consumes
+    evidence:
+      - kind: code
+        ref: scripts/update-ecs-ssh-ip
+        locator: "公网 IPv4 双端点"
   - from: process.log.refresh
     to: external.log.files
     type: consumes
