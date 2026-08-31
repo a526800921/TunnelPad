@@ -332,4 +332,5 @@ C ABI 最小原型在阶段 1 必须逐项证明以下门槛；任一不成立�
 - [TunnelPad 界面优化](tunnelpad-ui-refinements.md)：当前 SwiftUI/AppKit 用户操作与 UI/AX 契约。
 - [TunnelPad 代码质量重构](tunnelpad-code-quality-refactor.md)：Rust 迁移的前置内部边界与测试基线。
 - [ADR-0001：Rust Core 作为唯一生命周期 owner](../adr/0001-rust-core-single-owner.md)
+- [ADR-0002：App bundle ID 迁移至 com.jafish.tunnelpad.app](../adr/0002-app-bundle-id-migration.md)：阶段 5 产物的 App 身份与菜单栏宿主记录迁移决策。
 - [Rust Core owner 切换迁移说明](../migrations/tunnelpad-rust-owner-cutover.md)
