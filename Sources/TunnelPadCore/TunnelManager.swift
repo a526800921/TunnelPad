@@ -16,7 +16,8 @@ public final class TunnelManager: ObservableObject {
 
     private let migrationService: MigrationService
     private let probeCoordinator: ProbeCoordinator
-    private let rustCore: RustCoreClient
+    private let rustCore: any RustLifecycleOwner
+    private let preStartChecker: any ECSPreStartChecking
     private var runtimeState = TunnelRuntimeState()
     private var probeTask: Task<Void, Never>?
     private var probeGeneration: UInt = 0
@@ -28,7 +29,7 @@ public final class TunnelManager: ObservableObject {
     /// 真正的系统副作用前置校验由 Rust owner 完成。
     private var rustOperationGenerations: [String: UInt64] = [:]
 
-    public init(paths: TunnelPaths) {
+    public convenience init(paths: TunnelPaths) {
         let rustCore: RustCoreClient
         do {
             rustCore = try RustCoreClient(paths: paths)
@@ -37,10 +38,23 @@ public final class TunnelManager: ObservableObject {
         } catch {
             rustCore = RustCoreClient(failure: .unavailable(String(describing: error)))
         }
+        self.init(
+            paths: paths,
+            rustCore: rustCore,
+            preStartChecker: ECSPreStartChecker()
+        )
+    }
+
+    init(
+        paths: TunnelPaths,
+        rustCore: any RustLifecycleOwner,
+        preStartChecker: any ECSPreStartChecking
+    ) {
         self.paths = paths
         self.migrationService = MigrationService(paths: paths, executor: LaunchCtlExecutor())
         self.probeCoordinator = ProbeCoordinator(service: ProbeService())
         self.rustCore = rustCore
+        self.preStartChecker = preStartChecker
         self.shutdownHandle = Shutdown.OwnerHandle {
             (try? rustCore.shutdown()) ?? 0
         }
@@ -287,11 +301,14 @@ public final class TunnelManager: ObservableObject {
         guard let tunnel = tunnel(id: id) else { return }
         guard let operation = beginOperation(for: id) else { return }
         defer { endOperation(for: id, generation: operation) }
-        guard let rustGeneration = beginRustOperation(for: id) else { return }
         do {
+            try preStartChecker.check(tunnel: tunnel)
+            guard let rustGeneration = beginRustOperation(for: id) else { return }
             let status = try rustCore.start(id: id, generation: rustGeneration)
             updateRuntime { $0.setStatus(status, for: id) }
             lastMessage = "「\(tunnel.name)」已启动"
+        } catch let error as ECSPreStartError {
+            lastError = "启动「\(tunnel.name)」失败：\(error.errorDescription ?? "ECS 公网 IP 同步失败")"
         } catch {
             lastError = "启动「\(tunnel.name)」失败：\(error)"
         }
@@ -303,9 +320,12 @@ public final class TunnelManager: ObservableObject {
         guard let operation = beginOperation(for: id) else { return }
         defer { endOperation(for: id, generation: operation) }
 
-        guard let rustGeneration = beginRustOperation(for: id) else { return }
+        let preStartChecker = self.preStartChecker
         let rustCore = self.rustCore
         do {
+            try await preStartChecker.checkAsync(tunnel: tunnel)
+            guard !Task.isCancelled else { return }
+            guard let rustGeneration = beginRustOperation(for: id) else { return }
             let status = try await runRustOperation(id: id, generation: rustGeneration) {
                 try rustCore.start(id: id, generation: rustGeneration)
             }
@@ -315,6 +335,10 @@ public final class TunnelManager: ObservableObject {
             await refreshAsync()
         } catch is CancellationError {
             return
+        } catch let error as ECSPreStartError {
+            if isCurrentOperation(id, generation: operation) {
+                lastError = "启动「\(tunnel.name)」失败：\(error.errorDescription ?? "ECS 公网 IP 同步失败")"
+            }
         } catch {
             if isStaleRustOperation(error) { return }
             lastError = "启动「\(tunnel.name)」失败：\(error)"
@@ -363,11 +387,14 @@ public final class TunnelManager: ObservableObject {
         guard let tunnel = tunnel(id: id) else { return }
         guard let operation = beginOperation(for: id) else { return }
         defer { endOperation(for: id, generation: operation) }
-        guard let rustGeneration = beginRustOperation(for: id) else { return }
         do {
+            try preStartChecker.check(tunnel: tunnel)
+            guard let rustGeneration = beginRustOperation(for: id) else { return }
             let status = try rustCore.restart(id: id, generation: rustGeneration)
             updateRuntime { $0.setStatus(status, for: id) }
             lastMessage = "「\(tunnel.name)」已重启"
+        } catch let error as ECSPreStartError {
+            lastError = "重启「\(tunnel.name)」失败：\(error.errorDescription ?? "ECS 公网 IP 同步失败")"
         } catch {
             lastError = "重启「\(tunnel.name)」失败：\(error)"
         }
@@ -379,9 +406,12 @@ public final class TunnelManager: ObservableObject {
         guard let operation = beginOperation(for: id) else { return }
         defer { endOperation(for: id, generation: operation) }
 
-        guard let rustGeneration = beginRustOperation(for: id) else { return }
+        let preStartChecker = self.preStartChecker
         let rustCore = self.rustCore
         do {
+            try await preStartChecker.checkAsync(tunnel: tunnel)
+            guard !Task.isCancelled else { return }
+            guard let rustGeneration = beginRustOperation(for: id) else { return }
             let status = try await runRustOperation(id: id, generation: rustGeneration) {
                 try rustCore.restart(id: id, generation: rustGeneration)
             }
@@ -391,6 +421,10 @@ public final class TunnelManager: ObservableObject {
             await refreshAsync()
         } catch is CancellationError {
             return
+        } catch let error as ECSPreStartError {
+            if isCurrentOperation(id, generation: operation) {
+                lastError = "重启「\(tunnel.name)」失败：\(error.errorDescription ?? "ECS 公网 IP 同步失败")"
+            }
         } catch {
             if isStaleRustOperation(error) { return }
             lastError = "重启「\(tunnel.name)」失败：\(error)"

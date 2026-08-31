@@ -83,6 +83,9 @@ cp "$INFO_PLIST_SRC" "$APP_BUNDLE/Contents/Info.plist"
 echo "  ✓ Info.plist (LSUIElement)"
 cp "$ICON_SRC" "$APP_BUNDLE/Contents/Resources/$APP_NAME.icns"
 echo "  ✓ 应用图标"
+cp "$PROJECT_ROOT/scripts/update-ecs-ssh-ip" "$APP_BUNDLE/Contents/Resources/update-ecs-ssh-ip"
+chmod +x "$APP_BUNDLE/Contents/Resources/update-ecs-ssh-ip"
+echo "  ✓ ECS SSH 公网 IP 同步脚本"
 
 # Step 7: PkgInfo + ad-hoc 签名 + 校验
 echo -n "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
