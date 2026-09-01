@@ -16,6 +16,7 @@ public final class TunnelManager: ObservableObject {
 
     private let migrationService: MigrationService
     private let probeCoordinator: ProbeCoordinator
+    private let logStore: LogEventStore
     private let rustCore: any RustLifecycleOwner
     private let preStartChecker: any ECSPreStartChecking
     private var runtimeState = TunnelRuntimeState()
@@ -53,6 +54,7 @@ public final class TunnelManager: ObservableObject {
         self.paths = paths
         self.migrationService = MigrationService(paths: paths, executor: LaunchCtlExecutor())
         self.probeCoordinator = ProbeCoordinator(service: ProbeService())
+        self.logStore = LogEventStore(paths: paths)
         self.rustCore = rustCore
         self.preStartChecker = preStartChecker
         self.shutdownHandle = Shutdown.OwnerHandle {
@@ -64,10 +66,26 @@ public final class TunnelManager: ObservableObject {
             self.config = AppConfig()
             self.lastError = String(describing: error)
         }
+        let logStore = self.logStore
+        let initialIDs = self.config.tunnels.map(\.id)
+        Task {
+            await logStore.sync(tunnelIDs: initialIDs)
+        }
     }
 
     public func tunnel(id: String) -> TunnelConfig? {
         config.tunnels.first { $0.id == id }
+    }
+
+    /// 返回指定隧道的日志快照与事件流；订阅取消不会停止后台日志采集。
+    public func logSession(for tunnelID: String) async -> LogSession {
+        await logStore.openSession(for: tunnelID)
+    }
+
+    /// 显式刷新指定隧道的日志，供日志面板的刷新按钮和隔离测试使用。
+    @discardableResult
+    public func refreshLog(for tunnelID: String) async -> LogSnapshot {
+        await logStore.refresh(for: tunnelID)
     }
 
     /// 手动编辑 config.json 后重新加载；丢弃已移除隧道的状态与探针缓存。
@@ -77,6 +95,7 @@ public final class TunnelManager: ObservableObject {
             let validIDs = Set(config.tunnels.map(\.id))
             updateRuntime { $0.prune(to: validIDs) }
             lastMessage = "已重新加载配置，共 \(config.tunnels.count) 条隧道"
+            syncLogStore()
             refresh()
         } catch {
             lastError = "Rust Core 重新加载配置失败：\(error)"
@@ -95,6 +114,7 @@ public final class TunnelManager: ObservableObject {
             let validIDs = Set(config.tunnels.map(\.id))
             updateRuntime { $0.prune(to: validIDs) }
             lastMessage = "已重新加载配置，共 \(config.tunnels.count) 条隧道"
+            syncLogStore()
             await refreshAsync()
         } catch is CancellationError {
             return
@@ -165,6 +185,7 @@ public final class TunnelManager: ObservableObject {
                 $0.setStatus(nil, for: id)
                 $0.setProbeResult(nil, for: id)
             }
+            syncLogStore()
             refresh()
         } catch {
             lastError = "删除「\(tunnel.name)」失败：\(error)"
@@ -190,6 +211,7 @@ public final class TunnelManager: ObservableObject {
                 $0.setStatus(nil, for: id)
                 $0.setProbeResult(nil, for: id)
             }
+            syncLogStore()
             await refreshAsync()
         } catch is CancellationError {
             return
@@ -222,6 +244,7 @@ public final class TunnelManager: ObservableObject {
             lastError = "新增「\(tunnel.name)」失败：\(error)"
             return
         }
+        syncLogStore()
         refresh()
     }
 
@@ -230,8 +253,12 @@ public final class TunnelManager: ObservableObject {
     public func refresh() {
         do {
             let snapshot = try rustCore.snapshot()
+            let previousIDs = Set(config.tunnels.map(\.id))
             config = snapshot.config
             updateRuntime { $0.setStatuses(snapshot.statuses) }
+            if previousIDs != Set(config.tunnels.map(\.id)) {
+                syncLogStore()
+            }
         } catch {
             lastError = "Rust Core 刷新状态失败：\(error)"
         }
@@ -248,8 +275,12 @@ public final class TunnelManager: ObservableObject {
                 try rustCore.snapshot()
             }.value
             guard currentGeneration == refreshGeneration, !Task.isCancelled else { return }
+            let previousIDs = Set(config.tunnels.map(\.id))
             config = snapshot.config
             updateRuntime { $0.setStatuses(snapshot.statuses) }
+            if previousIDs != Set(config.tunnels.map(\.id)) {
+                syncLogStore()
+            }
             runProbes()
         } catch is CancellationError {
             return
@@ -434,6 +465,7 @@ public final class TunnelManager: ObservableObject {
     /// 应用退出时由 Rust owner 统一停止全部受管 launchd 隧道并关闭 handle。
     public func shutdownAsync() async {
         probeTask?.cancel()
+        await logStore.shutdown()
         do {
             let rustCore = self.rustCore
             _ = try await Task.detached(priority: .userInitiated) {
@@ -500,6 +532,14 @@ public final class TunnelManager: ObservableObject {
         if statuses != next.statuses { statuses = next.statuses }
         if probeResults != next.probeResults { probeResults = next.probeResults }
         if busyIDs != next.busyIDs { busyIDs = next.busyIDs }
+    }
+
+    private func syncLogStore() {
+        let store = logStore
+        let ids = config.tunnels.map(\.id)
+        Task {
+            await store.sync(tunnelIDs: ids)
+        }
     }
 
     private func beginOperation(for id: String) -> UInt? {

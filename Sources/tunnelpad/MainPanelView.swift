@@ -21,6 +21,9 @@ struct MainPanelView: View {
             detailPane
                 .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
         }
+        .onAppear {
+            appDelegate.markMainWindowVisible()
+        }
         .task {
             await manager.refreshAsync()
             rescanLegacyAgents()

@@ -56,6 +56,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         NSApp.activate(ignoringOtherApps: true)
         isMainWindowVisible = true
     }
+
+    /// SwiftUI WindowGroup 在应用重新激活时可能直接创建可见窗口，绕过菜单栏的打开动作；
+    /// 由主面板的 onAppear 补齐同一份可见性状态，确保日志订阅等 UI 任务能够恢复。
+    func markMainWindowVisible() {
+        isMainWindowVisible = true
+    }
 }
 
 // MARK: - NSWindowDelegate（关闭只隐藏）

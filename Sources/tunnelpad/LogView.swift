@@ -2,18 +2,18 @@ import AppKit
 import SwiftUI
 import TunnelPadCore
 
-/// 内嵌日志面板：显示隧道日志文件末 500 行。
+/// 内嵌日志面板：订阅后台日志事件并显示当前隧道的有界快照。
 /// 使用 AppKit 原生文本视图渲染日志，避免 macOS SwiftUI ScrollView 在动态尺寸
 /// 与自动滚动同时存在时反复触发布局计算。显式「自动滚动」开关默认开启：
-/// 开=刷新后自动滚到最新内容；关=自由回看历史，刷新不改变滚动位置。
-/// 刷新是静默的：内容未变化时不写 @State，避免每个刷新周期都触发重绘。
+/// 开=收到新事件后自动滚到最新内容；关=自由回看历史，新事件不改变滚动位置。
 struct LogView: View {
     let tunnel: TunnelConfig
     @EnvironmentObject private var manager: TunnelManager
     @EnvironmentObject private var appDelegate: AppDelegate
 
     @State private var text = ""
-    @State private var fileMissing = false
+    @State private var fileStatus: LogFileStatus = .missing
+    @State private var version: UInt64 = 0
     @State private var autoScroll = true
 
     var body: some View {
@@ -25,7 +25,7 @@ struct LogView: View {
                 Toggle("自动滚动", isOn: $autoScroll)
                     .toggleStyle(.checkbox)
                 Button {
-                    Task { await load() }
+                    Task { _ = await manager.refreshLog(for: tunnel.id) }
                 } label: {
                     Label("刷新", systemImage: "arrow.clockwise")
                 }
@@ -45,44 +45,40 @@ struct LogView: View {
                 .lineLimit(1)
                 .truncationMode(.head)
         }
-        .task(id: appDelegate.isMainWindowVisible) {
+        .task(id: "\(tunnel.id):\(appDelegate.isMainWindowVisible)") {
             guard appDelegate.isMainWindowVisible else { return }
-            await load()
-            while !Task.isCancelled {
-                do {
-                    try await Task.sleep(nanoseconds: 2_000_000_000)
-                } catch {
-                    return
-                }
-                guard !Task.isCancelled, appDelegate.isMainWindowVisible else { return }
-                await load()
+            version = 0
+            text = ""
+            fileStatus = .missing
+
+            let session = await manager.logSession(for: tunnel.id)
+            defer { session.cancel() }
+            apply(session.snapshot)
+
+            for await event in session.events {
+                guard !Task.isCancelled else { return }
+                guard event.tunnelID == tunnel.id, event.version > version else { continue }
+                apply(event.snapshot)
             }
         }
     }
 
     private var logText: String {
-        if fileMissing {
+        switch fileStatus {
+        case .missing:
             return "日志文件尚未生成（隧道启动后写入）"
+        case let .error(message):
+            return "日志读取失败：\(message)"
+        case .available:
+            return text.isEmpty ? " " : text
         }
-        return text.isEmpty ? " " : text
     }
 
-    /// 静默读取日志尾部：内容未变化时不写 @State，避免每个刷新周期都触发重绘。
-    private func load() async {
-        let url = manager.paths.logURL(for: tunnel)
-        let tail = await Task.detached(priority: .utility) {
-            LogTail.lastLines(of: url, maxLines: 500)
-        }.value
-        guard !Task.isCancelled else { return }
-        if let tail {
-            guard tail != text || fileMissing else { return }
-            text = tail
-            fileMissing = false
-        } else {
-            guard !text.isEmpty || !fileMissing else { return }
-            text = ""
-            fileMissing = true
-        }
+    private func apply(_ snapshot: LogSnapshot) {
+        guard snapshot.tunnelID == tunnel.id, snapshot.version >= version else { return }
+        version = snapshot.version
+        text = snapshot.text
+        fileStatus = snapshot.status
     }
 }
 
