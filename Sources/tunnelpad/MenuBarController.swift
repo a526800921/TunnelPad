@@ -6,17 +6,14 @@ import TunnelPadCore
 @MainActor
 final class MenuBarController: NSObject {
 
-    /// 供 AppKit 持久化此状态项可见性与位置的稳定标识。
-    // 菜单栏服务按 bundle ID 缓存状态项宿主记录，损坏后无法清除（killall
-    // ControlCenter、LaunchServices 重注册、重启 Mac、autosave 换版本均无效，
-    // 而任意新 bundle ID 图标立即可见），app 因此于 2026-08-30 迁移到
-    // com.jafish.tunnelpad.app（见 docs/plans/tunnelpad-v1.md 打包约定）。
-    // 新 ID 下本 autosave 是全新记录，保持稳定即可，无需再版本化。
-    private static let statusItemAutosaveName = "com.jafish.tunnelpad.menu-bar"
-
     private nonisolated(unsafe) var statusItem: NSStatusItem?
     private let manager: TunnelManager
     private let onShowPanel: () -> Void
+
+    // macOS Tahoe 为没有位置记录的 status item 选择外接屏回退位置；只在
+    // 当前 app 域没有记录时提供一个主屏默认值，保留用户之后的手工排列。
+    private static let preferredPositionKey = "NSStatusItem Preferred Position Item-0"
+    private static let defaultPreferredPosition = 257
 
     private static let dotSize: CGFloat = 8
     private static let greenDot = MenuBarController.makeDot(color: .systemGreen)
@@ -38,15 +35,14 @@ final class MenuBarController: NSObject {
     }
 
     private func setup() {
+        if UserDefaults.standard.object(forKey: Self.preferredPositionKey) == nil {
+            UserDefaults.standard.set(Self.defaultPreferredPosition, forKey: Self.preferredPositionKey)
+        }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem?.autosaveName = Self.statusItemAutosaveName
         guard let button = statusItem?.button else { return }
         let image = Self.makeMenuBarIcon(size: 22)
         button.image = image
         button.imagePosition = .imageOnly
-        // `squareLength` 是 AppKit 的负值哨兵（当前 macOS 为 -2），不能写入 button.frame。
-        // 让 NSStatusItem 按菜单栏高度自行布局按钮，避免得到负坐标的 2x2 frame。
-        statusItem?.isVisible = true
 
         let menu = NSMenu()
         menu.delegate = self
