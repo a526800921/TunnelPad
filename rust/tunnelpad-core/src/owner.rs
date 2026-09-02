@@ -398,11 +398,12 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
         self.ensure_generation(id, generation)?;
         let cancellation = self.cancellation_for(id, generation);
         let tunnel = self.tunnel(id)?;
-        // 保持现有 Swift restartSync 的兼容语义：未加载或 bootout 失败
-        // 不阻断后续 plist 重写/bootstrap，bootstrap 失败仍返回错误。
-        let _ = self
+        // 未加载由 executor 明确归类为可继续；其他 bootout 失败必须
+        // fail-closed，不能在旧实例未收敛时继续写 plist/bootstrap。
+        self
             .launchd
-            .bootout_cancellable(&tunnel.launchd_label(), &cancellation);
+            .bootout_cancellable(&tunnel.launchd_label(), &cancellation)
+            .map_err(|error| executor_error("重启前停止", error))?;
         self.ensure_generation(id, generation)?;
         let plist = write_plist(&tunnel, &self.paths).map_err(|error| {
             TpError::new(
@@ -1288,6 +1289,30 @@ mod tests {
         assert_eq!(error.code, error_code::EXECUTOR);
         assert!(error.message.contains("删除时停止 launchd 失败"));
         assert_eq!(owner.snapshot().unwrap().config.tunnels.len(), 1);
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn restart_blocks_bootstrap_after_bootout_error() {
+        let home = temp_home("stage0-restart-bootout-error");
+        let runner = ScriptedRunner::new(vec![process(9, "", "Operation not permitted")]);
+        let owner = scripted_owner(&home, &["stage0-restart-bootout-error"], runner.clone());
+
+        let error = owner
+            .restart("stage0-restart-bootout-error")
+            .unwrap_err();
+        assert_eq!(error.code, error_code::EXECUTOR);
+        assert!(error.message.contains("重启前停止 launchd 失败"));
+        assert_eq!(
+            runner
+                .calls()
+                .iter()
+                .map(|call| call[0].as_str())
+                .collect::<Vec<_>>(),
+            vec!["bootout"],
+            "bootout 失败后不得继续 bootstrap"
+        );
         runner.assert_exhausted();
         let _ = fs::remove_dir_all(home);
     }

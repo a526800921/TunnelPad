@@ -1,11 +1,11 @@
 # 计划：TunnelPad 隧道稳定性与健康恢复
 
 - 状态：设计中
-- 当前阶段：阶段 0
-- 最后更新：2026-08-31
-- 前置：`tunnelpad-v1`、`tunnelpad-code-quality-refactor`、`tunnelpad-rust-migration` 阶段 5 和 `ecs-dynamic-ssh-ip` 阶段 2 已完成并关闭；本计划阶段 1 实施仍需自身阶段 0 独立准入
+- 当前阶段：阶段 2（设计中；阶段 1 已完成）
+- 最后更新：2026-09-02
+- 前置：`tunnelpad-v1`、`tunnelpad-code-quality-refactor`、`tunnelpad-rust-migration` 阶段 5 和 `ecs-dynamic-ssh-ip` 阶段 2 已完成并关闭；阶段 0 和阶段 1 已完成，阶段 2 仍需自己的 Step 0 和独立准入
 
-本计划独立处理 TunnelPad 的运行稳定性，不回写 v1 已冻结的探针展示语义，也不与 Rust Core 迁移阶段 5 并行修改执行器、生命周期或探针模块。当前稳定性实现范围先限定为阶段 5 已确认的 `launchd`；未来 `app` 执行器重新开发后，另行补充对应稳定性范围。阶段 0 可以先完成基线和准入设计；本计划阶段 1 实施前仍需完成自身的准入复核。
+本计划独立处理 TunnelPad 的运行稳定性，不回写 v1 已冻结的探针展示语义，也不与 Rust Core 迁移阶段 5 并行修改执行器、生命周期或探针模块。当前稳定性实现范围先限定为阶段 5 已确认的 `launchd`；未来 `app` 执行器重新开发后，另行补充对应稳定性范围。日志事件流计划阶段 0–3 已完成；稳定性计划阶段 0–1 已完成，阶段 2 尚未开始实施，涉及共享模块的实现仍需使用单一编辑窗口。
 
 ## 背景
 
@@ -17,14 +17,14 @@ ECS 动态 SSH 计划已完成“TunnelPad 手动启动/重启前同步公网 IP
 
 功能图谱审计又发现，配置损坏/半写入、执行器切换停止失败、正常退出与信号退出资源发现不一致，以及 launchd 重启吞掉 `bootout` 错误，都会让配置、状态和实际托管实例分叉。这些问题与稳定性计划共同指向“运行时状态最终必须安全收敛”，本次并入本计划阶段 0 的基线和后续回归矩阵；app `keepAlive` 和 pidfile 语义留待未来 app 计划。
 
-这不是 v1 已验收行为的回归结论，而是下一阶段稳定性能力的缺口。新的行为必须与现有手动停止、删除、退出清理、`keepAlive` 和 `launchd` 语义保持一致，并且在达到重试上限后使当前隧道的监测与重试任务一起停止，避免界面状态和实际生命周期分叉。日志文件事件流仍由独立日志计划负责，Swift/Rust owner 与 parity 仍由 Rust 迁移计划负责。
+这不是 v1 已验收行为的回归结论，而是下一阶段稳定性能力的缺口。新的行为必须与现有手动停止、删除、退出清理、`keepAlive` 和 `launchd` 语义保持一致，并且在达到重试上限后停止当前隧道，取消该隧道的自动恢复与重试任务，同时保留只读探针监测，避免界面状态和实际生命周期分叉。日志文件事件流仍由独立日志计划负责，Swift/Rust owner 与 parity 仍由 Rust 迁移计划负责。
 
 ## 目标
 
 - 对已配置 HTTP 探针的隧道建立与主窗口可见性无关的后台健康监测。
 - 识别“进程仍在但隧道实际不可用”的情况，并在连续失败达到阈值后通过现有生命周期边界安全重启。
 - 固定、可测试地执行连续失败、退避、最大重试次数和熔断停止语义，避免重启风暴。
-- 第 10 次自动恢复仍失败时，停止当前隧道并取消该隧道全部监测、重试和自动恢复任务；其他隧道不受影响。
+- 第 10 次自动恢复仍失败时，停止当前隧道并取消该隧道的自动恢复与重试任务，保留只读探针监测；其他隧道不受影响。
 - 保留 `launchd` 进程意外退出时的现有 `keepAlive` 自动拉起能力，并确保手动启动/重启能够重新开启监测、清零失败计数。
 - 对 Rust 配置解析失败、`launchd` 重启停止失败和退出清理资源不一致建立 fail-closed 的运行时收敛边界；具体错误分类在阶段 0 冻结。
 - 对已接入 ECS 动态 SSH 同步的隧道，覆盖运行期间本机公网 IPv4 变化：在自动重连或健康恢复前确认并同步受管安全组来源，避免 `launchd` 直接重连绕过同步后长期失败。
@@ -58,7 +58,7 @@ ECS 动态 SSH 计划已完成“TunnelPad 手动启动/重启前同步公网 IP
 - ECS 动态 SSH 阶段 2 当前只在 `TunnelManager` 的显式 start/restart 前执行同步；运行中的 `launchd` `KeepAlive` 自动重连直接执行 SSH，不会回调 `TunnelManager`。该边界来自已完成 ECS 计划的实现与真实 App 验收。[ECS 动态 SSH 计划](ecs-dynamic-ssh-ip.md)；[LaunchdPlistRenderer.swift](../../Sources/TunnelPadCore/LaunchdPlistRenderer.swift)
 - 阶段 5 删除前，正常退出与信号退出使用不同的 app/pidfile 资源发现路径；当前运行路径统一由 Rust owner 按配置中的 `launchd` label 清理，历史差异只保留为迁移背景。[AppDelegate.swift](../../Sources/tunnelpad/AppDelegate.swift)；[Shutdown.swift](../../Sources/TunnelPadCore/Shutdown.swift)
 - 现有 v1 和代码质量重构计划已冻结手动停止、删除、退出清理、过期任务保护和探针展示兼容边界；本计划是行为增强，不替代这些事实源。[TunnelPad v1 计划](tunnelpad-v1.md)；[代码质量重构计划](tunnelpad-code-quality-refactor.md)
-- Rust Core 阶段 5 已完成实现并已提交；本计划不覆盖 owner 切换实现。阶段 1 实施前仍须按本计划自身的准入门禁重新核对共享生命周期模块影响面，并等待阶段 5 独立收尾复核完成。
+- Rust Core 阶段 5 已完成实现并已提交；本计划不覆盖 owner 切换实现。阶段 1 已按本计划自身准入门禁重新核对共享生命周期模块影响面并完成；阶段 2 的 Rust 生命周期增强仍须遵守本计划阶段路线和独立复核。
 
 ### 暂定假设与验证方式
 
@@ -104,24 +104,28 @@ ECS 动态 SSH 计划已完成“TunnelPad 手动启动/重启前同步公网 IP
 
 | 问题 | 推荐方案 | 是否阻塞当前阶段 | 状态 |
 |---|---|---|---|
-| Rust Core 迁移阶段 5 完成后再实施稳定性运行时变化 | Rust Core 阶段 5 已完成 `launchd` owner 切换；本计划阶段 0 继续做只读设计，阶段 1 实施必须先通过本计划自身准入 | 是（阻塞后续实现，不阻塞本阶段写计划） | 已完成前置（2026-08-31） |
-| 配置文件损坏/半写入时如何处理当前有效运行配置 | 阶段 0 比较“保留上一份有效配置并只报错”与“恢复空配置”两种语义；推荐 fail-closed，禁止因刷新直接裁剪运行时状态 | 否 | 阶段 0 待冻结 |
-| 执行器切换停止失败是否允许保存新执行器 | 只有旧实例停止成功或明确未加载时才提交新执行器；失败则保留旧配置并提示人工处理 | 否 | 阶段 0 待冻结 |
-| `launchd` 自动恢复任务的配置代次 | 推荐读取当前有效 Rust 配置，并用配置/操作代次阻止旧任务回写；需用 fixture 固定 | 否 | 阶段 0 待冻结 |
-| 正常退出与信号退出的清理结果如何统一 | 统一资源发现、身份校验和结果分类；保留 PID 不明不发信号的安全边界 | 否 | 阶段 0 待冻结 |
-| 运行中公网 IPv4 变化由什么事件触发检测 | 比较固定周期探测、HTTP 探针失败触发和 SSH 断线触发三种边界；优先复用已有健康协调器，避免新增独立网络监控 owner | 是（阶段 1 实施） | 阶段 0 待冻结 |
-| 自动重连前由谁调用 ECS 同步 | 推荐由 Rust owner 侧稳定性协调器统一调用既有同步边界；不让 `launchd` 直接重启绕过来源确认 | 是（阶段 1 实施） | 阶段 0 待冻结 |
-| IP 变化但 ECS 同步失败时是否允许 `KeepAlive` 继续拉起 | 推荐禁止新的 SSH 重连并进入可诊断退避/熔断；需用断线、规则读取失败和双端点不一致 fixture 固定 | 是（阶段 1 实施） | 阶段 0 待冻结 |
+| Rust Core 迁移阶段 5 完成后再实施稳定性运行时变化 | Rust Core 阶段 5 已完成 `launchd` owner 切换；稳定性阶段 1 已通过自身准入并完成，阶段 2 仍须按自身 Step 0 和准入推进 | 是（阻塞阶段 2 实施，不阻塞阶段 1 收尾） | 已完成前置（2026-08-31） |
+| 配置文件损坏/半写入时如何处理当前有效运行配置 | 保留上一份有效配置并只报错，禁止因刷新直接裁剪运行时状态 | 否 | 已冻结并在阶段 1 完成 |
+| 执行器切换停止失败是否允许保存新执行器 | 只有旧实例停止成功或明确未加载时才提交新执行器；失败则保留旧配置并提示人工处理 | 否 | 阶段 2 设计中 |
+| `launchd` 自动恢复任务的配置代次 | 读取当前有效 Rust 配置，并用配置/操作代次阻止旧任务回写 | 否 | 已冻结并在阶段 1 完成 |
+| 正常退出与信号退出的清理结果如何统一 | 统一资源发现、身份校验和结果分类；保留 PID 不明不发信号的安全边界 | 是（阶段 2 实施） | 阶段 2 待冻结 |
+| 运行中公网 IPv4 变化由什么事件触发检测 | 比较固定周期探测、HTTP 探针失败触发和 SSH 断线触发三种边界；优先复用已有健康协调器，避免新增独立网络监控 owner | 是（阶段 2 实施） | 阶段 2 待冻结 |
+| 自动重连前由谁调用 ECS 同步 | 推荐由 Rust owner 侧稳定性协调器统一调用既有同步边界；不让 `launchd` 直接重启绕过来源确认 | 是（阶段 2 实施） | 阶段 2 待冻结 |
+| IP 变化但 ECS 同步失败时是否允许 `KeepAlive` 继续拉起 | 推荐禁止新的 SSH 重连并进入可诊断退避/熔断；需用断线、规则读取失败和双端点不一致 fixture 固定 | 是（阶段 2 实施） | 阶段 2 待冻结 |
 
 ### 用户确认的探索结论
 
-2026-08-30 用户确认：建立独立的 TunnelPad 稳定性计划，目标包括进程仍运行但隧道不可用/假死的场景；健康信号只使用现有 HTTP 探针；后台监测不依赖主窗口是否可见；连续失败 3 次后触发恢复；恢复退避固定为 10 秒、30 秒、60 秒、5 分钟封顶；最多自动重试 10 次，第 10 次仍失败后停止当前隧道并停止该隧道全部监测、重试和自动恢复任务，其他隧道不受影响；手动启动/重启后恢复监测并清零；策略固定，不新增配置字段或设置项；本计划等待 Rust Core 阶段 5 完成，后续仍按本计划自身准入推进。当前阶段只实现 `launchd`，未来 `app` 执行器另立计划。
+2026-08-30 用户确认：建立独立的 TunnelPad 稳定性计划，目标包括进程仍运行但隧道不可用/假死的场景；健康信号只使用现有 HTTP 探针；后台监测不依赖主窗口是否可见；连续失败 3 次后触发恢复；恢复退避固定为 10 秒、30 秒、60 秒、5 分钟封顶；最多自动重试 10 次，第 10 次仍失败后停止当前隧道，停止该隧道的自动重试和自动恢复任务但保留只读探针监测，其他隧道不受影响；手动启动/重启后恢复监测并清零；策略固定，不新增配置字段或设置项；本计划等待 Rust Core 阶段 5 完成，后续仍按本计划自身准入推进。当前阶段只实现 `launchd`，未来 `app` 执行器另立计划。
 
 2026-08-30 用户补充确认：TunnelPad 崩溃后下一次启动必须检测并安全清理 app 执行器的孤儿进程；该需求已因阶段 5 当前移除 app 执行器而延后，未来 app 计划重新定义时再恢复。
 
 2026-08-30 根据功能图谱审计结果，用户确认将以下运行时问题并入本稳定性计划：配置损坏/半写入导致的状态分叉、`launchd` 执行器停止失败、正常退出与信号退出清理不一致，以及 launchd 重启吞掉 `bootout` 错误。`app` 执行器自动重启、pidfile 和孤儿进程问题因阶段 5 当前明确移除 app 范围，留待未来 app 计划。日志轮询问题仍归日志事件流计划；Swift/Rust owner 与 parity 问题仍归 Rust Core 迁移计划。本次合并只扩大稳定性计划的阶段 0 基线、失败注入和回归范围，不改变阶段 1 的实施前置条件。
 
 2026-08-31 用户要求将“运行中本机公网 IPv4 发生变化”补充到本计划：当前 ECS 同步只覆盖 TunnelPad 显式启动/重启，`launchd KeepAlive` 自动重连可能绕过同步并继续使用旧安全组来源；稳定性计划需设计运行中变化的发现、受管规则同步、自动重连前置和失败恢复边界。该需求先作为阶段 0 待冻结事项记录，不预设轮询周期、wrapper 或其他实现方案。
+
+2026-09-01 用户确认日志事件流计划与本计划的共享边界；日志计划阶段 0–3 现已完成，稳定性计划重新开始阶段 0。涉及 `TunnelManager`、`TunnelRuntimeState`、主面板和共享测试目录的稳定性实现改动必须串行，日志计划不再作为稳定性阶段 0 的前置条件。
+
+2026-09-02 用户进一步明确第 10 次失败后的运行语义：当前隧道进程停止，取消该隧道的自动重试和自动恢复；保留只读探针监测以持续反映停止状态，其他隧道继续独立运行。手动启动/重启后清零并恢复自动恢复资格。
 
 ### 本次并入范围的阶段 0 冻结要求
 
@@ -176,32 +180,32 @@ ECS 动态 SSH 计划已完成“TunnelPad 手动启动/重启前同步公网 IP
 
 | 阶段 | 目标 | 进入条件 | 验证方向 | 状态 |
 |---|---|---|---|---|
-| 阶段 0 | 固定健康恢复、配置一致性、资源收敛、状态契约、失败/回滚边界和实施门禁 | 用户确认结构化探索结论 | 只读审计、隔离 fixture 设计、现有测试与治理检查 | 设计中 |
-| 阶段 1 | 实现后台监测、`launchd` 状态收敛、配置 fail-closed 基线与单隧道健康恢复状态机 | 阶段 0 独立准入通过；Rust Core 迁移阶段 5 已完成 | 状态机、配置异常、取消、代次和成功清零测试 | 待实施 |
-| 阶段 2 | 接入 Rust `launchd` 生命周期，完成 10 次熔断停止、重启错误收敛和手动恢复 | 阶段 1 实现与单元/契约测试通过 | fake `launchd`、故障注入、退出清理、迟到任务测试 | 待实施 |
-| 阶段 3 | 隔离 demo 与受控应用验收、文档和发布门禁收口 | 阶段 2 独立复核通过 | `swift test`、`cargo test`（适用时）、构建、AX/应用冒烟和治理检查 | 待实施 |
+| 阶段 0 | 固定健康恢复、配置一致性、资源收敛、状态契约、失败/回滚边界和实施门禁 | 用户确认结构化探索结论 | 只读审计、隔离 fixture 设计、现有测试与治理检查 | 已完成 |
+| 阶段 1 | 实现后台监测、`launchd` 状态收敛（含 `bootout` fail-closed）、配置 fail-closed 基线与单隧道健康恢复状态机 | 阶段 0、阶段 1 Step 0 与阶段 1 独立准入均已通过；Rust Core 迁移阶段 5 已完成 | 状态机、配置异常、取消、代次、成功清零和 `launchd` 停止失败测试 | 已完成 |
+| 阶段 2 | 完善启动/退出收敛、ECS 运行中同步与跨层状态一致性 | 阶段 1 初始实现与单元/契约测试通过 | fake `launchd`、故障注入、退出清理、ECS 双端点、迟到任务测试 | 设计中 |
+| 阶段 3 | 隔离 demo 与受控应用验收、文档和发布门禁收口 | 阶段 2 独立复核通过 | `swift test`、`cargo test`（适用时）、构建、AX/应用冒烟和治理检查 | 设计中 |
 
-## 当前阶段
+## 阶段 0 收尾记录
 
 ### 范围
 
-阶段 0 只做稳定性缺口的现状确认、最小可观察复现、配置与生命周期安全收敛基线、启动孤儿进程收敛基线、状态机契约和后续实现门禁设计。不修改 Swift/Rust 稳定性实现，不修改配置，不启停真实用户隧道，不创建新的 Schema 字段；运行中公网 IPv4 变化只记录候选检测、同步和恢复契约，不在本阶段实现。
+阶段 0 只做稳定性缺口的现状确认、最小可观察复现、配置与生命周期安全收敛基线、启动孤儿进程收敛基线、状态机契约和后续实现门禁设计。不修改 Swift/Rust 稳定性实现，不修改配置，不启停真实用户隧道，不创建新的 Schema 字段；运行中公网 IPv4 变化只记录候选检测、同步和恢复契约，不在本阶段实现。日志事件流计划阶段 0–3 已完成；稳定性计划阶段 0 已完成，阶段 1 若进入共享实现必须使用单一编辑窗口串行合入。
 
-### 阶段准入摘要
+### 阶段 0 复核快照
 
 | 字段 | 内容 |
 |---|---|
-| 准入状态 | 设计中 |
-| Step 0 | 基线类型已确定为“缺陷现状快照 + 隔离最小复现”；现有源码和阶段证据已查证，独立 Step 0 证据尚待落盘 |
+| 准入状态 | 已完成 |
+| Step 0 | 基线类型已确定为“缺陷现状快照 + 隔离最小复现”；探针/刷新、launchd owner、退出清理和 ECS 启动前置的只读基线已落盘，现状基线 4 项 Swift 与 1 项 Rust 测试、后续实现契约 6 项 Swift 测试均已通过；阶段 0 独立准入已通过 |
 | 样本矩阵 | 12 行，覆盖现有探针/刷新边界、配置异常、`launchd` 生命周期失败、进程保活、假死复现、失败状态机、运行中公网 IPv4 变化与 ECS 同步、单隧道隔离和治理检查；app 范围留待未来计划 |
 | 验证方式 | 只读源码核对、隔离 fixture、现有测试清单、后续失败回归测试和 `plan-governance-cli check . --strict-readiness` |
-| 失败/回滚边界 | 阶段 0 不改变运行状态；实现阶段按独立提交回滚，不覆盖当前 Rust 阶段 3 未提交改动；任何真实隧道误操作立即停止该场景 |
-| 当前阻塞项 | Rust Core 阶段 5 已完成并关闭；本计划阶段 0 自身的 Step 0 证据和独立准入尚未完成，仍阻塞本计划阶段 1 实施，但不阻塞本阶段继续补齐基线 |
-| 最新独立准入复核 | 尚未进行；阶段 0 尚未达到“待实施”标准 |
+| 失败/回滚边界 | 阶段 0 不改变运行状态；实现阶段按独立提交回滚，不覆盖 Rust Core 阶段 5 完成后的既有工作树改动；任何真实隧道误操作立即停止该场景 |
+| 当前阻塞项 | 无；Rust Core 阶段 5、日志计划阶段 0–3 和本计划阶段 0 独立准入均已完成；阶段 1 另有自己的 Step 0 和准入门禁 |
+| 最新独立准入复核 | 2026-09-01：达到“待实施”标准；阶段 0 已完成，阶段 1 仍需自己的 Step 0 和独立准入；见[契约 fixture 独立准入复核](../data-quality/tunnelpad-stability-stage0-independent-review-contract-fixtures-20260901.md) |
 
 ### 实施步骤
 
-1. 记录当前工作树、源码/测试边界和 Rust 迁移前置状态，不将既有未提交改动归入本计划。
+1. 记录当前工作树、源码/测试边界和 Rust Core 阶段 5 完成后的迁移状态，不将既有未提交改动归入本计划。
 2. 补充不操作真实用户隧道的最小复现：进程保持存活且 HTTP 探针连续失败；配置半写入或损坏；`launchd` 停止失败。
 3. 冻结健康恢复状态机以及启动孤儿收敛的输入、身份校验、计数、退避、熔断、手动恢复和取消语义。
 4. 冻结配置 fail-closed、`launchd` 重启错误分类、统一退出清理资源集和自动恢复配置快照语义。
@@ -212,23 +216,34 @@ ECS 动态 SSH 计划已完成“TunnelPad 手动启动/重启前同步公网 IP
 
 基线类型：缺陷修复与架构探索结合的现状快照。当前已查证的替代基线是：`ProbeService` 只执行 HTTP GET；`TunnelManager` 只在刷新/启停路径调度探针；主面板 5 秒刷新受窗口可见性限制；当前有效配置全部使用 `launchd`，其 `keepAlive` 由 launchd 负责；配置损坏时 `ConfigStore.load()` 会返回空配置；launchd 重启存在停止结果未阻断后续流程的路径；正常退出与信号退出使用不同的资源发现方式；ECS 动态 SSH 同步只在 `TunnelManager` 显式 start/restart 前执行，`launchd` KeepAlive 自动重连不经过该前置。上述事实由源码、v1 阶段 2 证据、代码质量重构计划、ECS 动态 SSH 计划和本次功能图谱审计共同锚定。
 
-尚未完成的 Step 0 证据包括可执行隔离最小复现：“进程仍存活、探针持续失败、现有逻辑不触发恢复”“配置损坏/半写入导致刷新替换当前配置”“`launchd` 停止失败后新配置仍可能提交”“launchd 重启吞掉 bootout 错误”。复现必须使用 fake lifecycle/本机隔离 HTTP fixture，不得杀掉或修改真实用户隧道；完成后追加到本节和阶段证据文档。
+Step 0 的可执行现状基线现已包括：“配置损坏/半写入时当前读取退化为空配置”和“launchd 重启吞掉 bootout 错误后继续 bootstrap”；“进程仍存活、探针连续失败且现有逻辑不触发恢复”的当前缺口也已由隔离测试记录。上述测试均使用临时目录、fake lifecycle 或脚本化 launchd，不得杀掉或修改真实用户隧道。阶段 0 的健康恢复状态机、配置/操作代次、取消和 ECS 运行中同步契约已由仅测试 fixture 固定并通过独立准入；生产接入留待阶段 1。
+
+### 隔离 fixture 设计与当前基线
+
+阶段 0 后续 fixture 统一使用以下注入边界，不扩展生产 API，也不连接真实隧道：
+
+- 探针使用 `ProbeService.Performer` 注入固定的成功、非期望状态码、超时和连接失败序列；生命周期使用 `RustLifecycleOwner` fake 记录每次 start/stop/restart/remove/shutdown 调用及隧道 id。
+- launchd 失败场景使用 `ProcessRunning`/fake launchd 记录 `bootout`、`bootstrap` 和 `print` 的输入输出，分别区分成功、明确 not-found、停止失败和 bootstrap 失败；当前 Rust 基线已复现 restart 在 bootout 出错后继续 bootstrap，fixture 不调用真实 `/bin/launchctl`。
+- 配置异常场景使用隔离 `TunnelPaths` 和临时 `config.json`，保留一份有效运行配置快照，再注入坏 JSON、半写入和留档失败；验证 reload 失败时的内存配置、运行时状态、留档结果和提示语。
+- ECS 场景只注入公网 IP 双端点结果、受管规则同步结果和取消/超时结果；验证自动恢复在来源未确认或同步失败时 fail-closed，不输出凭证或完整公网响应。
+
+最小验收序列固定为：假死序列 `running + [fail, fail, fail]`、恢复成功序列 `[fail, fail, fail, success]`、第 10 次恢复失败序列、手动 stop/start 与迟到任务序列、配置代次变化序列，以及公网 IP 变化→规则同步→自动重连序列。每个序列都必须记录调用顺序、当前隧道 id、generation/取消结果和其他隧道未被修改；仅有全量测试通过不能替代这些行为证据。
 
 ### 样本矩阵
 
 | # | 输入/基线 | 可执行命令或操作 | 预期结果 | 失败判定 | 输出位置 |
 |---|---|---|---|---|---|
-| 1 | 当前工作树与 Rust 阶段 3 未提交改动 | `git rev-parse HEAD && git status --short && git diff --stat` | 记录 HEAD、既有未提交文件和稳定性计划边界；不把 Rust 改动归入本计划 | 输出缺失、误覆盖既有 diff 或出现未声明的稳定性代码改动 | 阶段 0 证据文档 |
+| 1 | 当前工作树与 Rust Core 阶段 5 完成后的基线 | `git rev-parse HEAD && git status --short && git diff --stat` | 记录 HEAD、既有未提交文件和稳定性计划边界；不把日志基线测试或其他既有改动归入本计划 | 输出缺失、误覆盖既有 diff 或出现未声明的稳定性代码改动 | 阶段 0 证据文档 |
 | 2 | 现有探针与刷新实现 | `rg -n 'runProbes|ProbeService|Task\.sleep|isMainWindowVisible' Sources Tests --glob '*.swift'`；只读核对 v1 阶段 2 证据 | 复现“探针只展示、刷新受窗口可见性限制、无健康恢复调用”的现状 | 找不到事实源、源码与证据矛盾或出现未登记行为变化 | 阶段 0 证据文档 |
 | 3 | launchd 进程退出保活基线 | `cargo test --manifest-path rust/Cargo.toml`；静态核对 `LaunchdPlistRenderer.swift` 与 Rust owner | 当前 `launchd` keepAlive 和状态查询边界可复现；历史 app keepAlive 不纳入当前范围 | 测试触碰真实用户隧道、出现旧 app 执行器路径或当前 launchd 语义不一致 | 阶段 0 证据文档 |
-| 4 | 隔离假死最小复现 | 新增仅使用 fake executor + 注入式 ProbeService 的测试；命令：`swift test --filter StabilityBaselineTests` | 进程状态保持 running、探针连续失败 3 次；基线版本不触发自动恢复，明确缺口 | 测试无法稳定复现、触发真实 launchctl/SSH，或结果依赖主窗口 | 阶段 0 证据文档与测试文件 |
-| 5 | 状态机候选契约 | 失败序列 `[fail, fail, fail, success]`、十次失败序列、手动 stop/start、删除和退出取消序列 | 明确计数、退避、成功清零、第 10 次熔断和迟到任务失效边界 | 计数漂移、成功不清零、熔断后仍拉起、其他隧道被修改 | 阶段 0 证据文档；阶段 1 契约测试 |
+| 4 | 隔离假死最小复现 | `swift test --filter StabilityStage0BaselineTests`；使用 fake Rust owner、本机隔离 URL 和 `ProbeService.Performer` | 2 项测试通过：连续 3 次探针失败均保持为 `ProbeResult.failed`；`TunnelManager` 当前探针路径不调用 start/stop/restart/remove/shutdown，明确现有恢复缺口 | 测试触碰真实 launchctl/SSH、结果依赖主窗口，或出现生命周期调用 | 阶段 0 证据文档；`Tests/TunnelPadCoreTests/StabilityStage0BaselineTests.swift` |
+| 5 | 状态机候选契约 | `swift test --filter StabilityStage0ContractTests`；失败序列、十次失败序列和成功清零 fixture | 固定 3 次失败阈值、10/30/60/300 秒退避、成功清零、第 10 次熔断后停止并继续监测 | 计数漂移、成功不清零、熔断后仍拉起、其他隧道被修改 | 阶段 0 证据文档；`Tests/TunnelPadCoreTests/StabilityStage0ContractTests.swift` |
 | 6 | `launchd` 生命周期隔离 | fake `launchd` 注入 bootstrap/bootout 结果；不调用真实 `launchctl` 或 SSH | `launchd` 遵守生命周期边界，其他隧道不受影响 | 出现真实外部副作用、跨隧道操作或迟到任务 | 阶段 0 证据文档；阶段 1–2 契约测试 |
-| 7 | 配置异常安全边界 | 隔离 `ConfigStore` 损坏/半写入 fixture；执行 `reloadConfigAsync()` 并检查内存配置、运行时状态和留档文件 | 当前有效配置不被无提示替换为空；原文件留档；运行中实例不被错误裁剪；错误可恢复 | 配置条目丢失、运行实例失管、留档失败或错误文案不完整 | 阶段 0 证据文档；阶段 1 回归测试 |
-| 8 | `launchd` 重启失败边界 | fake `launchd` 注入停止失败、not-found、bootstrap 失败；记录配置保存和状态查询顺序 | 旧实例已停止或明确未加载后才提交新配置；失败可诊断 | 新旧实例同时存在、配置先提交、错误被吞掉或状态误报 | 阶段 0 证据文档；阶段 1–2 契约测试 |
+| 7 | 配置异常安全边界 | `swift test --filter StabilityStage0BaselineTests`；隔离 `ConfigStore` 损坏/半写入 fixture | 已复现当前坏 JSON/半写入会留档并返回空配置；该结果记录为待修复缺口，阶段 1 再验证有效配置保留、运行时不裁剪和错误可恢复 | 测试触碰真实配置、归档原文丢失，或把当前缺陷误写成目标行为 | 阶段 0 证据文档；`Tests/TunnelPadCoreTests/StabilityStage0BaselineTests.swift` |
+| 8 | `launchd` 重启失败边界 | `cargo test --manifest-path rust/Cargo.toml stage0_baseline_restart_continues_after_bootout_error`；fake `launchd` 注入停止失败 | 已复现当前 bootout 错误被忽略且继续 bootstrap；阶段 1–2 再验证失败时阻断后续流程、状态可诊断 | 真实 `launchctl` 被调用，或基线测试不能证明 bootout 错误被吞掉 | 阶段 0 证据文档；`rust/tunnelpad-core/src/owner.rs` |
 | 9 | 退出清理资源一致性 | 隔离配置读取失败和受管 label 缺失；分别走正常退出、信号退出和下次启动 | 各路径覆盖同一组 `launchd` 资源；无关 label 不操作；结果分类一致 | 受管任务残留、配置异常导致清理为空或成功状态虚报 | 阶段 0 证据文档；阶段 1–2 回归测试 |
-| 10 | `launchd` 自动恢复配置代次 | 修改命令/`keepAlive` 后注入 `launchd` 状态变化；比较旧快照与当前有效配置候选语义 | 冻结一种可解释语义；旧任务不能回写过期状态；手动停止/删除仍取消自动恢复 | 自动恢复使用未声明配置、迟到任务倒灌或其他隧道受影响 | 阶段 0 证据文档；阶段 1 契约测试 |
-| 11 | 运行中公网 IPv4 变化与自动重连 | 隔离注入来源变化、探针失败/SSH 断线和 `launchd` KeepAlive 重连序列；串联既有 ECS 同步命令 fake 与健康恢复协调器 | 自动重连前确认当前来源或 fail-closed；规则同步成功后只恢复当前隧道；同步失败不无限重试旧来源，其他隧道不受影响 | 直接重连绕过同步、旧规则持续重试、双端点不一致仍写入、或其他隧道被修改 | 阶段 0 证据文档；阶段 1–2 契约测试 |
+| 10 | `launchd` 自动恢复配置代次 | `swift test --filter StabilityStage0ContractTests`；注入配置有效/无效候选和旧代次结果 | 有效候选才替换当前配置；解析失败保留当前有效配置；旧任务不能回写过期状态 | 自动恢复使用未声明配置、迟到任务倒灌或其他隧道受影响 | 阶段 0 证据文档；`Tests/TunnelPadCoreTests/StabilityStage0ContractTests.swift` |
+| 11 | 运行中公网 IPv4 变化与自动重连 | `swift test --filter StabilityStage0ContractTests`；注入公网 IP 双端点、规则同步成功/失败序列 | 自动重连前确认来源一致且同步成功；不一致、私网、不可用或同步失败均 fail-closed | 直接重连绕过同步、旧规则持续重试、双端点不一致仍写入、或其他隧道被修改 | 阶段 0 证据文档；`Tests/TunnelPadCoreTests/StabilityStage0ContractTests.swift` |
 | 12 | 治理与反向引用 | `plan-governance-cli check . --strict-readiness`；`git diff --check`；`rg -n 'tunnelpad-stability|健康恢复|运行时配置|稳定性|keepAlive|探针|孤儿进程|pidfile|公网 IPv4|ECS 动态 SSH|草案为准|以草案为事实源|详见草案' docs` | 计划链接、状态、依赖和关键术语一致；无新增治理 ERROR；旧草案不成为事实源 | 计划未被索引、重复定义、状态漂移或出现空白错误 | `docs/PLAN_MAP.md` 与阶段 0 证据文档 |
 
 ### 阶段证据
@@ -237,18 +252,29 @@ ECS 动态 SSH 计划已完成“TunnelPad 手动启动/重启前同步公网 IP
 |---|---|---|---|---|---|
 | 2026-08-30 | 需求探索/计划建立 | 用户确认独立稳定性计划、HTTP-only、3 次失败、固定退避、最多 10 次并熔断停止；Rust Core 阶段 5 先完成 `launchd` owner，稳定性实现仍等待本计划自身准入 | 本计划“需求探索”与 `docs/PLAN_MAP.md` | 进行中 | Codex |
 | 2026-08-30 | 功能图谱审计合并 | 根据功能图谱审计，将配置异常、`launchd` 执行器/重启失败和退出清理一致性纳入本计划阶段 0；app 执行器与 pidfile 语义留待未来计划；日志事件流与 Rust owner/parity 保持原计划边界 | [功能图谱审计](../data-quality/tunnelpad-functional-graph-review-20260830.md)；本计划“需求探索” | 进行中 | Codex |
+| 2026-09-01 | 阶段 0 当前代码基线 | 只读核对探针/刷新、launchd 状态与 bootout、Rust owner、正常/信号退出、配置损坏处理和 ECS 启动前置；确认稳定性实现代码未混入并行日志基线 | [阶段 0 基线证据](../data-quality/tunnelpad-stability-stage0-20260901.md) | 通过（隔离故障注入与独立准入尚待完成） | Codex |
+| 2026-09-01 | 阶段 0 假死现状最小复现 | 新增 `StabilityStage0BaselineTests`；2/2 通过，确认连续三次探针失败仅产生失败结果，当前 `TunnelManager` 不调用生命周期恢复；未修改生产实现 | [阶段 0 基线证据](../data-quality/tunnelpad-stability-stage0-20260901.md)；`Tests/TunnelPadCoreTests/StabilityStage0BaselineTests.swift` | 通过（仅完成现状缺口，不代表恢复状态机已实现） | Codex |
+| 2026-09-01 | 阶段 0 配置/生命周期故障基线 | `StabilityStage0BaselineTests` 增至 4/4，复现坏 JSON 与半写入会留档并返回空配置；新增 Rust `stage0_baseline_restart_continues_after_bootout_error`，复现 restart 吞掉 bootout 错误后继续 bootstrap；未修改稳定性生产逻辑 | [阶段 0 基线证据](../data-quality/tunnelpad-stability-stage0-20260901.md)；`Tests/TunnelPadCoreTests/StabilityStage0BaselineTests.swift`；`rust/tunnelpad-core/src/owner.rs` | 通过（目标 fail-closed 行为留待阶段 1–2） | Codex |
+| 2026-09-01 | 阶段 0 契约 fixture 补齐 | 新增 6 项仅测试契约 fixture：健康恢复、成功清零、keepAlive、隧道隔离/手动停止、代次取消、配置 fail-closed、ECS 双端点 fail-closed；6/6 通过，未修改生产恢复逻辑 | [阶段 0 基线证据](../data-quality/tunnelpad-stability-stage0-20260901.md)；`Tests/TunnelPadCoreTests/StabilityStage0ContractTests.swift` | 通过（等待新的独立准入复核） | Codex |
+| 2026-09-02 | 阶段 1 初始生产实现 | 接入固定 10 秒后台健康监测、单隧道恢复状态机、配置有效候选保留、手动操作取消/清零、第 10 次失败停止和 Rust `bootout` fail-closed；停止后保留只读监测；未混入启动/退出收敛或真实 ECS/应用验收 | [阶段 1 实施证据](../data-quality/tunnelpad-stability-stage1-implementation-20260902.md)；`Sources/TunnelPadCore/HealthRecovery.swift`；`Sources/TunnelPadCore/TunnelManager.swift`；`rust/tunnelpad-core/src/owner.rs` | 进行中 | Codex |
 
 ### 最近实施/验证记录
 
 | 日期 | 类型 | 动作/结果 | 证据 | 状态 | 记录者 |
 |---|---|---|---|---|---|
 | 2026-08-30 | 只读治理检查 | 新计划写入前执行 `plan-governance-cli check . --strict-readiness`，既有仓库检查通过并保留一项既有 warning | 命令输出；本计划尚未落盘时的基线 | 通过 | Codex |
+| 2026-09-01 | 并行计划边界与阶段 0 基线 | 日志/稳定性阶段 0 改为可并行推进；阶段 1 共享模块串行；完成稳定性当前代码基线证据，并执行普通、严格、停滞检查和空白检查 | [阶段 0 基线证据](../data-quality/tunnelpad-stability-stage0-20260901.md)；`plan-governance-cli check .`；`plan-governance-cli check . --strict-readiness`；`plan-governance-cli check . --stale-days 10`；`git diff --check` | 通过（保留预期共享目标 WARNING） | Codex |
+| 2026-09-01 | 阶段 0 fixture 回归 | 执行 `swift test --filter StabilityStage0BaselineTests`（4/4）、`swift test --filter StabilityStage0ContractTests`（6/6）、`cargo test --manifest-path rust/Cargo.toml stage0_baseline_restart_continues_after_bootout_error`（1/1）、全量 `swift test`（109/109）和全量 `cargo test --manifest-path rust/Cargo.toml`（51 个 Rust 单元测试 + 1 个差分测试）；日志计划已完成，稳定性仍未引入后台恢复生产实现 | `Tests/TunnelPadCoreTests/StabilityStage0BaselineTests.swift`；`Tests/TunnelPadCoreTests/StabilityStage0ContractTests.swift`；`rust/tunnelpad-core/src/owner.rs`；命令输出 | 通过（阶段 0 已通过独立准入，阶段 1 自身 Step 0 尚待完成） | Codex |
+| 2026-09-01 | 阶段 0 独立准入复核 | 独立只读复核确认目标/范围/安全边界和现状基线充分，但状态机、代次取消、ECS 运行中同步 fixture 尚未执行；阶段 0 未达到待实施标准 | [独立准入复核](../data-quality/tunnelpad-stability-stage0-independent-review-20260901.md) | 未通过（保留在阶段 0 设计中） | Codex（独立只读复核） |
+| 2026-09-01 | 阶段 0 独立准入复核 | 复核确认目标/范围/非目标、12 行矩阵、6 项契约 fixture、验证/回滚边界和共享影响均满足阶段 0 准入；阶段 0 达到“待实施标准”并关闭 | [契约 fixture 独立准入复核](../data-quality/tunnelpad-stability-stage0-independent-review-contract-fixtures-20260901.md) | 通过 | Codex（独立只读复核） |
+| 2026-09-02 | 阶段 1 初始实现验证 | `swift test --filter StabilityStage1Tests`（7/7）、全量 `swift test`（116/116）、全量 `cargo test --manifest-path rust/Cargo.toml`（51 个 Rust 单元测试 + 1 个差分测试）、治理普通/严格/停滞检查和 `git diff --check` 均通过；GitNexus `detect_changes()` 报告 `TunnelManager` 枢纽变更为预期高影响，待阶段 1 完整行为验收 | [阶段 1 实施证据](../data-quality/tunnelpad-stability-stage1-implementation-20260902.md)；命令输出；GitNexus 变更范围检查 | 通过（阶段 1 仍在实施） | Codex |
+| 2026-09-02 | 阶段 1 独立完成复核 | 补齐人工 start 后重新恢复、删除时取消排队恢复任务；阶段 1 专项 9/9、全量 Swift 118/118、Rust 51+1、治理普通/严格/停滞检查、`git diff --check` 和 GitNexus `detect_changes()`（83 个变更符号、26 个受影响符号、`critical`）均通过；阶段 1 完成边界与阶段 2 交接项已分离 | [阶段 1 独立完成复核](../data-quality/tunnelpad-stability-stage1-independent-completion-review-20260902.md)；[阶段 1 实施证据](../data-quality/tunnelpad-stability-stage1-implementation-20260902.md) | 通过（阶段 1 已完成） | Codex（独立只读复核） |
 
 阶段证据只声明仓库内相对路径；最近实施/验证记录采用追加式记录，不能替代独立准入复核。
 
 ### Attestation 说明
 
-本计划完成快照沿用 `docs/attestations/<plan>.json` 兼容格式。阶段 0 未完成前不创建完成快照；阶段完成或发布门禁需要快照时，使用治理 CLI 生成并保留独立复核状态。
+本计划完成快照沿用 `docs/attestations/<plan>.json` 兼容格式。阶段 0 已完成但全计划未完成，不创建全计划完成快照；阶段完成或发布门禁需要快照时，使用治理 CLI 生成并保留独立复核状态。
 
 ### 验证方式
 
@@ -267,6 +293,14 @@ ECS 动态 SSH 计划已完成“TunnelPad 手动启动/重启前同步公网 IP
 
 当前没有为本计划新增覆盖率证据。完成阶段 1–2 后以专项测试矩阵和 `swift test`/`cargo test` 输出记录关键状态机、执行器分支、取消代次和回滚边界；若项目引入行覆盖率工具，再补充百分比和关键模块覆盖情况，不以全量测试通过替代状态机分支覆盖。
 
+### 阶段 1 完成条件
+
+- 当前执行器 `launchd` 范围内的后台监测、单隧道健康恢复状态机、配置 fail-closed 和 Rust `bootout` fail-closed 已接入生产协调路径。
+- 连续 3 次失败、10/30/60/300 秒固定退避、最多 10 次恢复、第 10 次失败停止当前隧道并保留只读监测、成功清零和人工 start/restart 重置均有生产路径隔离证据。
+- `keepAlive=false`、手动停止、删除、恢复并发、代次/取消、弱引用监测生命周期和单隧道隔离均有反证或代码核对；不引入新的配置字段，不操作真实隧道、SSH、ECS 或 `launchctl`。
+- 配置无效候选不会替换当前有效配置；Rust `bootout` 非“未加载”错误会阻断后续 bootstrap；阶段 1 的专项、全量回归、治理检查和独立完成复核通过。
+- 启动/退出收敛、ECS 运行时同步和跨层状态一致性明确列为阶段 2，不作为阶段 1 完成前置。
+
 ### 完成条件
 
 - 阶段 0 Step 0 现状快照和假死最小复现已落盘，且不操作真实用户隧道。
@@ -281,27 +315,77 @@ ECS 动态 SSH 计划已完成“TunnelPad 手动启动/重启前同步公网 IP
 - 最新独立准入/完成复核明确通过，`PLAN_MAP.md`、阶段证据、测试证据和状态同步。
 - 治理普通检查和严格准入检查通过；提交前 `detect_changes()` 只报告本计划预期影响。
 
+## 当前阶段
+
+### 范围
+
+当前阶段为阶段 2，状态为设计中。阶段 1 已完成并关闭；阶段 2 只设计启动/退出收敛、运行中 ECS 公网 IPv4 同步和跨层状态一致性，不进入生产实现，直到阶段 2 自己完成 Step 0、验证矩阵和独立准入。未来 `app` 执行器仍不在本计划范围内。
+
+### 阶段准入摘要
+
+| 字段 | 内容 |
+|---|---|
+| 准入状态 | 设计中 |
+| Step 0 | 尚未开始；不得以阶段 1 的 Step 0 或完成证据替代阶段 2 基线 |
+| 样本矩阵 | 待冻结：启动收敛、正常/信号退出、ECS 双端点来源变化、同步失败、迟到任务和跨层状态一致性 |
+| 验证方式 | 待阶段 2 自行确定 fake `launchd`、退出清理、ECS 双端点和跨层状态 fixture；阶段 2 实施前重新执行相关 upstream impact |
+| 失败/回滚边界 | 设计候选继续遵守 fail-closed；阶段 2 实施前不调用真实 `launchctl`、SSH、ECS 或用户隧道 |
+| 当前阻塞项 | 阶段 2 尚未完成需求冻结、Step 0 和独立准入；不阻塞已完成的阶段 1 |
+| 最新独立准入复核 | 暂无阶段 2 准入复核；阶段 1 准入复核仅作为历史记录保留，见下方“阶段 1 收尾” |
+
+## 阶段 1 收尾
+
+### 阶段 1 完成摘要
+
+| 字段 | 内容 |
+|---|---|
+| 完成状态 | 已完成；只关闭阶段 1，不改变阶段 2 的设计中状态 |
+| 完成范围 | `launchd` 后台健康监测、固定恢复状态机、配置 fail-closed、操作/恢复代次与取消保护、手动 stop/start/restart 语义、删除迟到任务保护，以及 Rust `bootout` fail-closed |
+| 固定策略 | 连续 3 次失败触发恢复；退避 10/30/60/300 秒封顶；最多 10 次；第 10 次失败停止当前隧道并保留只读监测；成功或人工 start/restart 清零 |
+| 隔离验证 | 阶段 1 专项 9/9；最终全量 Swift/Rust、治理检查、空白检查和变更范围检查见[阶段 1 独立完成复核](../data-quality/tunnelpad-stability-stage1-independent-completion-review-20260902.md) |
+| 明确留待阶段 2 | 启动/退出收敛、ECS 运行中同步和跨层状态一致性；不把这些未实现项计入阶段 1 缺口 |
+
+### 阶段 1 Step 0
+
+阶段 1 的 Step 0 证据见[阶段 1 Step 0 证据](../data-quality/tunnelpad-stability-stage1-step0-20260902.md)，记录了生产实现前基线、`TunnelManager`/`TunnelRuntimeState`/`RustLifecycleOwner`/`ProbeCoordinator` 的 upstream impact、共享编辑边界，以及 fake `launchd`、fake 探针、隔离配置和 ECS 双端点矩阵。它是阶段 1 的历史准入证据，不替代阶段 2 自己的 Step 0。
+
+阶段 1 已完成 Step 0、独立准入、生产实现和独立完成复核；详细实施结果见[阶段 1 实施证据](../data-quality/tunnelpad-stability-stage1-implementation-20260902.md)。
+
 ## 最新独立准入复核
 
 | 字段 | 内容 |
 |---|---|
-| 日期 | 尚未进行 |
-| 阶段 | 阶段 0 |
-| 结论 | 尚未达到待实施标准 |
-| 证据 | Step 0 隔离假死复现和样本矩阵尚待执行；Rust Core 迁移阶段 5 已完成并关闭，本计划当前仅等待自身证据 |
-| 复核者 | 尚未指定 |
+| 日期 | 2026-09-02 |
+| 阶段 | 阶段 1 |
+| 结论 | 通过（达到“待实施标准”） |
+| 证据 | [阶段 1 Step 0 证据](../data-quality/tunnelpad-stability-stage1-step0-20260902.md)；[阶段 1 独立准入复核（r2）](../data-quality/tunnelpad-stability-stage1-independent-review-20260902-r2.md)；阶段 0 复核见[契约 fixture 独立准入复核](../data-quality/tunnelpad-stability-stage0-independent-review-contract-fixtures-20260901.md) |
+| 复核者 | Codex（独立只读复核） |
+
+## 最新独立完成复核
+
+| 字段 | 内容 |
+|---|---|
+| 日期 | 2026-09-02 |
+| 阶段 | 阶段 1 |
+| 结论 | 通过（阶段 1 已完成） |
+| 证据 | [阶段 1 独立完成复核](../data-quality/tunnelpad-stability-stage1-independent-completion-review-20260902.md)；阶段 1 专项 9/9、全量 Swift 118/118、Rust 51+1 通过；治理、空白和变更范围检查通过 |
+| 复核者 | Codex（独立只读复核） |
 
 ## 独立复核记录
 
 | 日期 | 类型 | 阶段 | 结论 | 证据 | 复核者 |
 |---|---|---|---|---|---|
-| - | - | - | - | - | - |
+| 2026-09-01 | 阶段准入复核 | 阶段 0 | 未通过（未达到待实施标准） | [上一轮独立准入复核](../data-quality/tunnelpad-stability-stage0-independent-review-20260901.md)；健康恢复状态机、配置/操作代次与取消、ECS 运行中同步 fixture 尚未执行 | Codex（独立只读复核） |
+| 2026-09-01 | 阶段准入复核 | 阶段 0 | 通过（达到“待实施标准”） | [契约 fixture 独立准入复核](../data-quality/tunnelpad-stability-stage0-independent-review-contract-fixtures-20260901.md)；阶段 0 目标/范围、12 行矩阵、6 项契约 fixture、验证/回滚边界和共享影响复核均通过 | Codex（独立只读复核） |
+| 2026-09-02 | 阶段准入复核 | 阶段 1 | 未通过（未达到“待实施标准”） | [阶段 1 独立准入复核](../data-quality/tunnelpad-stability-stage1-independent-review-20260902.md)；复核时 `PLAN_MAP` 尚未登记阶段 1 证据，且计划将生产接入测试列为当前阻塞项；两项已整改，待重新复核 | Codex（独立只读复核） |
+| 2026-09-02 | 阶段准入复核 | 阶段 1 | 通过（达到“待实施标准”） | [阶段 1 独立准入复核（r2）](../data-quality/tunnelpad-stability-stage1-independent-review-20260902-r2.md)；Step 0、8 行矩阵、影响复核、验证/回滚边界、共享日志边界和当前准入状态均通过 | Codex（独立只读复核） |
+| 2026-09-02 | 阶段完成复核 | 阶段 1 | 通过（已完成） | [阶段 1 独立完成复核](../data-quality/tunnelpad-stability-stage1-independent-completion-review-20260902.md)；完成边界、9/9 专项、118/118 Swift、Rust 51+1、治理和变更范围均通过；阶段 2 保持设计中 | Codex（独立只读复核） |
 
 ## 未决问题
 
 | 问题 | 推荐方案 | 是否阻塞当前阶段 | 状态 |
 |---|---|---|---|
-| 稳定性实现何时开始 | Rust Core 迁移阶段 5 已完成，本计划阶段 0 继续补基线和准入证据，通过本计划自身准入后再进入阶段 1 | 是（阶段 1 实施） | 顺序已确认，等待本计划证据 |
+| 阶段 1 收尾与阶段 2 衔接 | 阶段 1 已完成；阶段 2 继续保持设计中，必须独立完成需求冻结、Step 0 和准入复核后再实施 | 是（阶段 2） | 阶段 1 已关闭 |
 
 ## 风险和回滚
 
@@ -314,7 +398,8 @@ ECS 动态 SSH 计划已完成“TunnelPad 手动启动/重启前同步公网 IP
 - 执行器切换和 launchd 重启的停止结果如果被吞掉，可能同时留下旧实例和新配置；失败分类、状态复查和提交顺序必须在 fake fixture 中固定。
 - 自动重启若读取旧快照会继续使用用户已修改前的命令；若直接读取新配置又可能绕过操作代次。两种语义必须先冻结，再实现。
 - 正常退出、信号退出和启动收敛若各自维护资源发现逻辑，修复一条路径可能使另外两条路径继续残留；应以同一资源结果模型验收。
-- Rust Core 阶段 5 正在进行，后续 owner 变化可能与共享执行器冲突。实现前重新运行影响分析；在 Rust owner 和本计划准入未完成前，稳定性阶段 1 保持未实施。
+- Rust Core 阶段 5 已完成，共享 owner 的阶段 1 upstream impact 已登记；阶段 1 已接入 Swift 侧协调路径，并已将 Rust `bootout` 非预期失败改为 fail-closed；启动/退出收敛和完整 ECS 运行时同步留待阶段 2。
+- 日志事件流计划阶段 0–3 已完成；稳定性计划阶段 0–1 已完成，阶段 2 仍在设计中。后续若修改 `TunnelManager`、`TunnelRuntimeState`、主面板或共享测试目录，可能产生行为互相覆盖；必须保留单一编辑窗口并按 `PLAN_MAP.md` 串行合入。
 - 若实现导致误重启、状态倒灌或无法可靠熔断，按阶段独立提交回滚稳定性实现，保留 `config.json` 和既有 TunnelPad v1 运行契约；不得用配置重写或删除真实 plist 作为回滚手段。
 - 任何真实用户隧道验收只允许在用户明确指定、可观察、可恢复的窗口内进行；发现 stop/bootout、删除或退出清理异常时立即停止该场景并保留配置。
 
