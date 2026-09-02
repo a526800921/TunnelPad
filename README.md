@@ -6,15 +6,17 @@ TunnelPad 是一个 macOS 菜单栏应用，用于统一管理本机与服务器
 
 - v1 隧道管理、菜单栏入口、`launchd` 生命周期、配置 v1 和 Rust Core 迁移已完成。
 - ECS 动态 SSH 公网 IP 同步阶段 2 已完成：SSH 隧道执行启动/重启前，App 会调用 `.app/Contents/Resources/update-ecs-ssh-ip`，同步受管安全组规则后再调用 Rust Core。
-- 稳定性与健康恢复、日志事件流仍处于阶段 0 设计中；当前尚未实现运行中公网 IP 变化的自动恢复，也未实现事件驱动日志采集。
+- 稳定性与健康恢复、日志事件流和 Rust Core 风险收敛计划已完成；当前稳定性自动恢复范围固定为 `launchd`，未来 `app` 执行器另立计划。
+- 本机 HTTP API 已完成：App 启动时绑定 `127.0.0.1:9998`，提供隧道状态、启停、重启和日志接口；不提供远程访问、配置写入或 ECS API。
 - 计划状态与阶段依赖以 [`docs/PLAN_MAP.md`](docs/PLAN_MAP.md) 为准。
 
 ## 主要能力
 
 - 菜单栏和主窗口管理多条 `launchd` SSH 隧道。
 - Rust Core 作为配置、生命周期、运行时状态、并发和退出清理的唯一 owner；SwiftUI/AppKit 负责界面和 FFI 适配。
-- HTTP 探针检查并展示隧道健康结果。后台健康恢复策略已登记在稳定性计划，尚未进入实现阶段。
+- HTTP 探针检查并展示隧道健康结果；`launchd` 范围内的后台健康恢复和资源收敛已完成。
 - 读取每条隧道的 `launchd` 日志文件并在详情页查看。
+- 通过本机 HTTP API 对外提供受控的状态、生命周期和日志调用。
 - 接管旧版 LaunchAgent，提供备份与失败回滚边界。
 - 对识别为 SSH 的命令，在启动/重启前执行 ECS 动态 IP 同步；非 SSH 命令不触发该同步。
 
@@ -34,6 +36,35 @@ TunnelPad 是一个 macOS 菜单栏应用，用于统一管理本机与服务器
 ```
 
 App 退出时会停止由 TunnelPad 管理的 `launchd` 隧道。`config.json` 继续使用 version `1`，不保存 ECS 凭证、私钥或公网 IP。
+
+## 本机 HTTP API
+
+API 服务随 TunnelPad App 启停，只监听 `127.0.0.1:9998`。端口被占用时记录启动错误并继续运行 App，不换端口、不重试；App 退出时 API 服务停止。
+
+接口清单：
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `GET` | `/api/health` | API 健康检查 |
+| `GET` | `/api/tunnels` | 隧道列表和安全摘要 |
+| `GET` | `/api/tunnels/{id}` | 隧道详情 |
+| `POST` | `/api/tunnels/{id}/start` | 启动隧道 |
+| `POST` | `/api/tunnels/{id}/stop` | 停止隧道 |
+| `POST` | `/api/tunnels/{id}/restart` | 重启隧道 |
+| `GET` | `/api/tunnels/{id}/logs` | 读取日志纯文本快照 |
+| `POST` | `/api/tunnels/{id}/logs/clear` | 清空日志快照 |
+| `GET` | `/openapi.json` | 获取 OpenAPI 描述 |
+
+示例：
+
+```bash
+curl http://127.0.0.1:9998/api/health
+curl http://127.0.0.1:9998/api/tunnels
+curl -X POST http://127.0.0.1:9998/api/tunnels/admin-tunnel/start
+curl http://127.0.0.1:9998/api/tunnels/admin-tunnel/logs
+```
+
+启停请求会等待底层操作完成后返回；隧道不存在返回 `404`，已有操作进行中返回 `409`，失败和超时会返回明确错误。API 只返回状态、PID、探针结果等安全摘要，不返回命令、探针 URL、本地路径、环境变量、密钥或原始 stderr。
 
 ## 构建与测试
 
@@ -82,11 +113,13 @@ open dist/TunnelPad.app
 - [ECS 动态 SSH 公网 IP 同步计划](docs/plans/ecs-dynamic-ssh-ip.md)
 - [隧道稳定性与健康恢复计划](docs/plans/tunnelpad-stability.md)
 - [日志事件流与面板生命周期计划](docs/plans/tunnelpad-log-streaming.md)
+- [本机 HTTP API 计划](docs/plans/tunnelpad-local-api.md)
 - [Rust Core 唯一生命周期 owner ADR](docs/adr/0001-rust-core-single-owner.md)
 - [TunnelPad 功能图谱](docs/graph/functional.yaml)
 
 ## 安全提示
 
 - 不要把阿里云凭证 CSV、CLI 配置文件、AccessKey、Secret、SSH 私钥或真实公网 IP 提交到仓库。
+- 本机 HTTP API 无鉴权，安全边界依赖回环监听；不要通过端口转发、代理或其他方式将 `9998` 暴露到局域网或公网。
 - ECS 同步只维护描述明确的受管 SSH `/32` 规则，其他安全组规则不在操作范围内。
 - 发现安全组规则、凭证或隧道状态异常时，先停止当前操作，并按计划中的失败与恢复边界处理。

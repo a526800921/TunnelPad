@@ -4,7 +4,7 @@ project:
   name: TunnelPad
 gitnexus:
   repo: TunnelPad
-  indexed_commit: c7e2d87
+  indexed_commit: e02fb05
 
 nodes:
   - id: business.tunnelpad
@@ -127,6 +127,23 @@ nodes:
         ref: docs/plans/tunnelpad-log-streaming.md
         locator: "目标与面板生命周期"
 
+  - id: function.local.api
+    type: function
+    name: 本机 HTTP API 服务
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/API/TunnelAPIServer.swift
+        locator: "TunnelAPIServer.start/stop/TunnelAPIRouter"
+      - kind: code
+        ref: Sources/tunnelpad/API/TunnelManagerAPIBackend.swift
+        locator: "TunnelManagerAPIBackend"
+      - kind: code
+        ref: Sources/tunnelpad/AppDelegate.swift
+        locator: "apiServer 启动、冲突记录与退出停止"
+      - kind: document
+        ref: docs/plans/tunnelpad-local-api.md
+        locator: "目标、9 路由协议与生命周期边界"
+
   - id: function.legacy.migration
     type: function
     name: 旧 LaunchAgent 扫描、接管与回滚
@@ -187,6 +204,34 @@ nodes:
       - kind: code
         ref: Sources/tunnelpad/MainPanelView.swift
         locator: "MainPanelView.task 初始 refreshAsync"
+
+  - id: process.api.startup
+    type: process
+    name: App 内嵌本机 API 启动、端口冲突与退出停止
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/AppDelegate.swift
+        locator: "applicationDidFinishLaunching/applicationShouldTerminate"
+      - kind: code
+        ref: Sources/TunnelPadCore/API/TunnelAPIServer.swift
+        locator: "固定 127.0.0.1:9998、启动失败与 stop"
+      - kind: test
+        ref: Tests/TunnelPadCoreTests/APITests/TunnelAPIServerTests.swift
+        locator: "服务启动与回环请求"
+
+  - id: process.api.request
+    type: process
+    name: 本机 HTTP API 查询、隧道操作与日志调用
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/API/TunnelAPIServer.swift
+        locator: "TunnelAPIRouter.route、OpenAPI 路由定义"
+      - kind: code
+        ref: Sources/tunnelpad/API/TunnelManagerAPIBackend.swift
+        locator: "隧道启停、详情、状态和日志适配"
+      - kind: test
+        ref: Tests/TunnelPadCoreTests/APITests/TunnelAPIServerTests.swift
+        locator: "健康、列表、详情、启停、日志、清空与错误响应"
 
   - id: process.app.terminate
     type: process
@@ -367,6 +412,20 @@ nodes:
         ref: docs/plans/tunnelpad-stability.md
         locator: "现有 HTTP 探针健康信号"
 
+  - id: external.local.api
+    type: external_workflow
+    name: 本机回环 HTTP API 调用方
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/API/TunnelAPIServer.swift
+        locator: "127.0.0.1:9998"
+      - kind: test
+        ref: Tests/TunnelPadCoreTests/APITests/TunnelAPIServerTests.swift
+        locator: "URLSession 回环请求"
+      - kind: document
+        ref: docs/plans/tunnelpad-local-api.md
+        locator: "只绑定回环、不提供远程访问"
+
   - id: external.ecs.security.group
     type: external_workflow
     name: ECS 受管 SSH 安全组规则
@@ -469,6 +528,13 @@ relations:
         ref: docs/plans/tunnelpad-log-streaming.md
         locator: "日志事件流"
   - from: business.tunnelpad
+    to: function.local.api
+    type: contains
+    evidence:
+      - kind: document
+        ref: docs/plans/tunnelpad-local-api.md
+        locator: "本机 HTTP API 服务"
+  - from: business.tunnelpad
     to: function.legacy.migration
     type: contains
     evidence:
@@ -511,6 +577,13 @@ relations:
       - kind: code
         ref: Sources/tunnelpad/AppDelegate.swift
         locator: "applicationShouldTerminate"
+  - from: function.app.lifecycle
+    to: process.api.startup
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/AppDelegate.swift
+        locator: "App 启动 API，退出停止 API"
   - from: function.app.lifecycle
     to: external.launchd.service
     type: consumes
@@ -663,6 +736,41 @@ relations:
       - kind: code
         ref: Sources/tunnelpad/LogView.swift
         locator: "load 与 2 秒任务"
+  - from: function.local.api
+    to: process.api.startup
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/API/TunnelAPIServer.swift
+        locator: "start/stop"
+  - from: function.local.api
+    to: process.api.request
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/API/TunnelAPIServer.swift
+        locator: "TunnelAPIRouter.route"
+  - from: function.local.api
+    to: function.tunnel.lifecycle
+    type: depends_on
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/API/TunnelManagerAPIBackend.swift
+        locator: "start/stop/restart 通过 TunnelManager"
+  - from: function.local.api
+    to: function.log.management
+    type: depends_on
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/API/TunnelManagerAPIBackend.swift
+        locator: "logs/clearLogs 通过 TunnelManager"
+  - from: function.local.api
+    to: function.health.probe
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/API/TunnelAPI.swift
+        locator: "TunnelAPIProbeSummary"
   - from: function.log.management
     to: external.log.files
     type: consumes
@@ -708,6 +816,49 @@ relations:
       - kind: code
         ref: Sources/TunnelPadCore/TunnelManager.swift
         locator: "配置快照与运行时裁剪"
+
+  - from: process.api.startup
+    to: external.local.api
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/API/TunnelAPIServer.swift
+        locator: "绑定 127.0.0.1:9998"
+  - from: process.api.request
+    to: process.tunnel.start
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/API/TunnelManagerAPIBackend.swift
+        locator: "start"
+  - from: process.api.request
+    to: process.tunnel.stop
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/API/TunnelManagerAPIBackend.swift
+        locator: "stop"
+  - from: process.api.request
+    to: process.tunnel.restart
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/API/TunnelManagerAPIBackend.swift
+        locator: "restart"
+  - from: process.api.request
+    to: function.log.management
+    type: depends_on
+    evidence:
+      - kind: code
+        ref: Sources/tunnelpad/API/TunnelManagerAPIBackend.swift
+        locator: "logs/clearLogs"
+  - from: process.api.request
+    to: function.health.probe
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/API/TunnelAPI.swift
+        locator: "安全摘要中的 probe"
 
   - from: function.rust.parity
     to: function.config.management
