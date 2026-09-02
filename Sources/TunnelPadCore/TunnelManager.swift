@@ -24,7 +24,11 @@ public final class TunnelManager: ObservableObject {
     private var probeTask: Task<Void, Never>?
     private var healthMonitorTask: Task<Void, Never>?
     private var probeGeneration: UInt = 0
-    private var refreshGeneration: UInt = 0
+    /// 所有异步状态快照共享请求代次；较旧的后台/手动读取不能覆盖较新的读取。
+    private var stateReadGeneration: UInt = 0
+    /// 生命周期或有效配置发生变化时失效在途读取，即使底层调用无法立即取消，
+    /// 结果也不能再回写到 UI 门面。
+    private var stateMutationGeneration: UInt = 0
     /// 每个隧道的操作代际：异步操作即使底层系统调用无法立即取消，
     /// 也不能在后续操作已经开始后把旧结果写回门面。
     private var operationGenerations: [String: UInt] = [:]
@@ -42,6 +46,11 @@ public final class TunnelManager: ObservableObject {
     private struct HealthMonitorSchedule: Sendable {
         let intervalNanoseconds: UInt64
         let sleep: @Sendable (UInt64) async throws -> Void
+    }
+
+    private struct StateReadToken: Sendable, Equatable {
+        let readGeneration: UInt
+        let mutationGeneration: UInt
     }
 
     public convenience init(paths: TunnelPaths) {
@@ -119,9 +128,11 @@ public final class TunnelManager: ObservableObject {
 
     /// 手动编辑 config.json 后重新加载；丢弃已移除隧道的状态与探针缓存。
     public func reloadConfig() {
+        invalidateStateReads()
         do {
             let loaded = try rustCore.loadConfig()
             applyEffectiveConfig(loaded)
+            invalidateStateReads()
             lastMessage = "已重新加载配置，共 \(config.tunnels.count) 条隧道"
             syncLogStore()
             refresh()
@@ -132,13 +143,16 @@ public final class TunnelManager: ObservableObject {
 
     /// 异步重新加载配置：文件读取在后台执行，完成后沿用同步入口的状态裁剪和提示语义。
     public func reloadConfigAsync() async {
+        invalidateStateReads()
+        let mutationGeneration = stateMutationGeneration
         let rustCore = self.rustCore
         do {
             let loaded = try await Task.detached(priority: .utility) {
                 try rustCore.loadConfig()
             }.value
-            guard !Task.isCancelled else { return }
+            guard mutationGeneration == stateMutationGeneration, !Task.isCancelled else { return }
             applyEffectiveConfig(loaded)
+            invalidateStateReads()
             lastMessage = "已重新加载配置，共 \(config.tunnels.count) 条隧道"
             syncLogStore()
             await refreshAsync()
@@ -154,6 +168,7 @@ public final class TunnelManager: ObservableObject {
         guard !runtimeState.busyIDs.contains(tunnel.id) else { return }
         guard let index = config.tunnels.firstIndex(where: { $0.id == tunnel.id }) else { return }
         let old = config.tunnels[index]
+        invalidateStateReads()
         config.tunnels[index] = tunnel
         do {
             try rustCore.saveConfig(config)
@@ -271,6 +286,7 @@ public final class TunnelManager: ObservableObject {
 
         var nextConfig = config
         nextConfig.tunnels.append(tunnel)
+        invalidateStateReads()
         do {
             try rustCore.saveConfig(nextConfig)
             config = nextConfig
@@ -285,15 +301,18 @@ public final class TunnelManager: ObservableObject {
     // MARK: - 状态
 
     public func refresh() {
+        let token = beginStateRead()
         do {
             let snapshot = try rustCore.snapshot()
+            guard isCurrentStateRead(token) else { return }
             let previousIDs = Set(config.tunnels.map(\.id))
             applyEffectiveConfig(snapshot.config)
-            updateRuntime { $0.setStatuses(snapshot.statuses) }
+            applyStatusSnapshot(snapshot.statuses)
             if previousIDs != Set(config.tunnels.map(\.id)) {
                 syncLogStore()
             }
         } catch {
+            guard isCurrentStateRead(token) else { return }
             lastError = "Rust Core 刷新状态失败：\(error)"
         }
         runProbes()
@@ -301,17 +320,16 @@ public final class TunnelManager: ObservableObject {
 
     /// 异步状态刷新：系统查询在后台进行，完成后以同样的状态快照发布到 UI。
     public func refreshAsync() async {
-        refreshGeneration &+= 1
-        let currentGeneration = refreshGeneration
+        let token = beginStateRead()
         do {
             let rustCore = self.rustCore
             let snapshot = try await Task.detached(priority: .utility) {
                 try rustCore.snapshot()
             }.value
-            guard currentGeneration == refreshGeneration, !Task.isCancelled else { return }
+            guard isCurrentStateRead(token), !Task.isCancelled else { return }
             let previousIDs = Set(config.tunnels.map(\.id))
             applyEffectiveConfig(snapshot.config)
-            updateRuntime { $0.setStatuses(snapshot.statuses) }
+            applyStatusSnapshot(snapshot.statuses)
             if previousIDs != Set(config.tunnels.map(\.id)) {
                 syncLogStore()
             }
@@ -319,6 +337,7 @@ public final class TunnelManager: ObservableObject {
         } catch is CancellationError {
             return
         } catch {
+            guard isCurrentStateRead(token) else { return }
             lastError = "Rust Core 刷新状态失败：\(error)"
         }
     }
@@ -333,6 +352,9 @@ public final class TunnelManager: ObservableObject {
             cancelRecovery(for: id)
             healthRecoveryStates.removeValue(forKey: id)
         }
+        if !changedIDs.isEmpty {
+            invalidateProbeResults()
+        }
 
         config = nextConfig
         let validIDs = Set(nextConfig.tunnels.map(\.id))
@@ -345,9 +367,8 @@ public final class TunnelManager: ObservableObject {
             guard let probe = tunnel.probe else { return nil }
             return (tunnel.id, probe)
         }
-        probeGeneration &+= 1
+        invalidateProbeResults()
         let currentGeneration = probeGeneration
-        probeTask?.cancel()
         guard !probes.isEmpty else {
             Task { await probeCoordinator.cancel() }
             probeTask = nil
@@ -410,6 +431,7 @@ public final class TunnelManager: ObservableObject {
     private func runHealthProbeCycle() async {
         guard !Task.isCancelled else { return }
 
+        let token = beginStateRead()
         let rustCore = self.rustCore
         let snapshot: RustCoreClient.Snapshot
         do {
@@ -420,11 +442,11 @@ public final class TunnelManager: ObservableObject {
             // 状态读取失败时不使用旧快照触发自动恢复，避免对未知实例做副作用。
             return
         }
-        guard !Task.isCancelled else { return }
+        guard isCurrentStateRead(token), !Task.isCancelled else { return }
 
         let previousIDs = Set(config.tunnels.map(\.id))
         applyEffectiveConfig(snapshot.config)
-        updateRuntime { $0.setStatuses(snapshot.statuses) }
+        applyStatusSnapshot(snapshot.statuses)
         if previousIDs != Set(config.tunnels.map(\.id)) {
             syncLogStore()
         }
@@ -439,7 +461,7 @@ public final class TunnelManager: ObservableObject {
         }
 
         let results = await healthProbeCoordinator.run(probes)
-        guard !Task.isCancelled, let results else { return }
+        guard isCurrentStateRead(token), !Task.isCancelled, let results else { return }
         applyProbeResults(results)
         for (id, result) in results {
             recordHealthResult(result, for: id)
@@ -452,9 +474,13 @@ public final class TunnelManager: ObservableObject {
         // 下一轮健康结果再决定是否进入下一次尝试。
         guard recoveryTasks[id] == nil, !runtimeState.busyIDs.contains(id) else { return }
         var state = healthRecoveryStates[id] ?? HealthRecoveryState()
+        let mayRetryWithoutRunning = canRetryQuiescedRecovery(for: id, tunnel: tunnel, state: state)
+        let healthStatus = mayRetryWithoutRunning && !isRunning(statuses[id])
+            ? TunnelStatus.running(pid: nil)
+            : statuses[id]
         let action = state.record(
             result,
-            status: statuses[id],
+            status: healthStatus,
             keepAlive: tunnel.keepAlive
         )
         healthRecoveryStates[id] = state
@@ -517,9 +543,12 @@ public final class TunnelManager: ObservableObject {
             }
         }
         guard let tunnel = tunnel(id: id), tunnel.keepAlive else { return }
-        guard isRunning(statuses[id]), !runtimeState.busyIDs.contains(id) else { return }
-        guard healthRecoveryStates[id]?.phase == .monitoring,
-              healthRecoveryStates[id]?.recoveryAttempts == attempt else { return }
+        let recoveryState = healthRecoveryStates[id]
+        let mayRetryWithoutRunning = canRetryQuiescedRecovery(for: id, tunnel: tunnel, state: recoveryState)
+        guard (isRunning(statuses[id]) || mayRetryWithoutRunning),
+              !runtimeState.busyIDs.contains(id) else { return }
+        guard recoveryState?.phase == .monitoring,
+              recoveryState?.recoveryAttempts == attempt else { return }
 
         guard let operation = beginOperation(for: id, cancelsRecovery: false) else { return }
         defer { endOperation(for: id, generation: operation) }
@@ -527,14 +556,39 @@ public final class TunnelManager: ObservableObject {
         var rustGeneration: UInt64?
         let rustCore = self.rustCore
         do {
-            try await preStartChecker.checkAsync(tunnel: tunnel)
-            guard !Task.isCancelled, recoveryGenerations[id] == generation else { return }
-            guard let nextRustGeneration = beginRustOperation(for: id) else {
-                throw HealthRecoveryError.lifecycleUnavailable
-            }
-            rustGeneration = nextRustGeneration
-            let status = try await runRustOperation(id: id, generation: nextRustGeneration) {
-                try rustCore.restart(id: id, generation: nextRustGeneration)
+            let status: TunnelStatus
+            if SSHCommand.isSSH(tunnel.command),
+               preStartChecker.requiresAutomaticRecoveryQuiescence {
+                guard let nextRustGeneration = beginRustOperation(for: id) else {
+                    throw HealthRecoveryError.lifecycleUnavailable
+                }
+                rustGeneration = nextRustGeneration
+                let stoppedStatus = try await runRustOperation(id: id, generation: nextRustGeneration) {
+                    try rustCore.stop(id: id, generation: nextRustGeneration)
+                }
+                guard stoppedStatus == .notLoaded,
+                      !Task.isCancelled,
+                      recoveryGenerations[id] == generation,
+                      isCurrentOperation(id, generation: operation) else {
+                    throw HealthRecoveryError.lifecycleUnavailable
+                }
+                updateRuntime { $0.setStatus(.notLoaded, for: id) }
+
+                try await preStartChecker.checkAsync(tunnel: tunnel)
+                guard !Task.isCancelled, recoveryGenerations[id] == generation else { return }
+                status = try await runRustOperation(id: id, generation: nextRustGeneration) {
+                    try rustCore.start(id: id, generation: nextRustGeneration)
+                }
+            } else {
+                try await preStartChecker.checkAsync(tunnel: tunnel)
+                guard !Task.isCancelled, recoveryGenerations[id] == generation else { return }
+                guard let nextRustGeneration = beginRustOperation(for: id) else {
+                    throw HealthRecoveryError.lifecycleUnavailable
+                }
+                rustGeneration = nextRustGeneration
+                status = try await runRustOperation(id: id, generation: nextRustGeneration) {
+                    try rustCore.restart(id: id, generation: nextRustGeneration)
+                }
             }
             guard isRunning(status),
                   recoveryGenerations[id] == generation,
@@ -613,6 +667,30 @@ public final class TunnelManager: ObservableObject {
         recoveryTasks[id] = nil
     }
 
+    private func beginStateRead() -> StateReadToken {
+        stateReadGeneration &+= 1
+        return StateReadToken(
+            readGeneration: stateReadGeneration,
+            mutationGeneration: stateMutationGeneration
+        )
+    }
+
+    private func isCurrentStateRead(_ token: StateReadToken) -> Bool {
+        token.readGeneration == stateReadGeneration &&
+            token.mutationGeneration == stateMutationGeneration
+    }
+
+    private func invalidateProbeResults() {
+        probeGeneration &+= 1
+        probeTask?.cancel()
+        probeTask = nil
+    }
+
+    private func invalidateStateReads() {
+        stateMutationGeneration &+= 1
+        invalidateProbeResults()
+    }
+
     private func resetHealthRecovery(for id: String, phase: HealthRecoveryState.Phase) {
         cancelRecovery(for: id)
         var state = healthRecoveryStates[id] ?? HealthRecoveryState()
@@ -630,6 +708,19 @@ public final class TunnelManager: ObservableObject {
     private func isRunning(_ status: TunnelStatus?) -> Bool {
         guard case .running? = status else { return false }
         return true
+    }
+
+    /// ECS 前置失败后，SSH 实例已被安全卸载，但恢复代次仍需沿用既有退避/熔断。
+    /// 只有当前 ECS checker 明确要求 quiescence 且已有失败恢复代次时，才允许
+    /// 停止态继续累计下一轮失败；手动停止或初始未运行隧道仍不会被自动拉起。
+    private func canRetryQuiescedRecovery(
+        for id: String,
+        tunnel: TunnelConfig,
+        state: HealthRecoveryState?
+    ) -> Bool {
+        guard SSHCommand.isSSH(tunnel.command),
+              preStartChecker.requiresAutomaticRecoveryQuiescence else { return false }
+        return (state?.recoveryAttempts ?? 0) > 0
     }
 
     // MARK: - 启停
@@ -776,6 +867,7 @@ public final class TunnelManager: ObservableObject {
 
     /// 应用退出时由 Rust owner 统一停止全部受管 launchd 隧道并关闭 handle。
     public func shutdownAsync() async {
+        invalidateStateReads()
         probeTask?.cancel()
         healthMonitorTask?.cancel()
         let monitorTask = healthMonitorTask
@@ -869,6 +961,7 @@ public final class TunnelManager: ObservableObject {
             cancelRecovery(for: id)
         }
         guard !runtimeState.busyIDs.contains(id) else { return nil }
+        invalidateStateReads()
         let generation = (operationGenerations[id] ?? 0) &+ 1
         operationGenerations[id] = generation
         updateRuntime { $0.setBusy(true, for: id) }
@@ -883,6 +976,7 @@ public final class TunnelManager: ObservableObject {
         guard operationGenerations[id] == generation else { return }
         updateRuntime { $0.setBusy(false, for: id) }
         rustOperationGenerations.removeValue(forKey: id)
+        invalidateStateReads()
     }
 
     private func beginRustOperation(for id: String) -> UInt64? {
@@ -908,6 +1002,12 @@ public final class TunnelManager: ObservableObject {
         }, onCancel: {
             try? rustCore.cancelOperation(id: id, generation: generation)
         })
+    }
+
+    private func applyStatusSnapshot(_ nextStatuses: [String: TunnelStatus]) {
+        let busyStatuses = runtimeState.statuses.filter { runtimeState.busyIDs.contains($0.key) }
+        let mergedStatuses = nextStatuses.merging(busyStatuses) { _, current in current }
+        updateRuntime { $0.setStatuses(mergedStatuses) }
     }
 
     private func isStaleRustOperation(_ error: Error) -> Bool {

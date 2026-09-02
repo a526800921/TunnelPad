@@ -26,12 +26,12 @@
 
 | 计划 | 状态 | 当前阶段 | 最后更新 | 依赖 | 证据 |
 |---|---|---|---|---|---|
-| [TunnelPad 隧道稳定性与健康恢复](plans/tunnelpad-stability.md) | 设计中 | 阶段 2 | 2026-09-02 | tunnelpad-v1, tunnelpad-code-quality-refactor, tunnelpad-rust-migration, ecs-dynamic-ssh-ip | [专项计划](plans/tunnelpad-stability.md)；[阶段 0 基线证据](data-quality/tunnelpad-stability-stage0-20260901.md)；[阶段 0 独立准入复核](data-quality/tunnelpad-stability-stage0-independent-review-contract-fixtures-20260901.md)；[阶段 1 Step 0](data-quality/tunnelpad-stability-stage1-step0-20260902.md)；[阶段 1 独立准入复核（r2）](data-quality/tunnelpad-stability-stage1-independent-review-20260902-r2.md)；[阶段 1 实施证据](data-quality/tunnelpad-stability-stage1-implementation-20260902.md)；[阶段 1 独立完成复核](data-quality/tunnelpad-stability-stage1-independent-completion-review-20260902.md)；[功能图谱审计](data-quality/tunnelpad-functional-graph-review-20260830.md) |
 
 ### 已完成
 
 | 计划 | 状态 | 当前阶段 | 最后更新 | 依赖 | 证据 |
 |---|---|---|---|---|---|
+| [TunnelPad 隧道稳定性与健康恢复](plans/tunnelpad-stability.md) | 已完成 | - | 2026-09-02 | tunnelpad-v1, tunnelpad-code-quality-refactor, tunnelpad-rust-migration, ecs-dynamic-ssh-ip | [阶段 2 总体独立完成复核](data-quality/tunnelpad-stability-stage2-independent-completion-review-20260902.md)；[阶段 3 独立完成复核](data-quality/tunnelpad-stability-stage3-independent-completion-review-20260902.md)；[阶段 3 Step 0](data-quality/tunnelpad-stability-stage3-step0-20260902.md) |
 | [TunnelPad v1 隧道管理应用](plans/tunnelpad-v1.md) | 已完成 | - | 2026-08-29 | - | [阶段 2 功能与验收记录](data-quality/tunnelpad-v1-stage2-features-20260829.md) |
 | [TunnelPad 界面优化](plans/tunnelpad-ui-refinements.md) | 已完成 | - | 2026-08-30 | tunnelpad-v1 | [阶段 1 证据](data-quality/tunnelpad-ui-refinements-stage1-20260829.md)；[阶段 2 证据](data-quality/tunnelpad-ui-refinements-stage2-20260829.md)；[阶段 3 与阶段 1 收尾证据](data-quality/tunnelpad-ui-refinements-stage3-20260830.md)；[阶段 4 证据](data-quality/tunnelpad-ui-refinements-stage4-20260830.md) |
 | [TunnelPad 代码质量重构](plans/tunnelpad-code-quality-refactor.md) | 已完成 | - | 2026-08-30 | tunnelpad-v1, tunnelpad-ui-refinements | [阶段 0 基线证据](data-quality/tunnelpad-code-quality-refactor-stage0-20260830.md)；[阶段 1 实施证据](data-quality/tunnelpad-code-quality-refactor-stage1-20260830.md)；[阶段 2–4 实施证据](data-quality/tunnelpad-code-quality-refactor-stage2-4-20260830.md)；[专项计划](plans/tunnelpad-code-quality-refactor.md) |
@@ -56,7 +56,7 @@
 5. `tunnelpad-rust-migration` 阶段 5 已完成并关闭；当前 Rust `launchd` owner、配置事实源和 Bundle ID 决策以专项计划及 ADR 为准。
 6. `tunnelpad-tunnel-remarks` 阶段 0–3 已完成；Rust Core 迁移阶段 5 已完成并确定 Rust 配置事实源，备注模型、双表单、列表副标题、差分、Release/AX 和回归证据已落盘。
 7. `tunnelpad-log-streaming` 阶段 0–3 已完成并通过独立复核；阶段 1 的 launchd 文件采集、事件、500 条缓存、8000 字符单行、2000 行文件保留和锁失败重试已通过 10/10 专项测试与 101/101 全量回归，阶段 2 的隔离 App 追加、关闭/重开、切换和滚动位置冒烟及阶段 3 的 Rust/Swift、Release、签名和治理门禁已通过。共享模块改动继续使用单一编辑窗口。
-8. `tunnelpad-stability` 阶段 0 和阶段 1 已完成，当前阶段 2 仍在设计中；阶段 1 的健康恢复、配置 fail-closed、代次/取消保护和 `launchd` `bootout` fail-closed 已通过独立完成复核，启动/退出收敛、ECS 运行时同步与跨层状态一致性留待阶段 2 自身 Step 0 和准入。日志计划阶段 0–3 已完成，不再构成稳定性前置；后续稳定性若修改 `TunnelManager`、`TunnelRuntimeState`、主面板或共享测试目录，仍使用单一编辑窗口，不覆盖日志计划已验收行为。
+8. `tunnelpad-stability` 阶段 0–3 已完成并通过各自独立复核；阶段 2 的 ECS 自动恢复、启动/退出资源收敛、跨层状态一致性和配置重载资源收敛切片均已完成，真实 App/launchd 生命周期与探针假死触发 ECS 自动恢复验收已通过；阶段 3 的隔离 demo、Release 产物、受控 App 和最终治理门禁也已通过，稳定性计划已关闭。日志计划阶段 0–3 已完成，不再构成稳定性前置；后续稳定性若修改 `TunnelManager`、`TunnelRuntimeState`、主面板或共享测试目录，仍使用单一编辑窗口，不覆盖日志计划已验收行为。
 
 ## 依赖关系
 
@@ -67,8 +67,8 @@
 | tunnelpad-ui-refinements | tunnelpad-v1 | 前置 v1 已完成；本计划不修改 config schema 与隧道启停语义，与 ecs-dynamic-ssh-ip 无依赖。 |
 | tunnelpad-code-quality-refactor | tunnelpad-v1, tunnelpad-ui-refinements | v1 提供现有运行契约；界面优化阶段 1–4 已完成，重构实现不与已验收 UI 行为并行修改；阶段 0–4 已完成。 |
 | tunnelpad-rust-migration | tunnelpad-v1, tunnelpad-ui-refinements, tunnelpad-code-quality-refactor | Rust Core 阶段 0–5 已完成；阶段 5 的唯一 owner 切换、真实隧道验证、删除后回归和独立收尾复核均已通过。 |
-| tunnelpad-stability | tunnelpad-v1, tunnelpad-code-quality-refactor, tunnelpad-rust-migration, ecs-dynamic-ssh-ip | 稳定性行为增强依赖 Rust Core 阶段 5 的唯一 owner，并复用 ECS 动态 SSH 阶段 2 的受管来源同步边界；阶段 0–1 已完成，当前阶段 2 设计中，日志计划已完成但共享实现仍须串行。 |
-| tunnelpad-log-streaming | tunnelpad-v1, tunnelpad-code-quality-refactor, tunnelpad-rust-migration, tunnelpad-stability（仅共享实现串行，不构成阶段 0 前置） | 日志事件流依赖 Rust Core 阶段 5 的最终 owner 和当前 `launchd` 范围；阶段 0 与 tunnelpad-stability 可并行，阶段 1–3 已完成并通过本计划自身 fixture、隔离 App 和发布门禁；后续若恢复稳定性实现，涉及共享模块仍保持单一编辑窗口。 |
+| tunnelpad-stability | tunnelpad-v1, tunnelpad-code-quality-refactor, tunnelpad-rust-migration, ecs-dynamic-ssh-ip | 稳定性行为增强依赖 Rust Core 阶段 5 的唯一 owner，并复用 ECS 动态 SSH 阶段 2 的受管来源同步边界；阶段 0–3 已完成并通过独立复核，隔离 demo、受控应用、Release 产物和治理门禁均已收口；日志计划已完成但共享实现仍须串行。 |
+| tunnelpad-log-streaming | tunnelpad-v1, tunnelpad-code-quality-refactor, tunnelpad-rust-migration, tunnelpad-stability（仅共享实现串行，不构成阶段 0 前置） | 日志事件流依赖 Rust Core 阶段 5 的最终 owner 和当前 `launchd` 范围；阶段 0–3 已完成并通过本计划自身 fixture、隔离 App 和发布门禁；稳定性阶段 2 四个当前切片、无运行中受管隧道的真实 App 验收及单条 `admin-tunnel` 真实生命周期验收已完成，共享实现仍保持单一编辑窗口。 |
 | tunnelpad-tunnel-remarks | tunnelpad-v1, tunnelpad-code-quality-refactor, tunnelpad-rust-migration | 备注字段依赖 Rust Core 阶段 5 确认的配置事实源；阶段 0–3 已完成并通过专项复核；与日志事件流共享侧栏文件，后续改动必须串行。 |
 
 ## 替代、合并和废弃
@@ -84,7 +84,7 @@
 | - | - | - | 否 | 已延后 |
 | 阶段 2 自动集成实施 | `ECSPreStartChecker` 已补齐 Finder/launchd 的 PATH/HOME 兜底；真实 App 启动/重启、负向失败隔离、恢复重试、探针和本机 SSH 闭环均已通过 | ecs-dynamic-ssh-ip 阶段 2 | 否 | 已完成 |
 | Rust Core 阶段 5 独立收尾复核 | 阶段 5 完成条件逐项核对；旧 Swift Core/app 实现已删除，删除后回归、最终反向引用审计和最新打包 App 实机验证已完成 | tunnelpad-rust-migration 阶段 5 | 否 | 已完成 |
-| TunnelPad 稳定性实现前置 | Rust Core 阶段 5、日志计划阶段 0–3、稳定性阶段 0–1 已完成；阶段 1 已完成，阶段 2 仍需自己的 Step 0 和独立准入 | tunnelpad-stability 阶段 2–3 | 否 | 已完成 |
+| TunnelPad 稳定性实现前置 | Rust Core 阶段 5、日志计划阶段 0–3、稳定性阶段 0–3 已完成并通过独立复核；阶段 2 四个切片、真实 App/launchd 生命周期和探针假死自动恢复验收已通过，阶段 3 隔离 demo、Release 和治理门禁已收口；未来 `app` 执行器仍另立计划 | tunnelpad-stability | 否 | 已完成 |
 | TunnelPad 日志事件流实现前置 | Rust Core、ECS 阶段 2 和备注阶段 1–3 已完成；日志计划阶段 0–3 已通过独立复核；Rust 50+1 差分、Swift 101/101、Release 构建、隔离 Release App 和治理门禁已通过 | tunnelpad-log-streaming 阶段 0–3 | 否 | 已完成 |
 | TunnelPad 隧道备注实现前置 | Rust Core 迁移阶段 5 已完成并确定 Rust 配置事实源；本计划阶段 0–3 已完成，备注专项完成复核通过 | tunnelpad-tunnel-remarks 阶段 1–3 | 否 | 已完成 |
 | - | - | - | 否 | 已完成 |
@@ -121,3 +121,20 @@
 | tunnelpad-stability | 阶段 1 准入 | [阶段 1 独立准入复核（r2）](data-quality/tunnelpad-stability-stage1-independent-review-20260902-r2.md)（Step 0、8 行矩阵、影响复核、验证/回滚边界和共享日志边界通过，达到“待实施标准”，2026-09-02） |
 | tunnelpad-stability | 阶段 1 实施 | [阶段 1 实施证据](data-quality/tunnelpad-stability-stage1-implementation-20260902.md)（后台监测、3 次失败恢复、10 次熔断停止、`keepAlive=false`、手动操作/删除取消、配置 fail-closed 和 `bootout` fail-closed 的隔离验证通过，2026-09-02） |
 | tunnelpad-stability | 阶段 1 完成复核 | [阶段 1 独立完成复核](data-quality/tunnelpad-stability-stage1-independent-completion-review-20260902.md)（9/9 专项测试、全量 Swift/Rust 回归、范围和安全边界核对通过；阶段 2 保持设计中，2026-09-02） |
+| tunnelpad-stability | 阶段 2 ECS 自动恢复切片准入 | [独立准入复核](data-quality/tunnelpad-stability-stage2-ecs-recovery-independent-review-20260902.md)（bootout-first、`notLoaded` 门禁、ECS fail-closed、影响/验证/回滚边界通过；后续阶段 2 切片不在范围内，2026-09-02） |
+| tunnelpad-stability | 阶段 2 ECS 自动恢复切片实施 | [实施证据](data-quality/tunnelpad-stability-stage2-ecs-recovery-implementation-20260902.md)（5/5 专项、123/123 Swift、Rust 51+1 和治理门禁通过；启动/退出与跨层一致性随后由各自切片补齐，2026-09-02） |
+| tunnelpad-stability | 阶段 2 启动/退出资源收敛切片准入 | [独立准入复核](data-quality/tunnelpad-stability-stage2-lifecycle-reconciliation-independent-review-20260902.md)（启动首轮状态发现、shutdown 单入口、逐条清理和失败/回滚边界达到“待实施”标准，2026-09-02） |
+| tunnelpad-stability | 阶段 2 启动/退出资源收敛切片实施 | [实施证据](data-quality/tunnelpad-stability-stage2-lifecycle-reconciliation-implementation-20260902.md)（启动 fixture 2/2、阶段 2 专项 7/7、Swift 125/125、Rust 53+1 和治理门禁通过；跨层一致性随后由独立切片补齐，2026-09-02） |
+| tunnelpad-stability | 阶段 2 启动/退出资源收敛切片完成复核 | [独立完成复核](data-quality/tunnelpad-stability-stage2-lifecycle-reconciliation-independent-completion-review-20260902.md)（当前仓库代码、启动/退出失败注入、专项与全量回归、治理和变更范围独立核对通过；仅关闭该切片，跨层一致性随后由独立切片补齐，2026-09-02） |
+| tunnelpad-stability | 阶段 2 跨层状态一致性切片 Step 0 | [Step 0 基线证据](data-quality/tunnelpad-stability-stage2-cross-layer-consistency-step0-20260902.md)；[独立准入复核](data-quality/tunnelpad-stability-stage2-cross-layer-consistency-independent-review-20260902.md)（统一结果门禁、busy 状态保护、C1–C8 矩阵和回滚边界已登记并达到“待实施”标准，2026-09-02） |
+| tunnelpad-stability | 阶段 2 跨层状态一致性切片实施 | [实施证据](data-quality/tunnelpad-stability-stage2-cross-layer-consistency-implementation-20260902.md)（迟到 snapshot/probe 结果门禁、生命周期失效、busy 状态保护；专项 11/11、Swift 129/129、Rust 53+1、治理和变更范围检查通过，2026-09-02） |
+| tunnelpad-stability | 阶段 2 跨层状态一致性切片完成复核 | [独立完成复核](data-quality/tunnelpad-stability-stage2-cross-layer-consistency-independent-completion-review-20260902.md)（C1–C3/C7 反证、当前代码、专项与全量回归、治理和变更范围独立核对通过；仅关闭该切片，阶段 2 整体仍在实施，2026-09-02） |
+| tunnelpad-stability | 阶段 2 真实 App 受控验收 | [真实 App 受控验收](data-quality/tunnelpad-stability-stage2-real-app-acceptance-20260902.md)（旧版 App 正常退出、当前 App 构建/签名/启动、`not_loaded` 状态发现、真实 `admin-tunnel` 启动/HTTP `401`、KeepAlive 重拉起、App 崩溃后重启发现、正常退出清理和无 App/label 残留通过；ECS 仅执行 `--check` 未写入，2026-09-02） |
+| tunnelpad-stability | 阶段 2 跨层状态一致性切片准入 | [独立准入复核](data-quality/tunnelpad-stability-stage2-cross-layer-consistency-independent-review-20260902.md)（异步快照/探针结果门禁、busy 状态保护、迟到结果失效和 C1–C8 矩阵达到“待实施”标准；2026-09-02） |
+| tunnelpad-stability | 阶段 2 配置重载资源收敛切片 Step 0 | [Step 0 基线证据](data-quality/tunnelpad-stability-stage2-config-reload-reconciliation-step0-20260902.md)；[独立准入复核](data-quality/tunnelpad-stability-stage2-config-reload-reconciliation-independent-review-20260902.md)（删除 label 先停止/复核再提交、失败保留旧 owner 配置、同 ID 参数修改下次显式重启生效；CfgR-1–CfgR-9 矩阵达到“待实施”标准，2026-09-02） |
+| tunnelpad-stability | 阶段 2 配置重载资源收敛切片实施 | [实施证据](data-quality/tunnelpad-stability-stage2-config-reload-reconciliation-implementation-20260902.md)（删除 label 先停止/复核再提交、候选失败保留旧 owner 配置、新增不自动启动、同 ID 参数不自动重启；CfgR-1–CfgR-9、Rust 62+1 和 Swift 129 回归通过，已通过独立完成复核，2026-09-02） |
+| tunnelpad-stability | 阶段 2 配置重载资源收敛切片完成复核 | [独立完成复核](data-quality/tunnelpad-stability-stage2-config-reload-reconciliation-independent-completion-review-20260902.md)（候选失败保留旧 owner 配置、删除 label 先停止/复核、同 ID 参数不自动重启；CfgR-1–CfgR-9、Rust 62+1、Swift 129、治理和 App 冒烟边界通过，2026-09-02） |
+| tunnelpad-stability | 阶段 2 真实探针假死/ECS 自动恢复验收 | [真实 App 受控验收](data-quality/tunnelpad-stability-stage2-real-app-acceptance-20260902.md#追加验收http-探针假死触发-ecs-自动恢复)（真实 PID 身份校验后 `SIGSTOP`；连续 3 次探针失败；`stop → ECSPreStartChecker.checkAsync → start`；同步日志 `already_current`；新 PID `15710` 与 HTTP `401`；清理后无 App/label/PID/端口残留，2026-09-02） |
+| tunnelpad-stability | 阶段 2 总体独立完成复核 | [独立完成复核](data-quality/tunnelpad-stability-stage2-independent-completion-review-20260902.md)（四个切片、真实 App/launchd 生命周期、探针假死触发 ECS 自动恢复、Swift/Rust、治理和环境清理均通过，阶段 3 保持设计中，2026-09-02） |
+| tunnelpad-stability | 阶段 3 Step 0 | [阶段 3 Step 0 证据](data-quality/tunnelpad-stability-stage3-step0-20260902.md)（隔离 demo、Release 产物、受控 App 和治理门禁矩阵已固定，尚未获得阶段 3 独立准入，2026-09-02） |
+| tunnelpad-stability | 阶段 3 独立准入 | [独立准入复核](data-quality/tunnelpad-stability-stage3-independent-review-20260902.md)（Step 0、样本矩阵、验证/回滚边界和阶段 2 前置均通过，达到“待实施”标准，2026-09-02） |

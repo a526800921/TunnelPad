@@ -2,8 +2,15 @@ import Foundation
 
 /// ECS 动态 SSH 同步前置检查。非 SSH 命令必须直接放行，不启动外部进程。
 protocol ECSPreStartChecking: Sendable {
+    /// 自动恢复前是否必须先卸载 launchd 实例，阻止 KeepAlive 绕过同步前置。
+    /// 默认 false，保持注入式非 ECS checker 与既有普通恢复路径兼容。
+    var requiresAutomaticRecoveryQuiescence: Bool { get }
     func check(tunnel: TunnelConfig) throws
     func checkAsync(tunnel: TunnelConfig) async throws
+}
+
+extension ECSPreStartChecking {
+    var requiresAutomaticRecoveryQuiescence: Bool { false }
 }
 
 /// 仅供 ECS 前置同步使用的进程协议，不扩展现有 launchctl ProcessRunning，
@@ -79,6 +86,8 @@ struct ECSPreStartChecker: ECSPreStartChecking, Sendable {
     let runner: any ECSPreflightProcessRunning
     let environment: [String: String]
     let timeout: TimeInterval
+
+    var requiresAutomaticRecoveryQuiescence: Bool { true }
 
     init(
         scriptURL: URL? = ECSPreStartChecker.defaultScriptURL(),

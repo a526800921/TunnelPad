@@ -180,6 +180,56 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
         self.ensure_open()?;
         let config = load_owner_config(&self.paths)?;
         validate_launchd_config(&config)?;
+
+        // 配置重载不能先丢失旧配置再处理已删除的 label。否则仍在运行的
+        // launchd 服务会脱离 owner，之后 shutdown/status 都无法再找到它。
+        // 先复制旧配置并按稳定顺序持有待删除隧道锁，避免与同一隧道的启停
+        // 交错；全部删除项收敛后才替换 owner 配置。
+        let previous = self
+            .config
+            .lock()
+            .expect("owner config mutex 不应中毒")
+            .clone();
+        let next_ids: std::collections::HashSet<_> =
+            config.tunnels.iter().map(|tunnel| tunnel.id.as_str()).collect();
+        let mut removed: Vec<_> = previous
+            .tunnels
+            .iter()
+            .filter(|tunnel| !next_ids.contains(tunnel.id.as_str()))
+            .cloned()
+            .collect();
+        removed.sort_by(|left, right| left.id.cmp(&right.id));
+        let locks: Vec<_> = removed.iter().map(|tunnel| self.lock_for(&tunnel.id)).collect();
+        let _guards: Vec<_> = locks
+            .iter()
+            .map(|lock| lock.lock().expect("owner tunnel mutex 不应中毒"))
+            .collect();
+
+        let mut first_error = None;
+        for tunnel in &removed {
+            let label = tunnel.launchd_label();
+            if self.launchd.status(&label) == TunnelStatus::NotLoaded {
+                continue;
+            }
+            if let Err(error) = self.launchd.bootout(&label) {
+                if first_error.is_none() {
+                    let mut failure = executor_error("配置刷新前停止", error);
+                    failure.message = format!("{}（label={label}）", failure.message);
+                    first_error = Some(failure);
+                }
+                continue;
+            }
+            if self.launchd.status(&label) != TunnelStatus::NotLoaded && first_error.is_none() {
+                first_error = Some(TpError::new(
+                    error_code::EXECUTOR,
+                    format!("配置刷新前停止后仍加载 launchd 服务：{label}"),
+                ));
+            }
+        }
+        if let Some(error) = first_error {
+            return Err(error);
+        }
+
         *self.config.lock().expect("owner config mutex 不应中毒") = config.clone();
         Ok(config)
     }
@@ -513,10 +563,13 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
         })
     }
 
-    /// 退出时先把所有隧道锁按稳定顺序持有，再关门并逐条 bootout；这样不会
-    /// 让新生命周期操作在 shutdown 之后进入。
+    /// 退出时先原子地关闭 owner、取消在途操作，再把所有隧道锁按稳定顺序
+    /// 持有并逐条 bootout；单条清理失败不会截断后续 label，重复 shutdown
+    /// 也不会再次产生 launchd 副作用。
     pub fn shutdown(&self) -> Result<Value, TpError> {
-        self.ensure_open()?;
+        if self.closed.swap(true, Ordering::AcqRel) {
+            return Err(TpError::new(error_code::OWNER_CLOSED, "Rust Core 已关闭"));
+        }
         self.cancel_all_operations();
         let ids = {
             let mut ids: Vec<String> = self
@@ -535,20 +588,37 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
             .iter()
             .map(|lock| lock.lock().expect("owner tunnel mutex 不应中毒"))
             .collect();
-        self.closed.store(true, Ordering::Release);
-
         let mut stopped = 0;
+        let mut first_error = None;
         for id in ids {
             let tunnel = self.tunnel(&id)?;
-            if self.launchd.status(&tunnel.launchd_label()) != TunnelStatus::NotLoaded {
-                if self
-                    .launchd
-                    .bootout(&tunnel.launchd_label())
-                    .map_err(|error| executor_error("退出清理", error))?
-                {
-                    stopped += 1;
+            let label = tunnel.launchd_label();
+            if self.launchd.status(&label) != TunnelStatus::NotLoaded {
+                match self.launchd.bootout(&label) {
+                    Ok(_) => {
+                        if self.launchd.status(&label) == TunnelStatus::NotLoaded {
+                            stopped += 1;
+                        } else if first_error.is_none() {
+                            first_error = Some(TpError::new(
+                                error_code::EXECUTOR,
+                                format!("退出清理后仍加载 launchd 服务：{label}"),
+                            ));
+                        }
+                    }
+                    Err(error) => {
+                        if first_error.is_none() {
+                            let mut failure = executor_error("退出清理", error);
+                            failure.message = format!("{}（label={label}）", failure.message);
+                            first_error = Some(failure);
+                        }
+                        // 即使当前 label 失败，也继续处理剩余配置中的受管服务。
+                        // 失败结果在所有 label 尝试完成后统一返回。
+                    }
                 }
             }
+        }
+        if let Some(error) = first_error {
+            return Err(error);
         }
         Ok(json!({ "operation": "shutdown", "stopped": stopped }))
     }
@@ -890,6 +960,23 @@ mod tests {
         }
     }
 
+    fn config_with_tunnels(tunnels: Vec<TunnelConfig>) -> AppConfig {
+        AppConfig { version: 1, tunnels }
+    }
+
+    fn tunnel(id: &str, command: &str) -> TunnelConfig {
+        TunnelConfig {
+            id: id.into(),
+            name: id.into(),
+            remark: String::new(),
+            command: vec![command.into()],
+            executor: ExecutorKind::Launchd,
+            keep_alive: true,
+            throttle_interval: 10,
+            probe: None,
+        }
+    }
+
     fn owner(home: &Path, ids: &[&str]) -> CoreOwner<LaunchCtlExecutor<FakeRunner>> {
         let paths = TunnelPaths::new(home);
         ConfigStore::new(paths.clone()).save(&config(ids)).unwrap();
@@ -929,9 +1016,257 @@ mod tests {
     }
 
     #[test]
+    fn reload_config_stops_removed_loaded_label_before_commit() {
+        let home = temp_home("reload-removed-success");
+        let runner = ScriptedRunner::new(vec![running(100), process(0, "", ""), not_loaded()]);
+        let owner = scripted_owner(&home, &["keep", "remove"], runner.clone());
+        let candidate = config_with_tunnels(vec![tunnel("keep", "/usr/bin/true")]);
+        ConfigStore::new(owner.paths().clone())
+            .save(&candidate)
+            .unwrap();
+
+        let loaded = owner.load_config().unwrap();
+
+        assert_eq!(loaded.tunnels.iter().map(|item| item.id.as_str()).collect::<Vec<_>>(), vec!["keep"]);
+        assert_eq!(
+            runner
+                .calls()
+                .iter()
+                .map(|call| call[0].as_str())
+                .collect::<Vec<_>>(),
+            vec!["print", "bootout", "print"]
+        );
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn reload_config_commits_new_tunnels_without_starting_them() {
+        let home = temp_home("reload-added");
+        let runner = ScriptedRunner::new(vec![]);
+        let owner = scripted_owner(&home, &["keep"], runner.clone());
+        let candidate = config_with_tunnels(vec![
+            tunnel("keep", "/usr/bin/true"),
+            tunnel("added", "/usr/bin/added"),
+        ]);
+        ConfigStore::new(owner.paths().clone())
+            .save(&candidate)
+            .unwrap();
+
+        let loaded = owner.load_config().unwrap();
+
+        assert_eq!(loaded.tunnels.len(), 2);
+        assert_eq!(owner.config.lock().unwrap().tunnels.len(), 2);
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn reload_config_stops_unloaded_removed_label_without_bootout() {
+        let home = temp_home("reload-removed-unloaded");
+        let runner = ScriptedRunner::new(vec![not_loaded()]);
+        let owner = scripted_owner(&home, &["remove"], runner.clone());
+        let candidate = config_with_tunnels(vec![]);
+        ConfigStore::new(owner.paths().clone())
+            .save(&candidate)
+            .unwrap();
+
+        let loaded = owner.load_config().unwrap();
+
+        assert!(loaded.tunnels.is_empty());
+        assert_eq!(
+            runner
+                .calls()
+                .iter()
+                .map(|call| call[0].as_str())
+                .collect::<Vec<_>>(),
+            vec!["print"]
+        );
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn reload_config_rejects_stop_failure_and_retains_old_owner_config() {
+        let home = temp_home("reload-removed-error");
+        let runner = ScriptedRunner::new(vec![
+            running(101),
+            process(8, "", "Operation not permitted"),
+        ]);
+        let owner = scripted_owner(&home, &["keep", "remove"], runner.clone());
+        let candidate = config_with_tunnels(vec![tunnel("keep", "/usr/bin/true")]);
+        ConfigStore::new(owner.paths().clone())
+            .save(&candidate)
+            .unwrap();
+
+        let error = owner.load_config().unwrap_err();
+
+        assert_eq!(error.code, error_code::EXECUTOR);
+        assert!(error.message.contains("配置刷新前停止"));
+        assert_eq!(
+            owner
+                .config
+                .lock()
+                .unwrap()
+                .tunnels
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["keep", "remove"]
+        );
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn reload_config_rejects_label_that_remains_loaded_after_bootout() {
+        let home = temp_home("reload-removed-still-loaded");
+        let runner = ScriptedRunner::new(vec![running(102), process(0, "", ""), running(103)]);
+        let owner = scripted_owner(&home, &["remove"], runner.clone());
+        let candidate = config_with_tunnels(vec![]);
+        ConfigStore::new(owner.paths().clone())
+            .save(&candidate)
+            .unwrap();
+
+        let error = owner.load_config().unwrap_err();
+
+        assert_eq!(error.code, error_code::EXECUTOR);
+        assert!(error.message.contains("仍加载"));
+        assert_eq!(owner.config.lock().unwrap().tunnels.len(), 1);
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn reload_config_attempts_all_removed_labels_before_rejecting_candidate() {
+        let home = temp_home("reload-removed-partial");
+        let runner = ScriptedRunner::new(vec![
+            running(201),
+            process(0, "", ""),
+            not_loaded(),
+            running(202),
+            process(9, "", "Operation not permitted"),
+        ]);
+        let owner = scripted_owner(&home, &["first", "second"], runner.clone());
+        let candidate = config_with_tunnels(vec![]);
+        ConfigStore::new(owner.paths().clone())
+            .save(&candidate)
+            .unwrap();
+
+        let error = owner.load_config().unwrap_err();
+
+        assert_eq!(error.code, error_code::EXECUTOR);
+        assert_eq!(owner.config.lock().unwrap().tunnels.len(), 2);
+        assert_eq!(
+            runner
+                .calls()
+                .iter()
+                .map(|call| call[0].as_str())
+                .collect::<Vec<_>>(),
+            vec!["print", "bootout", "print", "print", "bootout"]
+        );
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn reload_config_keeps_same_loaded_label_without_automatic_restart() {
+        let home = temp_home("reload-same-id-change");
+        let old = tunnel("same", "/usr/bin/old");
+        let runner = ScriptedRunner::new(vec![]);
+        let paths = TunnelPaths::new(&home);
+        ConfigStore::new(paths.clone())
+            .save(&config_with_tunnels(vec![old]))
+            .unwrap();
+        let owner = CoreOwner::new(paths, LaunchCtlExecutor::new(runner.clone(), 501)).unwrap();
+
+        let candidate = config_with_tunnels(vec![tunnel("same", "/usr/bin/new")]);
+        ConfigStore::new(owner.paths().clone())
+            .save(&candidate)
+            .unwrap();
+        let loaded = owner.load_config().unwrap();
+
+        assert_eq!(loaded.tunnels[0].command, vec!["/usr/bin/new"]);
+        assert_eq!(owner.config.lock().unwrap().tunnels[0].command, vec!["/usr/bin/new"]);
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn reload_config_rejects_invalid_candidate_without_lifecycle_side_effects() {
+        let home = temp_home("reload-invalid");
+        let runner = ScriptedRunner::new(vec![]);
+        let owner = scripted_owner(&home, &["keep"], runner.clone());
+        fs::write(
+            owner.paths().config_url(),
+            br#"{"version":2,"tunnels":[]}"#,
+        )
+        .unwrap();
+
+        let error = owner.load_config().unwrap_err();
+
+        assert_eq!(error.code, error_code::SCHEMA_VERSION);
+        assert_eq!(owner.config.lock().unwrap().tunnels.len(), 1);
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn reload_config_waits_for_same_tunnel_lifecycle_lock() {
+        let home = temp_home("reload-lock");
+        let paths = TunnelPaths::new(&home);
+        let initial = config_with_tunnels(vec![tunnel("same", "/usr/bin/true")]);
+        ConfigStore::new(paths.clone()).save(&initial).unwrap();
+        let (runner, entered_rx) = BlockingRunner::new();
+        let owner = Arc::new(CoreOwner::new(
+            paths,
+            LaunchCtlExecutor::new(runner, 501),
+        ).unwrap());
+        let generation = owner.begin("same").unwrap()["generation"]
+            .as_u64()
+            .unwrap();
+        let lifecycle_owner = owner.clone();
+        let lifecycle = thread::spawn(move || {
+            lifecycle_owner.execute(CoreCommand::Start {
+                id: "same".into(),
+                generation: Some(generation),
+            })
+        });
+        entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        ConfigStore::new(owner.paths().clone())
+            .save(&config_with_tunnels(vec![]))
+            .unwrap();
+        let reload_owner = owner.clone();
+        let reload = thread::spawn(move || reload_owner.load_config());
+        thread::sleep(Duration::from_millis(20));
+        owner.cancel("same", generation).unwrap();
+
+        let lifecycle = lifecycle.join().unwrap();
+        assert!(!lifecycle.ok);
+        let loaded = reload.join().unwrap().unwrap();
+        assert!(loaded.tunnels.is_empty());
+        assert!(owner.config.lock().unwrap().tunnels.is_empty());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
     fn lifecycle_and_shutdown_are_json_owned() {
         let home = temp_home("lifecycle");
-        let owner = owner(&home, &["admin-tunnel", "reverse-ssh"]);
+        let runner = ScriptedRunner::new(vec![
+            not_loaded(),
+            process(0, "", ""),
+            running(123),
+            running(456),
+            running(789),
+            running(321),
+            process(0, "", ""),
+            not_loaded(),
+            running(654),
+            process(0, "", ""),
+            not_loaded(),
+        ]);
+        let owner = scripted_owner(&home, &["admin-tunnel", "reverse-ssh"], runner.clone());
         let start = owner
             .execute_json(r#"{"op":"start","id":"admin-tunnel"}"#)
             .unwrap();
@@ -949,6 +1284,11 @@ mod tests {
             serde_json::from_str::<Value>(&shutdown).unwrap()["result"]["operation"],
             "shutdown"
         );
+        assert_eq!(
+            serde_json::from_str::<Value>(&shutdown).unwrap()["result"]["stopped"],
+            2
+        );
+        runner.assert_exhausted();
         let after = owner
             .execute_json(r#"{"op":"status","id":"admin-tunnel"}"#)
             .unwrap();
@@ -1019,6 +1359,50 @@ mod tests {
         assert!(!calls
             .iter()
             .any(|arguments| arguments.first().map(String::as_str) == Some("bootout")));
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn shutdown_attempts_all_loaded_services() {
+        let home = temp_home("shutdown-continues-after-error");
+        let runner = ScriptedRunner::new(vec![
+            running(101),
+            process(8, "", "Operation not permitted"),
+            running(202),
+            process(0, "", ""),
+            not_loaded(),
+        ]);
+        let owner = scripted_owner(&home, &["first", "second"], runner.clone());
+
+        let error = owner.shutdown().unwrap_err();
+
+        assert_eq!(error.code, error_code::EXECUTOR);
+        assert!(error.message.contains("label=com.jafish.tunnelpad.first"));
+        assert_eq!(
+            runner
+                .calls()
+                .iter()
+                .map(|call| call[0].as_str())
+                .collect::<Vec<_>>(),
+            vec!["print", "bootout", "print", "bootout", "print"],
+            "第一条 bootout 失败后仍必须继续清理后续服务"
+        );
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn shutdown_is_single_entry() {
+        let home = temp_home("shutdown-single-entry");
+        let runner = ScriptedRunner::new(vec![running(303), process(0, "", ""), not_loaded()]);
+        let owner = scripted_owner(&home, &["single"], runner.clone());
+
+        owner.shutdown().unwrap();
+        let error = owner.shutdown().unwrap_err();
+
+        assert_eq!(error.code, error_code::OWNER_CLOSED);
+        assert_eq!(runner.calls().len(), 3, "重复 shutdown 不得重复查询或 bootout");
+        runner.assert_exhausted();
         let _ = fs::remove_dir_all(home);
     }
 
@@ -1328,7 +1712,12 @@ mod tests {
         let _ = fs::remove_dir_all(home);
 
         let home = temp_home("matrix-shutdown");
-        let runner = ScriptedRunner::new(vec![running(654), process(0, "", ""), not_loaded()]);
+        let runner = ScriptedRunner::new(vec![
+            running(654),
+            process(0, "", ""),
+            not_loaded(),
+            not_loaded(),
+        ]);
         let owner = scripted_owner(&home, &["loaded", "unloaded"], runner.clone());
         let result = owner.shutdown().unwrap();
         assert_eq!(result["operation"], "shutdown");
@@ -1339,7 +1728,7 @@ mod tests {
                 .iter()
                 .map(|call| call[0].as_str())
                 .collect::<Vec<_>>(),
-            vec!["print", "bootout", "print"]
+            vec!["print", "bootout", "print", "print"]
         );
         runner.assert_exhausted();
         let _ = fs::remove_dir_all(home);
