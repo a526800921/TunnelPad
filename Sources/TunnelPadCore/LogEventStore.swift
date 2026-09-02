@@ -201,6 +201,44 @@ enum LogFileRetention {
         }
         return true
     }
+
+    /// 原位清空日志文件，保持文件身份、路径和现有 watcher 不变。
+    @discardableResult
+    static func clearInPlace(of url: URL) throws -> Bool {
+        guard FileManager.default.fileExists(atPath: url.path) else { return false }
+        let handle: FileHandle
+        do {
+            handle = try FileHandle(forUpdating: url)
+        } catch {
+            throw LogEventStoreError.io(String(describing: error))
+        }
+        defer { try? handle.close() }
+        guard flock(handle.fileDescriptor, LOCK_EX | LOCK_NB) == 0 else {
+            throw LogEventStoreError.lockUnavailable
+        }
+        defer { _ = flock(handle.fileDescriptor, LOCK_UN) }
+
+        try handle.seek(toOffset: 0)
+        let original = try handle.readToEnd() ?? Data()
+        guard !original.isEmpty else { return true }
+
+        do {
+            try handle.seek(toOffset: 0)
+            try handle.truncate(atOffset: 0)
+            try handle.synchronize()
+        } catch {
+            do {
+                try handle.seek(toOffset: 0)
+                try handle.write(contentsOf: original)
+                try handle.truncate(atOffset: UInt64(original.count))
+                try handle.synchronize()
+            } catch {
+                // 保留首个清空错误；恢复失败也不能报告清空成功。
+            }
+            throw LogEventStoreError.io(String(describing: error))
+        }
+        return true
+    }
 }
 
 /// launchd 日志文件的后台增量采集、每隧道缓存和事件发布 owner。
@@ -284,6 +322,53 @@ public actor LogEventStore {
         ensureState(tunnelID)
         ensureWatcher(tunnelID)
         return refreshState(tunnelID, publish: true)
+    }
+
+    /// 原位清空指定隧道日志，保留 watcher、文件路径和订阅者；显式清空总会推进版本。
+    @discardableResult
+    public func clear(for tunnelID: String) -> LogSnapshot {
+        guard !isShutdown else {
+            return LogSnapshot(tunnelID: tunnelID, version: 0, text: "", status: .error("日志采集器已关闭"))
+        }
+        ensureState(tunnelID)
+        ensureWatcher(tunnelID)
+        var state = states[tunnelID]!
+        let previous = state.snapshot
+        let url = logURL(for: tunnelID)
+
+        do {
+            _ = try LogFileRetention.clearInPlace(of: url)
+            state.parser.reset()
+            state.offset = 0
+            state.identity = nil
+            let status: LogFileStatus = FileManager.default.fileExists(atPath: url.path) ? .available : .missing
+            let snapshot = LogSnapshot(
+                tunnelID: tunnelID,
+                version: previous.version &+ 1,
+                text: "",
+                status: status
+            )
+            let event = LogEvent(
+                tunnelID: tunnelID,
+                version: snapshot.version,
+                appendedText: "",
+                snapshot: snapshot
+            )
+            for subscriber in state.subscribers.values { subscriber.yield(event) }
+            state.snapshot = snapshot
+        } catch {
+            state.snapshot = nextSnapshot(
+                id: tunnelID,
+                previous: previous,
+                text: "",
+                status: .error(String(describing: error)),
+                appendedText: "",
+                state: &state,
+                publish: true
+            )
+        }
+        states[tunnelID] = state
+        return state.snapshot
     }
 
     /// 兼容旧 fixture 的一次显式采集入口。

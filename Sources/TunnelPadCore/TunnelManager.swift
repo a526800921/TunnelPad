@@ -126,6 +126,12 @@ public final class TunnelManager: ObservableObject {
         await logStore.refresh(for: tunnelID)
     }
 
+    /// 通过日志 owner 原位清空指定隧道日志；不删除配置、plist、隧道或 watcher。
+    @discardableResult
+    public func clearLog(for tunnelID: String) async -> LogSnapshot {
+        await logStore.clear(for: tunnelID)
+    }
+
     /// 手动编辑 config.json 后重新加载；丢弃已移除隧道的状态与探针缓存。
     public func reloadConfig() {
         invalidateStateReads()
@@ -744,9 +750,10 @@ public final class TunnelManager: ObservableObject {
     }
 
     /// 异步兼容入口，供 UI 在不阻塞主线程的情况下执行启动。
-    public func startAsync(_ id: String) async {
-        guard let tunnel = tunnel(id: id) else { return }
-        guard let operation = beginOperation(for: id) else { return }
+    @discardableResult
+    public func startAsync(_ id: String) async -> TunnelOperationResult {
+        guard let tunnel = tunnel(id: id) else { return .notFound }
+        guard let operation = beginOperation(for: id) else { return .inProgress }
         defer { endOperation(for: id, generation: operation) }
         resetHealthRecovery(for: id, phase: .monitoring)
 
@@ -754,24 +761,27 @@ public final class TunnelManager: ObservableObject {
         let rustCore = self.rustCore
         do {
             try await preStartChecker.checkAsync(tunnel: tunnel)
-            guard !Task.isCancelled else { return }
-            guard let rustGeneration = beginRustOperation(for: id) else { return }
+            guard !Task.isCancelled else { return .failed }
+            guard let rustGeneration = beginRustOperation(for: id) else { return .failed }
             let status = try await runRustOperation(id: id, generation: rustGeneration) {
                 try rustCore.start(id: id, generation: rustGeneration)
             }
-            guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return }
+            guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return .failed }
             updateRuntime { $0.setStatus(status, for: id) }
             lastMessage = "「\(tunnel.name)」已启动"
             await refreshAsync()
+            return .completed(status: status)
         } catch is CancellationError {
-            return
+            return .failed
         } catch let error as ECSPreStartError {
             if isCurrentOperation(id, generation: operation) {
                 lastError = "启动「\(tunnel.name)」失败：\(error.errorDescription ?? "ECS 公网 IP 同步失败")"
             }
+            return .failed
         } catch {
-            if isStaleRustOperation(error) { return }
+            if isStaleRustOperation(error) { return .failed }
             lastError = "启动「\(tunnel.name)」失败：\(error)"
+            return .failed
         }
     }
 
@@ -791,27 +801,30 @@ public final class TunnelManager: ObservableObject {
     }
 
     /// 异步兼容入口，供 UI 在不阻塞主线程的情况下执行停止。
-    public func stopAsync(_ id: String) async {
-        guard let tunnel = tunnel(id: id) else { return }
-        guard let operation = beginOperation(for: id) else { return }
+    @discardableResult
+    public func stopAsync(_ id: String) async -> TunnelOperationResult {
+        guard let tunnel = tunnel(id: id) else { return .notFound }
+        guard let operation = beginOperation(for: id) else { return .inProgress }
         defer { endOperation(for: id, generation: operation) }
         resetHealthRecovery(for: id, phase: .manuallyStopped)
 
-        guard let rustGeneration = beginRustOperation(for: id) else { return }
+        guard let rustGeneration = beginRustOperation(for: id) else { return .failed }
         let rustCore = self.rustCore
         do {
             let status = try await runRustOperation(id: id, generation: rustGeneration) {
                 try rustCore.stop(id: id, generation: rustGeneration)
             }
-            guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return }
+            guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return .failed }
             updateRuntime { $0.setStatus(status, for: id) }
             lastMessage = "「\(tunnel.name)」已停止"
             await refreshAsync()
+            return .completed(status: status)
         } catch is CancellationError {
-            return
+            return .failed
         } catch {
-            if isStaleRustOperation(error) { return }
+            if isStaleRustOperation(error) { return .failed }
             lastError = "停止「\(tunnel.name)」失败：\(error)"
+            return .failed
         }
     }
 
@@ -834,9 +847,10 @@ public final class TunnelManager: ObservableObject {
     }
 
     /// 异步兼容入口，供 UI 在不阻塞主线程的情况下执行重启。
-    public func restartAsync(_ id: String) async {
-        guard let tunnel = tunnel(id: id) else { return }
-        guard let operation = beginOperation(for: id) else { return }
+    @discardableResult
+    public func restartAsync(_ id: String) async -> TunnelOperationResult {
+        guard let tunnel = tunnel(id: id) else { return .notFound }
+        guard let operation = beginOperation(for: id) else { return .inProgress }
         defer { endOperation(for: id, generation: operation) }
         resetHealthRecovery(for: id, phase: .monitoring)
 
@@ -844,24 +858,27 @@ public final class TunnelManager: ObservableObject {
         let rustCore = self.rustCore
         do {
             try await preStartChecker.checkAsync(tunnel: tunnel)
-            guard !Task.isCancelled else { return }
-            guard let rustGeneration = beginRustOperation(for: id) else { return }
+            guard !Task.isCancelled else { return .failed }
+            guard let rustGeneration = beginRustOperation(for: id) else { return .failed }
             let status = try await runRustOperation(id: id, generation: rustGeneration) {
                 try rustCore.restart(id: id, generation: rustGeneration)
             }
-            guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return }
+            guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return .failed }
             updateRuntime { $0.setStatus(status, for: id) }
             lastMessage = "「\(tunnel.name)」已重启"
             await refreshAsync()
+            return .completed(status: status)
         } catch is CancellationError {
-            return
+            return .failed
         } catch let error as ECSPreStartError {
             if isCurrentOperation(id, generation: operation) {
                 lastError = "重启「\(tunnel.name)」失败：\(error.errorDescription ?? "ECS 公网 IP 同步失败")"
             }
+            return .failed
         } catch {
-            if isStaleRustOperation(error) { return }
+            if isStaleRustOperation(error) { return .failed }
             lastError = "重启「\(tunnel.name)」失败：\(error)"
+            return .failed
         }
     }
 

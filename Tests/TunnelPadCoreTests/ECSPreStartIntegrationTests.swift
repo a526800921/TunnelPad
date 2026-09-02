@@ -43,10 +43,11 @@ final class ECSPreStartIntegrationTests: XCTestCase {
             preStartChecker: checker
         )
 
-        await manager.restartAsync(tunnel.id)
+        let result = await manager.restartAsync(tunnel.id)
 
         XCTAssertEqual(order.values, ["preflight-async", "begin", "restart"])
         XCTAssertEqual(checker.asyncIDs, [tunnel.id])
+        XCTAssertEqual(result, .completed(status: .running(pid: 100)))
         XCTAssertNil(manager.lastError)
     }
 

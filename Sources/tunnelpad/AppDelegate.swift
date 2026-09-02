@@ -8,6 +8,7 @@ import TunnelPadCore
 final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     let manager: TunnelManager
+    private var apiServer: TunnelAPIServer?
     private var menuBarController: MenuBarController?
     private var mainWindow: NSWindow?
     private var isTerminating = false
@@ -22,6 +23,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Shutdown.installSignalHandlers(owner: manager.shutdownHandle)
+        let apiServer = TunnelAPIServer(backend: TunnelManagerAPIBackend(manager: manager))
+        self.apiServer = apiServer
+        do {
+            try apiServer.start()
+        } catch {
+            // 与 ModelPad 一致：端口冲突只记录，App 继续运行，不换端口、不重试。
+            print("[TunnelPad] API 服务启动失败：\(error)")
+        }
         menuBarController = MenuBarController(manager: manager) { [weak self] in
             self?.showMainWindow()
         }
@@ -38,6 +47,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         isTerminating = true
 
         Task { @MainActor in
+            let apiServer = self.apiServer
+            await Task.detached(priority: .userInitiated) {
+                try? apiServer?.stop()
+            }.value
             await manager.shutdownAsync()
             sender.reply(toApplicationShouldTerminate: true)
         }

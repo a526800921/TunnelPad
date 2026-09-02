@@ -187,6 +187,26 @@ final class LogEventStoreTests: XCTestCase {
         XCTAssertEqual(snapshot.text.count, 8_000)
     }
 
+    func testClearTruncatesInPlaceAndPublishesMonotonicSnapshot() async throws {
+        let fixture = try LogEventFixture(id: "clear")
+        defer { fixture.cleanup() }
+        try fixture.write("before\n")
+
+        let store = LogEventStore(paths: fixture.paths, pollIntervalNanoseconds: 60_000_000_000)
+        let session = await store.openSession(for: fixture.id)
+        let cleared = await store.clear(for: fixture.id)
+
+        XCTAssertEqual(cleared.text, "")
+        XCTAssertEqual(cleared.status, .available)
+        XCTAssertGreaterThan(cleared.version, session.snapshot.version)
+        XCTAssertEqual(try String(contentsOf: fixture.logURL, encoding: .utf8), "")
+
+        let event = try await nextEvent(from: session.events)
+        XCTAssertEqual(event.snapshot, cleared)
+        XCTAssertEqual(event.appendedText, "")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.logURL.path))
+    }
+
     private func nextEvent(
         from stream: AsyncStream<LogEvent>,
         timeoutNanoseconds: UInt64 = 1_000_000_000
