@@ -166,3 +166,102 @@ pub extern "C" fn tp_core_last_error() -> *mut c_char {
         .map(CString::into_raw)
         .unwrap_or(ptr::null_mut())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+    use std::fs;
+
+    fn temp_home(label: &str) -> PathBuf {
+        let home =
+            std::env::temp_dir().join(format!("tp-owner-ffi-{label}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&home);
+        fs::create_dir_all(&home).unwrap();
+        home
+    }
+
+    unsafe fn take_string(raw: *mut c_char) -> String {
+        assert!(!raw.is_null());
+        let value = CStr::from_ptr(raw).to_string_lossy().into_owned();
+        crate::ffi::tp_string_free(raw);
+        value
+    }
+
+    unsafe fn take_error() -> Value {
+        let raw = tp_core_last_error();
+        let value = take_string(raw);
+        serde_json::from_str(&value).unwrap()
+    }
+
+    #[test]
+    fn core_ffi_roundtrip_and_shutdown_lifecycle() {
+        let home = temp_home("roundtrip");
+        let home_input = CString::new(home.to_str().unwrap()).unwrap();
+        let handle = unsafe { tp_core_create(home_input.as_ptr()) };
+        assert!(!handle.is_null());
+        assert!(tp_core_last_error().is_null());
+
+        let snapshot_input = CString::new(r#"{"op":"snapshot"}"#).unwrap();
+        let snapshot = unsafe { take_string(tp_core_command(handle, snapshot_input.as_ptr())) };
+        let snapshot: Value = serde_json::from_str(&snapshot).unwrap();
+        assert_eq!(snapshot["ok"], true);
+        assert_eq!(
+            snapshot["result"]["config"]["tunnels"],
+            Value::Array(vec![])
+        );
+
+        let shutdown = unsafe { take_string(tp_core_shutdown(handle)) };
+        let shutdown: Value = serde_json::from_str(&shutdown).unwrap();
+        assert_eq!(shutdown["ok"], true);
+        assert_eq!(shutdown["result"]["operation"], "shutdown");
+
+        unsafe {
+            tp_core_destroy(handle);
+            tp_core_destroy(ptr::null_mut());
+        }
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn core_ffi_rejects_null_and_non_utf8_inputs() {
+        let raw = unsafe { tp_core_command(ptr::null_mut(), ptr::null()) };
+        assert!(raw.is_null());
+        let error = unsafe { take_error() };
+        assert_eq!(error["code"], error_code::INVALID_ARGUMENT);
+
+        let invalid_home = unsafe { CStr::from_bytes_with_nul_unchecked(b"\xff\xfe\0") };
+        let handle = unsafe { tp_core_create(invalid_home.as_ptr()) };
+        assert!(handle.is_null());
+        let error = unsafe { take_error() };
+        assert_eq!(error["code"], error_code::INVALID_ARGUMENT);
+
+        let raw = unsafe { tp_core_shutdown(ptr::null_mut()) };
+        assert!(raw.is_null());
+        let error = unsafe { take_error() };
+        assert_eq!(error["code"], error_code::INVALID_ARGUMENT);
+    }
+
+    #[test]
+    fn core_ffi_command_error_is_cleared_by_success() {
+        let home = temp_home("command-error");
+        let home_input = CString::new(home.to_str().unwrap()).unwrap();
+        let handle = unsafe { tp_core_create(home_input.as_ptr()) };
+        assert!(!handle.is_null());
+
+        let invalid_command = CString::new("not-json").unwrap();
+        let raw = unsafe { tp_core_command(handle, invalid_command.as_ptr()) };
+        assert!(raw.is_null());
+        let error = unsafe { take_error() };
+        assert_eq!(error["code"], error_code::OWNER_COMMAND);
+
+        let snapshot_input = CString::new(r#"{"op":"snapshot"}"#).unwrap();
+        let raw = unsafe { tp_core_command(handle, snapshot_input.as_ptr()) };
+        let snapshot = unsafe { take_string(raw) };
+        assert!(snapshot.contains("\"ok\":true"));
+        assert!(tp_core_last_error().is_null());
+
+        unsafe { tp_core_destroy(handle) };
+        let _ = fs::remove_dir_all(home);
+    }
+}

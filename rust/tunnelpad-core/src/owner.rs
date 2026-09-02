@@ -564,63 +564,73 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
     }
 
     /// 退出时先原子地关闭 owner、取消在途操作，再把所有隧道锁按稳定顺序
-    /// 持有并逐条 bootout；单条清理失败不会截断后续 label，重复 shutdown
-    /// 也不会再次产生 launchd 副作用。
+    /// 持有并逐条 bootout；单条清理失败不会截断后续 label。清理失败时
+    /// 释放 closed 门闩，允许调用方再次尝试收敛未完成的服务；成功后重复
+    /// shutdown 仍不会再次产生 launchd 副作用。
     pub fn shutdown(&self) -> Result<Value, TpError> {
         if self.closed.swap(true, Ordering::AcqRel) {
             return Err(TpError::new(error_code::OWNER_CLOSED, "Rust Core 已关闭"));
         }
-        self.cancel_all_operations();
-        let ids = {
-            let mut ids: Vec<String> = self
-                .config
-                .lock()
-                .expect("owner config mutex 不应中毒")
-                .tunnels
+        let outcome = (|| {
+            self.cancel_all_operations();
+            let ids = {
+                let mut ids: Vec<String> = self
+                    .config
+                    .lock()
+                    .expect("owner config mutex 不应中毒")
+                    .tunnels
+                    .iter()
+                    .map(|tunnel| tunnel.id.clone())
+                    .collect();
+                ids.sort();
+                ids
+            };
+            let locks: Vec<_> = ids.iter().map(|id| self.lock_for(id)).collect();
+            let _guards: Vec<_> = locks
                 .iter()
-                .map(|tunnel| tunnel.id.clone())
+                .map(|lock| lock.lock().expect("owner tunnel mutex 不应中毒"))
                 .collect();
-            ids.sort();
-            ids
-        };
-        let locks: Vec<_> = ids.iter().map(|id| self.lock_for(id)).collect();
-        let _guards: Vec<_> = locks
-            .iter()
-            .map(|lock| lock.lock().expect("owner tunnel mutex 不应中毒"))
-            .collect();
-        let mut stopped = 0;
-        let mut first_error = None;
-        for id in ids {
-            let tunnel = self.tunnel(&id)?;
-            let label = tunnel.launchd_label();
-            if self.launchd.status(&label) != TunnelStatus::NotLoaded {
-                match self.launchd.bootout(&label) {
-                    Ok(_) => {
-                        if self.launchd.status(&label) == TunnelStatus::NotLoaded {
-                            stopped += 1;
-                        } else if first_error.is_none() {
-                            first_error = Some(TpError::new(
-                                error_code::EXECUTOR,
-                                format!("退出清理后仍加载 launchd 服务：{label}"),
-                            ));
+            let mut stopped = 0;
+            let mut first_error = None;
+            for id in ids {
+                let tunnel = self.tunnel(&id)?;
+                let label = tunnel.launchd_label();
+                if self.launchd.status(&label) != TunnelStatus::NotLoaded {
+                    match self.launchd.bootout(&label) {
+                        Ok(_) => {
+                            if self.launchd.status(&label) == TunnelStatus::NotLoaded {
+                                stopped += 1;
+                            } else if first_error.is_none() {
+                                first_error = Some(TpError::new(
+                                    error_code::EXECUTOR,
+                                    format!("退出清理后仍加载 launchd 服务：{label}"),
+                                ));
+                            }
                         }
-                    }
-                    Err(error) => {
-                        if first_error.is_none() {
-                            let mut failure = executor_error("退出清理", error);
-                            failure.message = format!("{}（label={label}）", failure.message);
-                            first_error = Some(failure);
+                        Err(error) => {
+                            if first_error.is_none() {
+                                let mut failure = executor_error("退出清理", error);
+                                failure.message = format!("{}（label={label}）", failure.message);
+                                first_error = Some(failure);
+                            }
+                            // 即使当前 label 失败，也继续处理剩余配置中的受管服务。
+                            // 失败结果在所有 label 尝试完成后统一返回。
                         }
-                        // 即使当前 label 失败，也继续处理剩余配置中的受管服务。
-                        // 失败结果在所有 label 尝试完成后统一返回。
                     }
                 }
             }
+            if let Some(error) = first_error {
+                return Err(error);
+            }
+            Ok(json!({ "operation": "shutdown", "stopped": stopped }))
+        })();
+
+        if outcome.is_err() {
+            // 本次清理未收敛，保留重试入口；closed=true 只代表成功完成
+            // shutdown，不能把一次可恢复的 launchd 错误变成永久状态。
+            self.closed.store(false, Ordering::Release);
         }
-        if let Some(error) = first_error {
-            return Err(error);
-        }
-        Ok(json!({ "operation": "shutdown", "stopped": stopped }))
+        outcome
     }
 }
 
@@ -1392,6 +1402,45 @@ mod tests {
     }
 
     #[test]
+    fn shutdown_failure_allows_retry_of_unconverged_services() {
+        let home = temp_home("shutdown-retry-after-error");
+        let runner = ScriptedRunner::new(vec![
+            running(101),
+            process(8, "", "Operation not permitted"),
+            running(202),
+            process(0, "", ""),
+            not_loaded(),
+            running(101),
+            process(0, "", ""),
+            not_loaded(),
+            not_loaded(),
+        ]);
+        let owner = scripted_owner(&home, &["first", "second"], runner.clone());
+
+        let first_error = owner.shutdown().unwrap_err();
+        assert_eq!(first_error.code, error_code::EXECUTOR);
+
+        let second = owner
+            .shutdown()
+            .expect("清理失败后应允许下一次 shutdown 重试");
+        assert_eq!(second["operation"], "shutdown");
+        assert_eq!(second["stopped"], 1);
+        assert_eq!(
+            runner
+                .calls()
+                .iter()
+                .map(|call| call[0].as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "print", "bootout", "print", "bootout", "print", "print", "bootout", "print",
+                "print"
+            ]
+        );
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
     fn shutdown_is_single_entry() {
         let home = temp_home("shutdown-single-entry");
         let runner = ScriptedRunner::new(vec![running(303), process(0, "", ""), not_loaded()]);
@@ -1737,11 +1786,15 @@ mod tests {
         let runner = ScriptedRunner::new(vec![
             running(987),
             process(8, "", "Operation not permitted"),
+            running(987),
         ]);
         let owner = scripted_owner(&home, &["matrix-shutdown-error"], runner.clone());
         let error = owner.shutdown().unwrap_err();
         assert_eq!(error.code, error_code::EXECUTOR);
-        assert!(owner.status("matrix-shutdown-error").is_err());
+        assert_eq!(
+            owner.status("matrix-shutdown-error").unwrap(),
+            TunnelStatus::Running { pid: Some(987) }
+        );
         runner.assert_exhausted();
         let _ = fs::remove_dir_all(home);
     }
