@@ -18,3 +18,11 @@ protocol RustLifecycleOwner: Sendable {
 }
 
 extension RustCoreClient: RustLifecycleOwner {}
+
+/// 健康监测按需读取单条隧道状态的能力，不扩大生命周期 owner 的公共契约。
+/// 不具备该能力的 owner 在健康监测中 fail-closed，不使用旧状态触发恢复。
+protocol RustHealthStatusReader: Sendable {
+    func status(id: String) throws -> TunnelStatus
+}
+
+extension RustCoreClient: RustHealthStatusReader {}

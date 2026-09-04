@@ -1,5 +1,27 @@
 import Foundation
 
+/// 每个 ProbeService 持有一个独立会话，复用同一探针协调器的连接资源。
+/// actor 只负责会话引用和请求串行入口，保持注入 performer 的测试路径不变。
+private actor ProbeSession {
+    private let session: URLSession
+
+    init(timeout: TimeInterval) {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.connectionProxyDictionary = [:]
+        configuration.timeoutIntervalForRequest = timeout
+        configuration.timeoutIntervalForResource = timeout
+        self.session = URLSession(configuration: configuration)
+    }
+
+    func status(for request: URLRequest) async throws -> Int {
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        return http.statusCode
+    }
+}
+
 /// 探针结果三态：满足 / 不满足（有响应但状态码不在期望集）/ 失败（连接错误、超时等）。
 public enum ProbeResult: Equatable, Sendable {
     case satisfied(status: Int)
@@ -14,26 +36,18 @@ public struct ProbeService: Sendable {
 
     private let timeout: TimeInterval
     private let perform: Performer
+    private let session: ProbeSession?
 
     public init(timeout: TimeInterval = 3, perform: Performer? = nil) {
         self.timeout = timeout
         if let perform {
             self.perform = perform
+            self.session = nil
         } else {
-            // 每次探测创建临时会话：绕过系统代理（回环请求会被系统代理拦截），
-            // 并规避跨隔离捕获共享会话。
+            let session = ProbeSession(timeout: timeout)
+            self.session = session
             self.perform = { request in
-                let configuration = URLSessionConfiguration.ephemeral
-                configuration.connectionProxyDictionary = [:]
-                configuration.timeoutIntervalForRequest = timeout
-                configuration.timeoutIntervalForResource = timeout
-                let session = URLSession(configuration: configuration)
-                defer { session.finishTasksAndInvalidate() }
-                let (_, response) = try await session.data(for: request)
-                guard let http = response as? HTTPURLResponse else {
-                    throw URLError(.badServerResponse)
-                }
-                return http.statusCode
+                try await session.status(for: request)
             }
         }
     }

@@ -40,6 +40,8 @@ public final class TunnelManager: ObservableObject {
     private var recoveryTasks: [String: Task<Void, Never>] = [:]
     /// 删除隧道后保留代次墓碑，避免不可立即取消的旧任务在同 ID 重建后复活。
     private var recoveryGenerations: [String: UInt] = [:]
+    /// 启动阶段只做一次全量状态发现；持续健康循环不再重复扫描所有隧道。
+    private var didAttemptInitialHealthStatusSnapshot = false
     private let healthMonitorIntervalNanoseconds: UInt64
     private let healthSleep: @Sendable (UInt64) async throws -> Void
 
@@ -439,22 +441,43 @@ public final class TunnelManager: ObservableObject {
 
         let token = beginStateRead()
         let rustCore = self.rustCore
-        let snapshot: RustCoreClient.Snapshot
+        let loadedConfig: AppConfig
         do {
-            snapshot = try await Task.detached(priority: .utility) {
-                try rustCore.snapshot()
+            loadedConfig = try await Task.detached(priority: .utility) {
+                try rustCore.loadConfig()
             }.value
         } catch {
-            // 状态读取失败时不使用旧快照触发自动恢复，避免对未知实例做副作用。
+            // 配置读取失败时不使用旧配置触发自动恢复。
             return
         }
         guard isCurrentStateRead(token), !Task.isCancelled else { return }
 
-        let previousIDs = Set(config.tunnels.map(\.id))
-        applyEffectiveConfig(snapshot.config)
-        applyStatusSnapshot(snapshot.statuses)
-        if previousIDs != Set(config.tunnels.map(\.id)) {
-            syncLogStore()
+        if config != loadedConfig {
+            let previousIDs = Set(config.tunnels.map(\.id))
+            applyEffectiveConfig(loadedConfig)
+            if previousIDs != Set(config.tunnels.map(\.id)) {
+                syncLogStore()
+            }
+        }
+
+        // 保留启动时的状态发现，兼容无主窗口时的状态展示；只允许一次全量
+        // snapshot。后续健康周期只读取配置并执行已配置的 HTTP 探针。
+        if !didAttemptInitialHealthStatusSnapshot {
+            didAttemptInitialHealthStatusSnapshot = true
+            do {
+                let snapshot = try await Task.detached(priority: .utility) {
+                    try rustCore.snapshot()
+                }.value
+                guard isCurrentStateRead(token), !Task.isCancelled else { return }
+                let previousIDs = Set(config.tunnels.map(\.id))
+                applyEffectiveConfig(snapshot.config)
+                applyStatusSnapshot(snapshot.statuses)
+                if previousIDs != Set(config.tunnels.map(\.id)) {
+                    syncLogStore()
+                }
+            } catch {
+                // 启动状态未知时继续执行探针，但不使用旧状态触发恢复。
+            }
         }
 
         let probes = config.tunnels.compactMap { tunnel -> (String, ProbeConfig)? in
@@ -470,6 +493,26 @@ public final class TunnelManager: ObservableObject {
         guard isCurrentStateRead(token), !Task.isCancelled, let results else { return }
         applyProbeResults(results)
         for (id, result) in results {
+            guard isCurrentStateRead(token), !Task.isCancelled else { return }
+            if case .satisfied = result {
+                recordHealthResult(result, for: id)
+                continue
+            }
+
+            // 只有探针不满足时才查询目标隧道的最新 launchd 状态；健康路径不
+            // 再执行全量 snapshot，也不会扫描没有探针的隧道。
+            guard let statusReader = rustCore as? any RustHealthStatusReader else { return }
+            var status: TunnelStatus
+            do {
+                status = try await Task.detached(priority: .utility) {
+                    try statusReader.status(id: id)
+                }.value
+            } catch {
+                // 状态未知时不推进失败计数，也不触发恢复副作用。
+                continue
+            }
+            guard isCurrentStateRead(token), !Task.isCancelled else { return }
+            updateRuntime { $0.setStatus(status, for: id) }
             recordHealthResult(result, for: id)
         }
     }
@@ -550,19 +593,32 @@ public final class TunnelManager: ObservableObject {
         }
         guard let tunnel = tunnel(id: id), tunnel.keepAlive else { return }
         let recoveryState = healthRecoveryStates[id]
-        let mayRetryWithoutRunning = canRetryQuiescedRecovery(for: id, tunnel: tunnel, state: recoveryState)
-        guard (isRunning(statuses[id]) || mayRetryWithoutRunning),
-              !runtimeState.busyIDs.contains(id) else { return }
         guard recoveryState?.phase == .monitoring,
               recoveryState?.recoveryAttempts == attempt else { return }
+
+        let rustCore = self.rustCore
+        guard let statusReader = rustCore as? any RustHealthStatusReader else { return }
+        let currentStatus: TunnelStatus
+        do {
+            currentStatus = try await Task.detached(priority: .utility) {
+                try statusReader.status(id: id)
+            }.value
+        } catch {
+            // 恢复前状态未知时 fail-closed，不执行生命周期副作用。
+            return
+        }
+        guard recoveryGenerations[id] == generation, !Task.isCancelled else { return }
+        let mayRetryWithoutRunning = canRetryQuiescedRecovery(for: id, tunnel: tunnel, state: recoveryState)
+        guard (isRunning(currentStatus) || mayRetryWithoutRunning),
+              !runtimeState.busyIDs.contains(id) else { return }
+        updateRuntime { $0.setStatus(currentStatus, for: id) }
 
         guard let operation = beginOperation(for: id, cancelsRecovery: false) else { return }
         defer { endOperation(for: id, generation: operation) }
 
         var rustGeneration: UInt64?
-        let rustCore = self.rustCore
         do {
-            let status: TunnelStatus
+            var status: TunnelStatus
             if SSHCommand.isSSH(tunnel.command),
                preStartChecker.requiresAutomaticRecoveryQuiescence {
                 guard let nextRustGeneration = beginRustOperation(for: id) else {
@@ -572,7 +628,25 @@ public final class TunnelManager: ObservableObject {
                 let stoppedStatus = try await runRustOperation(id: id, generation: nextRustGeneration) {
                     try rustCore.stop(id: id, generation: nextRustGeneration)
                 }
-                guard stoppedStatus == .notLoaded,
+                var stopped = stoppedStatus == .notLoaded
+                if !stopped {
+                    // launchd 在 bootout 后可能短暂报告 SIGTERMed 等过渡状态；
+                    // 只在有界重读确认 notLoaded 后才允许执行 ECS/start。
+                    for retry in 0..<30 {
+                        try Task.checkCancellation()
+                        let settledStatus = try await Task.detached(priority: .utility) {
+                            try statusReader.status(id: id)
+                        }.value
+                        if settledStatus == .notLoaded {
+                            stopped = true
+                            break
+                        }
+                        if retry < 29 {
+                            try await Task.sleep(nanoseconds: 100_000_000)
+                        }
+                    }
+                }
+                guard stopped,
                       !Task.isCancelled,
                       recoveryGenerations[id] == generation,
                       isCurrentOperation(id, generation: operation) else {
@@ -594,6 +668,23 @@ public final class TunnelManager: ObservableObject {
                 rustGeneration = nextRustGeneration
                 status = try await runRustOperation(id: id, generation: nextRustGeneration) {
                     try rustCore.restart(id: id, generation: nextRustGeneration)
+                }
+            }
+            if !isRunning(status) {
+                // bootstrap/restart 后 launchd 可能先返回 xpcproxy 等过渡态；
+                // 只有有界重读确认 running 才把恢复记为成功。
+                for retry in 0..<30 {
+                    try Task.checkCancellation()
+                    let settledStatus = try await Task.detached(priority: .utility) {
+                        try statusReader.status(id: id)
+                    }.value
+                    if isRunning(settledStatus) {
+                        status = settledStatus
+                        break
+                    }
+                    if retry < 29 {
+                        try await Task.sleep(nanoseconds: 100_000_000)
+                    }
                 }
             }
             guard isRunning(status),

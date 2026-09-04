@@ -372,6 +372,76 @@ final class StabilityStage2Tests: XCTestCase {
     }
 
     @MainActor
+    func testECSRecoveryWaitsForTransientLaunchdStatusToSettle() async throws {
+        let tunnel = TunnelConfig(
+            id: "stage2-ecs-transient-status",
+            name: "ECS transient status",
+            command: ["/usr/bin/ssh", "-N"],
+            probe: ProbeConfig(url: "http://fixture.invalid/health")
+        )
+        let order = Stage2OrderLog()
+        let owner = Stage2RecordingOwner(
+            config: AppConfig(tunnels: [tunnel]),
+            order: order,
+            stopStatus: .other(state: "SIGTERMed"),
+            postStopStatuses: [.other(state: "SIGTERMed"), .notLoaded]
+        )
+        let checker = Stage2PreStartChecker(outcome: .success, requiresQuiescence: true, order: order)
+        let manager = makeManager(
+            owner: owner,
+            checker: checker,
+            config: AppConfig(tunnels: [tunnel]),
+            probes: Stage2ProbeSequence(failures: 3)
+        )
+
+        try await Self.waitUntil(timeout: 3) {
+            owner.lifecycleEvents.contains("start")
+        }
+
+        XCTAssertEqual(order.values, ["stop", "preflight", "start"])
+        XCTAssertEqual(checker.asyncIDs, [tunnel.id])
+        XCTAssertEqual(manager.lastMessage, "「ECS transient status」已自动恢复")
+        await manager.shutdownAsync()
+    }
+
+    @MainActor
+    func testECSRecoveryWaitsForTransientStartStatusToSettle() async throws {
+        let tunnel = TunnelConfig(
+            id: "stage2-ecs-transient-start",
+            name: "ECS transient start",
+            command: ["/usr/bin/ssh", "-N"],
+            probe: ProbeConfig(url: "http://fixture.invalid/health")
+        )
+        let order = Stage2OrderLog()
+        let owner = Stage2RecordingOwner(
+            config: AppConfig(tunnels: [tunnel]),
+            order: order,
+            startStatus: .other(state: "xpcproxy"),
+            postStartStatuses: [.other(state: "xpcproxy"), .running(pid: 8)]
+        )
+        let checker = Stage2PreStartChecker(outcome: .success, requiresQuiescence: true, order: order)
+        let manager = makeManager(
+            owner: owner,
+            checker: checker,
+            config: AppConfig(tunnels: [tunnel]),
+            probes: Stage2ProbeSequence(failures: 3)
+        )
+
+        try await Self.waitUntil(timeout: 3) {
+            owner.postStartStatusSettled
+        }
+
+        XCTAssertEqual(order.values, ["stop", "preflight", "start"])
+        XCTAssertEqual(checker.asyncIDs, [tunnel.id])
+        XCTAssertEqual(
+            manager.lastMessage,
+            "「ECS transient start」已自动恢复",
+            "events=\(owner.events), lastError=\(manager.lastError ?? "nil")"
+        )
+        await manager.shutdownAsync()
+    }
+
+    @MainActor
     func testNonSSHAutomaticRecoveryKeepsRestartPath() async throws {
         let tunnel = TunnelConfig(
             id: "stage2-non-ssh",
@@ -552,7 +622,7 @@ private final class Stage2PreStartChecker: ECSPreStartChecking, @unchecked Senda
     }
 }
 
-private final class Stage2RecordingOwner: RustLifecycleOwner, @unchecked Sendable {
+private final class Stage2RecordingOwner: RustLifecycleOwner, RustHealthStatusReader, @unchecked Sendable {
     private let configuration: AppConfig
     private let order: Stage2OrderLog?
     private let onStart: (@Sendable () -> Void)?
@@ -560,18 +630,31 @@ private final class Stage2RecordingOwner: RustLifecycleOwner, @unchecked Sendabl
     private let lock = NSLock()
     private(set) var events: [String] = []
     private let stopStatus: TunnelStatus
+    private let startStatus: TunnelStatus
+    private let postStopStatuses: [TunnelStatus]
+    private let postStartStatuses: [TunnelStatus]
     private var currentStatus: TunnelStatus = .running(pid: 7)
+    private var didStop = false
+    private var postStopStatusIndex = 0
+    private var didStart = false
+    private var postStartStatusIndex = 0
 
     init(
         config: AppConfig,
         order: Stage2OrderLog? = nil,
         stopStatus: TunnelStatus = .notLoaded,
+        postStopStatuses: [TunnelStatus] = [],
+        startStatus: TunnelStatus = .running(pid: 7),
+        postStartStatuses: [TunnelStatus] = [],
         snapshotFails: Bool = false,
         onStart: (@Sendable () -> Void)? = nil
     ) {
         configuration = config
         self.order = order
         self.stopStatus = stopStatus
+        self.postStopStatuses = postStopStatuses
+        self.startStatus = startStatus
+        self.postStartStatuses = postStartStatuses
         self.snapshotFails = snapshotFails
         self.onStart = onStart
     }
@@ -586,6 +669,12 @@ private final class Stage2RecordingOwner: RustLifecycleOwner, @unchecked Sendabl
         lock.lock()
         defer { lock.unlock() }
         return events.filter { $0 == "snapshot" }.count
+    }
+
+    var postStartStatusSettled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return didStart && postStartStatusIndex >= postStartStatuses.count
     }
 
     func loadConfig() throws -> AppConfig { configuration }
@@ -617,18 +706,44 @@ private final class Stage2RecordingOwner: RustLifecycleOwner, @unchecked Sendabl
         return RustCoreClient.Snapshot(config: configuration, statuses: statuses)
     }
 
+    func status(id: String) throws -> TunnelStatus {
+        record("status")
+        lock.lock()
+        if didStart, postStartStatusIndex < postStartStatuses.count {
+            let status = postStartStatuses[postStartStatusIndex]
+            postStartStatusIndex += 1
+            currentStatus = status
+            lock.unlock()
+            return status
+        }
+        if didStop, postStopStatusIndex < postStopStatuses.count {
+            let status = postStopStatuses[postStopStatusIndex]
+            postStopStatusIndex += 1
+            currentStatus = status
+            lock.unlock()
+            return status
+        }
+        let status = currentStatus
+        lock.unlock()
+        return status
+    }
+
     func start(id: String, generation: UInt64?) throws -> TunnelStatus {
         record("start")
         lock.lock()
-        currentStatus = .running(pid: 7)
+        didStop = false
+        didStart = true
+        postStartStatusIndex = 0
+        currentStatus = startStatus
         lock.unlock()
         onStart?()
-        return .running(pid: 7)
+        return startStatus
     }
 
     func stop(id: String, generation: UInt64?) throws -> TunnelStatus {
         record("stop")
         lock.lock()
+        didStop = true
         currentStatus = stopStatus
         lock.unlock()
         return stopStatus

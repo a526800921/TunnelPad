@@ -318,7 +318,7 @@ private struct Stage1PassingPreStartChecker: ECSPreStartChecking {
     func checkAsync(tunnel: TunnelConfig) async throws {}
 }
 
-private final class Stage1RecordingOwner: RustLifecycleOwner, @unchecked Sendable {
+private final class Stage1RecordingOwner: RustLifecycleOwner, RustHealthStatusReader, @unchecked Sendable {
     private let configured: AppConfig
     private let lock = NSLock()
     private var counts: [String: Int] = [:]
@@ -331,7 +331,7 @@ private final class Stage1RecordingOwner: RustLifecycleOwner, @unchecked Sendabl
         configured = config
     }
 
-    var probeCount: Int { count("snapshot") }
+    var probeCount: Int { count("status") }
     var startCount: Int { count("start") }
     var restartCount: Int { count("restart") }
     var stopCount: Int { count("stop") }
@@ -360,6 +360,11 @@ private final class Stage1RecordingOwner: RustLifecycleOwner, @unchecked Sendabl
             ($0.id, TunnelStatus.running(pid: 7))
         })
         return RustCoreClient.Snapshot(config: configured, statuses: statuses)
+    }
+
+    func status(id: String) throws -> TunnelStatus {
+        record("status")
+        return .running(pid: 7)
     }
 
     func start(id: String, generation: UInt64?) throws -> TunnelStatus {

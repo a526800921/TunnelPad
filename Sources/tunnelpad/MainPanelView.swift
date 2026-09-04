@@ -31,21 +31,9 @@ struct MainPanelView: View {
                 selectedID = manager.config.tunnels.first?.id
             }
         }
-        // 用与视图生命周期绑定的可取消任务刷新，避免 onReceive 在状态发布后
-        // 重建 Timer 订阅，导致 refresh -> @Published -> 重建订阅的反馈环。
-        .task(id: appDelegate.isMainWindowVisible) {
-            guard appDelegate.isMainWindowVisible else { return }
-            while !Task.isCancelled {
-                do {
-                    try await Task.sleep(nanoseconds: 5_000_000_000)
-                } catch {
-                    return
-                }
-                guard !Task.isCancelled else { return }
-                guard appDelegate.isMainWindowVisible else { return }
-                await manager.refreshAsync()
-            }
-        }
+        // 健康监测负责后台探针和按需状态复核；不再由主窗口每 5 秒触发
+        // refreshAsync() 的全量 snapshot/launchctl 扫描。首次显示和显式操作
+        // 仍会刷新状态，避免窗口可见性制造周期性高 CPU 峰值。
         .onChange(of: manager.config.tunnels) { _, tunnels in
             if !tunnels.contains(where: { $0.id == selectedID }) {
                 selectedID = tunnels.first?.id
