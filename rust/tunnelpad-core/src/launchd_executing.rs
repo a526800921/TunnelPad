@@ -11,6 +11,18 @@ pub trait LaunchdExecuting: Send + Sync {
     fn bootout(&self, label: &str) -> Result<bool, ExecutorError>;
     fn status(&self, label: &str) -> TunnelStatus;
 
+    /// 保留 launchctl 状态读取错误，供健康恢复区分“状态未知”和普通状态。
+    /// 旧 fake 默认沿用兼容的非 checked status。
+    fn status_checked(&self, label: &str) -> Result<TunnelStatus, ExecutorError> {
+        Ok(self.status(label))
+    }
+
+    /// 启动后读取稳定状态；旧 fake 默认复用一次 status，真实执行器可在
+    /// launchd 过渡态内做有界重读。
+    fn status_after_bootstrap(&self, label: &str) -> TunnelStatus {
+        self.status(label)
+    }
+
     fn bootstrap_cancellable(
         &self,
         label: &str,
@@ -33,6 +45,22 @@ pub trait LaunchdExecuting: Send + Sync {
         }
         self.bootout(label)
     }
+
+    /// 受管 SSH 的 bootout 后收敛能力。旧 fake 默认保持原有
+    /// bootout/status 语义；真实执行器覆盖此方法实现身份核验和信号升级。
+    fn stop_managed_cancellable(
+        &self,
+        label: &str,
+        _executable_path: &Path,
+        cancellation: &CancellationToken,
+    ) -> Result<bool, ExecutorError> {
+        let stopped = self.bootout_cancellable(label, cancellation)?;
+        if self.status(label) == TunnelStatus::NotLoaded {
+            Ok(stopped)
+        } else {
+            Err(ExecutorError::ManagedProcessStillLoaded)
+        }
+    }
 }
 
 impl<R: ProcessRunning> LaunchdExecuting for LaunchCtlExecutor<R> {
@@ -46,6 +74,14 @@ impl<R: ProcessRunning> LaunchdExecuting for LaunchCtlExecutor<R> {
 
     fn status(&self, label: &str) -> TunnelStatus {
         LaunchCtlExecutor::status(self, label)
+    }
+
+    fn status_checked(&self, label: &str) -> Result<TunnelStatus, ExecutorError> {
+        LaunchCtlExecutor::status_checked(self, label)
+    }
+
+    fn status_after_bootstrap(&self, label: &str) -> TunnelStatus {
+        LaunchCtlExecutor::status_after_bootstrap(self, label)
     }
 
     fn bootstrap_cancellable(
@@ -63,5 +99,14 @@ impl<R: ProcessRunning> LaunchdExecuting for LaunchCtlExecutor<R> {
         cancellation: &CancellationToken,
     ) -> Result<bool, ExecutorError> {
         LaunchCtlExecutor::bootout_cancellable(self, label, cancellation)
+    }
+
+    fn stop_managed_cancellable(
+        &self,
+        label: &str,
+        executable_path: &Path,
+        cancellation: &CancellationToken,
+    ) -> Result<bool, ExecutorError> {
+        LaunchCtlExecutor::stop_managed_cancellable(self, label, executable_path, cancellation)
     }
 }

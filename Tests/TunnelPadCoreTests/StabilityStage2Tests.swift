@@ -442,6 +442,37 @@ final class StabilityStage2Tests: XCTestCase {
     }
 
     @MainActor
+    func testManualStartSettlesTransientLaunchdStatus() async {
+        let tunnel = TunnelConfig(
+            id: "stage2-manual-transient-start",
+            name: "Manual transient start",
+            command: ["/bin/echo", "hello"]
+        )
+        let owner = Stage2RecordingOwner(
+            config: AppConfig(tunnels: [tunnel]),
+            startStatus: .other(state: "xpcproxy"),
+            postStartStatuses: [.other(state: "xpcproxy"), .running(pid: 9)]
+        )
+        let manager = makeManager(
+            owner: owner,
+            checker: Stage2PreStartChecker(
+                outcome: .success,
+                requiresQuiescence: false,
+                order: Stage2OrderLog()
+            ),
+            config: AppConfig(tunnels: [tunnel]),
+            probes: Stage2ProbeSequence(failures: 0)
+        )
+
+        let result = await manager.startAsync(tunnel.id)
+
+        XCTAssertEqual(result, .completed(status: .running(pid: 9)))
+        XCTAssertEqual(manager.statuses[tunnel.id], .running(pid: 9))
+        XCTAssertTrue(owner.postStartStatusSettled)
+        await manager.shutdownAsync()
+    }
+
+    @MainActor
     func testNonSSHAutomaticRecoveryKeepsRestartPath() async throws {
         let tunnel = TunnelConfig(
             id: "stage2-non-ssh",

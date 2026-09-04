@@ -181,6 +181,11 @@ final class RustCoreClient: @unchecked Sendable {
         return try decodeStatus(result["status"])
     }
 
+    func isStatusQueryTimeout(_ error: Error) -> Bool {
+        guard case let ClientError.remote(_, message) = error else { return false }
+        return message.contains("launchctl 状态查询超时")
+    }
+
     func start(id: String, generation: UInt64? = nil) throws -> TunnelStatus {
         try lifecycle(op: "start", id: id, generation: generation)
     }

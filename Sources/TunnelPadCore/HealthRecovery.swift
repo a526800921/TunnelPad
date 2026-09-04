@@ -5,6 +5,7 @@ struct HealthRecoveryPolicy: Sendable, Equatable {
     static let failureThreshold = 3
     static let maximumRecoveryAttempts = 10
     static let monitorIntervalNanoseconds: UInt64 = 10_000_000_000
+    static let automaticCooldownNanoseconds: UInt64 = 1_800_000_000_000
 
     static func backoffNanoseconds(for attempt: Int) -> UInt64 {
         switch attempt {
@@ -27,25 +28,38 @@ struct HealthRecoveryState: Sendable, Equatable {
     enum Phase: Sendable, Equatable {
         case monitoring
         case manuallyStopped
-        case stoppedAfterRecovery
     }
 
     enum Action: Sendable, Equatable {
         case observe
         case schedule(attempt: Int, delayNanoseconds: UInt64)
-        case stop
+        case cooldown(delayNanoseconds: UInt64)
     }
 
     private(set) var phase: Phase = .monitoring
     private(set) var consecutiveFailures = 0
     private(set) var recoveryAttempts = 0
+    private(set) var cooldownUntilUptimeNanoseconds: UInt64?
 
     mutating func record(
         _ result: ProbeResult,
         status: TunnelStatus?,
-        keepAlive: Bool
+        keepAlive: Bool,
+        nowUptimeNanoseconds: UInt64 = DispatchTime.now().uptimeNanoseconds
     ) -> Action {
         guard phase == .monitoring else { return .observe }
+
+        if let cooldownUntil = cooldownUntilUptimeNanoseconds {
+            if nowUptimeNanoseconds < cooldownUntil {
+                if case .satisfied = result {
+                    self.cooldownUntilUptimeNanoseconds = nil
+                    consecutiveFailures = 0
+                    recoveryAttempts = 0
+                }
+                return .observe
+            }
+            self.cooldownUntilUptimeNanoseconds = nil
+        }
 
         guard keepAlive, Self.isRunning(status) else {
             consecutiveFailures = 0
@@ -65,8 +79,10 @@ struct HealthRecoveryState: Sendable, Equatable {
         consecutiveFailures = 0
 
         guard recoveryAttempts < HealthRecoveryPolicy.maximumRecoveryAttempts else {
-            phase = .stoppedAfterRecovery
-            return .stop
+            let delay = HealthRecoveryPolicy.automaticCooldownNanoseconds
+            recoveryAttempts = 0
+            cooldownUntilUptimeNanoseconds = nowUptimeNanoseconds &+ delay
+            return .cooldown(delayNanoseconds: delay)
         }
 
         recoveryAttempts += 1
@@ -76,30 +92,39 @@ struct HealthRecoveryState: Sendable, Equatable {
         )
     }
 
-    mutating func finishRecovery(success: Bool) -> Action {
+    mutating func finishRecovery(
+        success: Bool,
+        nowUptimeNanoseconds: UInt64 = DispatchTime.now().uptimeNanoseconds
+    ) -> Action {
         guard phase == .monitoring else { return .observe }
         guard success else {
             if recoveryAttempts >= HealthRecoveryPolicy.maximumRecoveryAttempts {
-                phase = .stoppedAfterRecovery
-                return .stop
+                consecutiveFailures = 0
+                recoveryAttempts = 0
+                let delay = HealthRecoveryPolicy.automaticCooldownNanoseconds
+                cooldownUntilUptimeNanoseconds = nowUptimeNanoseconds &+ delay
+                return .cooldown(delayNanoseconds: delay)
             }
             return .observe
         }
 
         consecutiveFailures = 0
         recoveryAttempts = 0
+        cooldownUntilUptimeNanoseconds = nil
         return .observe
     }
 
     mutating func manualStop() {
         phase = .manuallyStopped
         consecutiveFailures = 0
+        cooldownUntilUptimeNanoseconds = nil
     }
 
     mutating func manualStart() {
         phase = .monitoring
         consecutiveFailures = 0
         recoveryAttempts = 0
+        cooldownUntilUptimeNanoseconds = nil
     }
 
     private static func isRunning(_ status: TunnelStatus?) -> Bool {

@@ -42,6 +42,10 @@ public final class TunnelManager: ObservableObject {
     private var recoveryGenerations: [String: UInt] = [:]
     /// 启动阶段只做一次全量状态发现；持续健康循环不再重复扫描所有隧道。
     private var didAttemptInitialHealthStatusSnapshot = false
+    /// 显式启停完成后，仅对当前隧道有界重读 launchd 状态，收敛 xpcproxy
+    /// 等过渡态；不恢复全局定时 snapshot。
+    private static let lifecycleStatusSettleAttempts = 30
+    private static let lifecycleStatusSettleDelayNanoseconds: UInt64 = 100_000_000
     private let healthMonitorIntervalNanoseconds: UInt64
     private let healthSleep: @Sendable (UInt64) async throws -> Void
 
@@ -508,8 +512,13 @@ public final class TunnelManager: ObservableObject {
                     try statusReader.status(id: id)
                 }.value
             } catch {
-                // 状态未知时不推进失败计数，也不触发恢复副作用。
-                continue
+                // launchctl print 超时表示当前状态未知；只有已有的运行态
+                // 缓存仍可信时才进入恢复候选，实际 stop 仍会在 Rust 侧
+                // 重新核验完整受管身份。其他错误继续 fail-closed。
+                guard statusReader.isStatusQueryTimeout(error),
+                      let cachedStatus = statuses[id],
+                      isRunning(cachedStatus) else { continue }
+                status = cachedStatus
             }
             guard isCurrentStateRead(token), !Task.isCancelled else { return }
             updateRuntime { $0.setStatus(status, for: id) }
@@ -544,10 +553,9 @@ public final class TunnelManager: ObservableObject {
                 attempt: attempt,
                 delayNanoseconds: delayNanoseconds
             )
-        case .stop:
-            Task { [weak self] in
-                await self?.performAutomaticStopAfterRecoveryLimit(id)
-            }
+        case .cooldown(let delayNanoseconds):
+            let minutes = max(1, delayNanoseconds / 60_000_000_000)
+            lastError = "自动恢复「\(tunnel.name)」进入 \(minutes) 分钟冷却，稍后自动重试"
         }
     }
 
@@ -598,14 +606,18 @@ public final class TunnelManager: ObservableObject {
 
         let rustCore = self.rustCore
         guard let statusReader = rustCore as? any RustHealthStatusReader else { return }
-        let currentStatus: TunnelStatus
+        var currentStatus: TunnelStatus
         do {
             currentStatus = try await Task.detached(priority: .utility) {
                 try statusReader.status(id: id)
             }.value
         } catch {
-            // 恢复前状态未知时 fail-closed，不执行生命周期副作用。
-            return
+            // 仅对受控的 launchctl 超时使用已有运行态缓存；Rust stop
+            // 仍会重新读取/核验目标 label 与完整进程身份。
+            guard statusReader.isStatusQueryTimeout(error),
+                  let cachedStatus = statuses[id],
+                  isRunning(cachedStatus) else { return }
+            currentStatus = cachedStatus
         }
         guard recoveryGenerations[id] == generation, !Task.isCancelled else { return }
         let mayRetryWithoutRunning = canRetryQuiescedRecovery(for: id, tunnel: tunnel, state: recoveryState)
@@ -616,7 +628,6 @@ public final class TunnelManager: ObservableObject {
         guard let operation = beginOperation(for: id, cancelsRecovery: false) else { return }
         defer { endOperation(for: id, generation: operation) }
 
-        var rustGeneration: UInt64?
         do {
             var status: TunnelStatus
             if SSHCommand.isSSH(tunnel.command),
@@ -624,7 +635,6 @@ public final class TunnelManager: ObservableObject {
                 guard let nextRustGeneration = beginRustOperation(for: id) else {
                     throw HealthRecoveryError.lifecycleUnavailable
                 }
-                rustGeneration = nextRustGeneration
                 let stoppedStatus = try await runRustOperation(id: id, generation: nextRustGeneration) {
                     try rustCore.stop(id: id, generation: nextRustGeneration)
                 }
@@ -665,7 +675,6 @@ public final class TunnelManager: ObservableObject {
                 guard let nextRustGeneration = beginRustOperation(for: id) else {
                     throw HealthRecoveryError.lifecycleUnavailable
                 }
-                rustGeneration = nextRustGeneration
                 status = try await runRustOperation(id: id, generation: nextRustGeneration) {
                     try rustCore.restart(id: id, generation: nextRustGeneration)
                 }
@@ -705,57 +714,14 @@ public final class TunnelManager: ObservableObject {
             var state = healthRecoveryStates[id] ?? HealthRecoveryState()
             let action = state.finishRecovery(success: false)
             healthRecoveryStates[id] = state
-            lastError = "自动恢复「\(tunnelName)」第 \(attempt)/\(HealthRecoveryPolicy.maximumRecoveryAttempts) 次失败"
-            if case .stop = action {
-                await stopAfterRecoveryLimit(
-                    id: id,
-                    operation: operation,
-                    rustGeneration: rustGeneration,
-                    tunnelName: tunnelName
-                )
+            switch action {
+            case .cooldown(let delayNanoseconds):
+                let minutes = max(1, delayNanoseconds / 60_000_000_000)
+                lastError = "自动恢复「\(tunnelName)」第 \(attempt)/\(HealthRecoveryPolicy.maximumRecoveryAttempts) 次失败，进入 \(minutes) 分钟冷却，稍后自动重试"
+            default:
+                lastError = "自动恢复「\(tunnelName)」第 \(attempt)/\(HealthRecoveryPolicy.maximumRecoveryAttempts) 次失败"
             }
         }
-    }
-
-    private func stopAfterRecoveryLimit(
-        id: String,
-        operation: UInt,
-        rustGeneration: UInt64?,
-        tunnelName: String
-    ) async {
-        var nextRustGeneration = rustGeneration
-        let rustCore = self.rustCore
-        do {
-            if nextRustGeneration == nil {
-                guard let generation = beginRustOperation(for: id) else {
-                    throw HealthRecoveryError.lifecycleUnavailable
-                }
-                nextRustGeneration = generation
-            }
-            guard let generation = nextRustGeneration else { return }
-            let status = try await runRustOperation(id: id, generation: generation) {
-                try rustCore.stop(id: id, generation: generation)
-            }
-            guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return }
-            updateRuntime { $0.setStatus(status, for: id) }
-            lastError = "自动恢复「\(tunnelName)」已连续失败 10 次，隧道已停止；继续只读监测，需手动启动或重启"
-        } catch is CancellationError {
-            return
-        } catch {
-            lastError = "自动恢复「\(tunnelName)」连续失败 10 次，停止隧道失败；已停止后续自动恢复"
-        }
-    }
-
-    private func performAutomaticStopAfterRecoveryLimit(_ id: String) async {
-        guard let tunnel = tunnel(id: id) else { return }
-        guard let operation = beginOperation(for: id, cancelsRecovery: false) else { return }
-        defer { endOperation(for: id, generation: operation) }
-        await stopAfterRecoveryLimit(
-            id: id,
-            operation: operation,
-            rustGeneration: nil,
-            tunnelName: tunnel.name
-        )
     }
 
     private func cancelRecovery(for id: String) {
@@ -796,8 +762,6 @@ public final class TunnelManager: ObservableObject {
             state.manualStart()
         case .manuallyStopped:
             state.manualStop()
-        case .stoppedAfterRecovery:
-            return
         }
         healthRecoveryStates[id] = state
     }
@@ -805,6 +769,54 @@ public final class TunnelManager: ObservableObject {
     private func isRunning(_ status: TunnelStatus?) -> Bool {
         guard case .running? = status else { return false }
         return true
+    }
+
+    /// 手动启动/重启后，launchd 可能先返回 xpcproxy 等过渡态。
+    /// 只在本次生命周期操作仍有效时查询当前隧道，避免把瞬时状态永久留在 UI/API 缓存中。
+    private func settleLifecycleStatus(
+        id: String,
+        initialStatus: TunnelStatus,
+        operation: UInt
+    ) async -> TunnelStatus {
+        switch initialStatus {
+        case .running, .notRunning:
+            return initialStatus
+        case .notLoaded, .other:
+            break
+        }
+
+        guard let statusReader = rustCore as? any RustHealthStatusReader else {
+            return initialStatus
+        }
+
+        var status = initialStatus
+        for retry in 0..<Self.lifecycleStatusSettleAttempts {
+            guard isCurrentOperation(id, generation: operation), !Task.isCancelled else {
+                return status
+            }
+            do {
+                status = try await Task.detached(priority: .utility) {
+                    try statusReader.status(id: id)
+                }.value
+            } catch {
+                return status
+            }
+            guard isCurrentOperation(id, generation: operation), !Task.isCancelled else {
+                return status
+            }
+            updateRuntime { $0.setStatus(status, for: id) }
+            if isRunning(status) {
+                return status
+            }
+            if retry < Self.lifecycleStatusSettleAttempts - 1 {
+                do {
+                    try await Task.sleep(nanoseconds: Self.lifecycleStatusSettleDelayNanoseconds)
+                } catch {
+                    return status
+                }
+            }
+        }
+        return status
     }
 
     /// ECS 前置失败后，SSH 实例已被安全卸载，但恢复代次仍需沿用既有退避/熔断。
@@ -861,7 +873,14 @@ public final class TunnelManager: ObservableObject {
             updateRuntime { $0.setStatus(status, for: id) }
             lastMessage = "「\(tunnel.name)」已启动"
             await refreshAsync()
-            return .completed(status: status)
+            let settledStatus = await settleLifecycleStatus(
+                id: id,
+                initialStatus: status,
+                operation: operation
+            )
+            guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return .failed }
+            updateRuntime { $0.setStatus(settledStatus, for: id) }
+            return .completed(status: settledStatus)
         } catch is CancellationError {
             return .failed
         } catch let error as ECSPreStartError {
@@ -958,7 +977,14 @@ public final class TunnelManager: ObservableObject {
             updateRuntime { $0.setStatus(status, for: id) }
             lastMessage = "「\(tunnel.name)」已重启"
             await refreshAsync()
-            return .completed(status: status)
+            let settledStatus = await settleLifecycleStatus(
+                id: id,
+                initialStatus: status,
+                operation: operation
+            )
+            guard isCurrentOperation(id, generation: operation), !Task.isCancelled else { return .failed }
+            updateRuntime { $0.setStatus(settledStatus, for: id) }
+            return .completed(status: settledStatus)
         } catch is CancellationError {
             return .failed
         } catch let error as ECSPreStartError {

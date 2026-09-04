@@ -23,6 +23,14 @@ extension RustCoreClient: RustLifecycleOwner {}
 /// 不具备该能力的 owner 在健康监测中 fail-closed，不使用旧状态触发恢复。
 protocol RustHealthStatusReader: Sendable {
     func status(id: String) throws -> TunnelStatus
+
+    /// 仅用于健康恢复区分受控的 launchctl 状态查询超时；其他错误仍
+    /// fail-closed，不使用旧状态触发生命周期副作用。
+    func isStatusQueryTimeout(_ error: Error) -> Bool
+}
+
+extension RustHealthStatusReader {
+    func isStatusQueryTimeout(_ error: Error) -> Bool { false }
 }
 
 extension RustCoreClient: RustHealthStatusReader {}

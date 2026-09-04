@@ -6,6 +6,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -17,6 +18,7 @@ use crate::launchctl::{CancellationToken, ExecutorError, TunnelStatus};
 use crate::launchd_executing::LaunchdExecuting;
 use crate::paths::TunnelPaths;
 use crate::plist_render::write_plist;
+use crate::ssh_command::is_ssh;
 use crate::{error_code, AppConfig, ExecutorKind, TpError, TunnelConfig};
 
 /// 阶段 5 owner 的 JSON 命令。字段采用 camelCase，命令本身不携带 Swift
@@ -190,8 +192,11 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
             .lock()
             .expect("owner config mutex 不应中毒")
             .clone();
-        let next_ids: std::collections::HashSet<_> =
-            config.tunnels.iter().map(|tunnel| tunnel.id.as_str()).collect();
+        let next_ids: std::collections::HashSet<_> = config
+            .tunnels
+            .iter()
+            .map(|tunnel| tunnel.id.as_str())
+            .collect();
         let mut removed: Vec<_> = previous
             .tunnels
             .iter()
@@ -199,7 +204,10 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
             .cloned()
             .collect();
         removed.sort_by(|left, right| left.id.cmp(&right.id));
-        let locks: Vec<_> = removed.iter().map(|tunnel| self.lock_for(&tunnel.id)).collect();
+        let locks: Vec<_> = removed
+            .iter()
+            .map(|tunnel| self.lock_for(&tunnel.id))
+            .collect();
         let _guards: Vec<_> = locks
             .iter()
             .map(|lock| lock.lock().expect("owner tunnel mutex 不应中毒"))
@@ -379,7 +387,9 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
         let lock = self.lock_for(id);
         let _guard = lock.lock().expect("owner tunnel mutex 不应中毒");
         let tunnel = self.tunnel(id)?;
-        Ok(self.launchd.status(&tunnel.launchd_label()))
+        self.launchd
+            .status_checked(&tunnel.launchd_label())
+            .map_err(|error| executor_error("读取状态", error))
     }
 
     pub fn start(&self, id: &str) -> Result<Value, TpError> {
@@ -409,7 +419,7 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
             .bootstrap_cancellable(&tunnel.launchd_label(), &plist, &cancellation)
             .map_err(|error| executor_error("启动", error))?;
         self.ensure_generation(id, generation)?;
-        let status = self.launchd.status(&tunnel.launchd_label());
+        let status = self.launchd.status_after_bootstrap(&tunnel.launchd_label());
         self.ensure_generation(id, generation)?;
         Ok(json!({ "id": id, "operation": "start", "status": status }))
     }
@@ -426,12 +436,18 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
         self.ensure_generation(id, generation)?;
         let cancellation = self.cancellation_for(id, generation);
         let tunnel = self.tunnel(id)?;
-        let stopped = self
-            .launchd
-            .bootout_cancellable(&tunnel.launchd_label(), &cancellation)
-            .map_err(|error| executor_error("停止", error))?;
+        let label = tunnel.launchd_label();
+        let stopped = if is_ssh(&tunnel.command) {
+            self.launchd
+                .stop_managed_cancellable(&label, Path::new(&tunnel.command[0]), &cancellation)
+                .map_err(|error| executor_error("停止", error))?
+        } else {
+            self.launchd
+                .bootout_cancellable(&label, &cancellation)
+                .map_err(|error| executor_error("停止", error))?
+        };
         self.ensure_generation(id, generation)?;
-        let status = self.launchd.status(&tunnel.launchd_label());
+        let status = self.launchd.status(&label);
         self.ensure_generation(id, generation)?;
         Ok(json!({ "id": id, "operation": "stop", "stopped": stopped, "status": status }))
     }
@@ -450,8 +466,7 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
         let tunnel = self.tunnel(id)?;
         // 未加载由 executor 明确归类为可继续；其他 bootout 失败必须
         // fail-closed，不能在旧实例未收敛时继续写 plist/bootstrap。
-        self
-            .launchd
+        self.launchd
             .bootout_cancellable(&tunnel.launchd_label(), &cancellation)
             .map_err(|error| executor_error("重启前停止", error))?;
         self.ensure_generation(id, generation)?;
@@ -697,6 +712,15 @@ fn executor_error(operation: &str, error: ExecutorError) -> TpError {
             format!("{operation} launchd 失败（exit={exit_code}）：{stderr}")
         }
         ExecutorError::Spawn { message } => format!("{operation} launchd 无法启动：{message}"),
+        ExecutorError::ManagedProcessIdentityUnknown { stage } => {
+            format!("{operation} 受管进程身份未知：{stage}")
+        }
+        ExecutorError::ManagedProcessSignalFailed { signal } => {
+            format!("{operation} 受管进程信号失败：{signal}")
+        }
+        ExecutorError::ManagedProcessStillLoaded => {
+            format!("{operation} 后受管进程仍未收敛")
+        }
         ExecutorError::Cancelled => format!("{operation} launchd 操作已取消"),
     };
     let code = if cancelled {
@@ -971,7 +995,10 @@ mod tests {
     }
 
     fn config_with_tunnels(tunnels: Vec<TunnelConfig>) -> AppConfig {
-        AppConfig { version: 1, tunnels }
+        AppConfig {
+            version: 1,
+            tunnels,
+        }
     }
 
     fn tunnel(id: &str, command: &str) -> TunnelConfig {
@@ -1037,7 +1064,14 @@ mod tests {
 
         let loaded = owner.load_config().unwrap();
 
-        assert_eq!(loaded.tunnels.iter().map(|item| item.id.as_str()).collect::<Vec<_>>(), vec!["keep"]);
+        assert_eq!(
+            loaded
+                .tunnels
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["keep"]
+        );
         assert_eq!(
             runner
                 .calls()
@@ -1197,7 +1231,10 @@ mod tests {
         let loaded = owner.load_config().unwrap();
 
         assert_eq!(loaded.tunnels[0].command, vec!["/usr/bin/new"]);
-        assert_eq!(owner.config.lock().unwrap().tunnels[0].command, vec!["/usr/bin/new"]);
+        assert_eq!(
+            owner.config.lock().unwrap().tunnels[0].command,
+            vec!["/usr/bin/new"]
+        );
         runner.assert_exhausted();
         let _ = fs::remove_dir_all(home);
     }
@@ -1207,11 +1244,7 @@ mod tests {
         let home = temp_home("reload-invalid");
         let runner = ScriptedRunner::new(vec![]);
         let owner = scripted_owner(&home, &["keep"], runner.clone());
-        fs::write(
-            owner.paths().config_url(),
-            br#"{"version":2,"tunnels":[]}"#,
-        )
-        .unwrap();
+        fs::write(owner.paths().config_url(), br#"{"version":2,"tunnels":[]}"#).unwrap();
 
         let error = owner.load_config().unwrap_err();
 
@@ -1228,13 +1261,8 @@ mod tests {
         let initial = config_with_tunnels(vec![tunnel("same", "/usr/bin/true")]);
         ConfigStore::new(paths.clone()).save(&initial).unwrap();
         let (runner, entered_rx) = BlockingRunner::new();
-        let owner = Arc::new(CoreOwner::new(
-            paths,
-            LaunchCtlExecutor::new(runner, 501),
-        ).unwrap());
-        let generation = owner.begin("same").unwrap()["generation"]
-            .as_u64()
-            .unwrap();
+        let owner = Arc::new(CoreOwner::new(paths, LaunchCtlExecutor::new(runner, 501)).unwrap());
+        let generation = owner.begin("same").unwrap()["generation"].as_u64().unwrap();
         let lifecycle_owner = owner.clone();
         let lifecycle = thread::spawn(move || {
             lifecycle_owner.execute(CoreCommand::Start {
@@ -1450,7 +1478,11 @@ mod tests {
         let error = owner.shutdown().unwrap_err();
 
         assert_eq!(error.code, error_code::OWNER_CLOSED);
-        assert_eq!(runner.calls().len(), 3, "重复 shutdown 不得重复查询或 bootout");
+        assert_eq!(
+            runner.calls().len(),
+            3,
+            "重复 shutdown 不得重复查询或 bootout"
+        );
         runner.assert_exhausted();
         let _ = fs::remove_dir_all(home);
     }
@@ -1732,9 +1764,7 @@ mod tests {
         let runner = ScriptedRunner::new(vec![process(9, "", "Operation not permitted")]);
         let owner = scripted_owner(&home, &["stage0-restart-bootout-error"], runner.clone());
 
-        let error = owner
-            .restart("stage0-restart-bootout-error")
-            .unwrap_err();
+        let error = owner.restart("stage0-restart-bootout-error").unwrap_err();
         assert_eq!(error.code, error_code::EXECUTOR);
         assert!(error.message.contains("重启前停止 launchd 失败"));
         assert_eq!(

@@ -124,7 +124,7 @@ final class StabilityStage1Tests: XCTestCase {
     }
 
     @MainActor
-    func testTenthFailedRecoveryStopsOnlyCurrentTunnel() async throws {
+    func testTenthFailedRecoveryEntersAutomaticCooldownWithoutStopping() async throws {
         let tunnel = TunnelConfig(
             id: "stage1-circuit-breaker",
             name: "Circuit Breaker",
@@ -143,18 +143,18 @@ final class StabilityStage1Tests: XCTestCase {
         )
 
         let deadline = Date().addingTimeInterval(3)
-        while owner.stopCount < 1, Date() < deadline {
+        while owner.restartCount < HealthRecoveryPolicy.maximumRecoveryAttempts, Date() < deadline {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
 
         XCTAssertEqual(owner.restartCount, HealthRecoveryPolicy.maximumRecoveryAttempts)
-        XCTAssertEqual(owner.stopCount, 1, "第 10 次恢复失败后只应停止当前隧道一次")
-        XCTAssertTrue(manager.lastError?.contains("连续失败 10 次") == true)
+        XCTAssertEqual(owner.stopCount, 0, "第 10 次恢复失败后不应自动停止隧道")
+        XCTAssertTrue(manager.lastError?.contains("冷却") == true)
         await manager.shutdownAsync()
     }
 
     @MainActor
-    func testManualStartReopensRecoveryAfterCircuitBreaker() async throws {
+    func testManualStartResetsAutomaticCooldown() async throws {
         let tunnel = TunnelConfig(
             id: "stage1-manual-restart",
             name: "Manual Restart",
@@ -172,11 +172,14 @@ final class StabilityStage1Tests: XCTestCase {
             }
         )
 
-        let stopDeadline = Date().addingTimeInterval(3)
-        while owner.stopCount < 1, Date() < stopDeadline {
+        let cooldownDeadline = Date().addingTimeInterval(3)
+        while owner.restartCount < HealthRecoveryPolicy.maximumRecoveryAttempts,
+              Date() < cooldownDeadline {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         XCTAssertEqual(owner.restartCount, HealthRecoveryPolicy.maximumRecoveryAttempts)
+        XCTAssertEqual(owner.stopCount, 0)
+        XCTAssertTrue(manager.lastError?.contains("冷却") == true)
 
         owner.shouldFailRestart = false
         manager.start(tunnel.id)
@@ -229,34 +232,82 @@ final class StabilityStage1Tests: XCTestCase {
         XCTAssertEqual(owner.restartCount, 0, "删除隧道后不得执行已排队的恢复任务")
     }
 
-    func testProductionHealthStateUsesFixedPolicyAndStopsAfterTenthFailure() {
+    func testProductionHealthStateUsesFixedPolicyAndEntersAutomaticCooldown() {
         var state = HealthRecoveryState()
+        let now: UInt64 = 1_000_000_000
 
         for attempt in 1...HealthRecoveryPolicy.maximumRecoveryAttempts {
             XCTAssertEqual(
-                state.record(.failed(reason: "fixture"), status: .running(pid: 7), keepAlive: true),
+                state.record(
+                    .failed(reason: "fixture"),
+                    status: .running(pid: 7),
+                    keepAlive: true,
+                    nowUptimeNanoseconds: now
+                ),
                 .observe
             )
             XCTAssertEqual(
-                state.record(.failed(reason: "fixture"), status: .running(pid: 7), keepAlive: true),
+                state.record(
+                    .failed(reason: "fixture"),
+                    status: .running(pid: 7),
+                    keepAlive: true,
+                    nowUptimeNanoseconds: now
+                ),
                 .observe
             )
             XCTAssertEqual(
-                state.record(.failed(reason: "fixture"), status: .running(pid: 7), keepAlive: true),
+                state.record(
+                    .failed(reason: "fixture"),
+                    status: .running(pid: 7),
+                    keepAlive: true,
+                    nowUptimeNanoseconds: now
+                ),
                 .schedule(
                     attempt: attempt,
                     delayNanoseconds: HealthRecoveryPolicy.backoffNanoseconds(for: attempt)
                 )
             )
 
-            let finish = state.finishRecovery(success: false)
+            let finish = state.finishRecovery(
+                success: false,
+                nowUptimeNanoseconds: now
+            )
             if attempt == HealthRecoveryPolicy.maximumRecoveryAttempts {
-                XCTAssertEqual(finish, .stop)
-                XCTAssertEqual(state.phase, .stoppedAfterRecovery)
+                XCTAssertEqual(
+                    finish,
+                    .cooldown(delayNanoseconds: HealthRecoveryPolicy.automaticCooldownNanoseconds)
+                )
+                XCTAssertEqual(state.phase, .monitoring)
+                XCTAssertEqual(state.recoveryAttempts, 0)
+                XCTAssertEqual(
+                    state.cooldownUntilUptimeNanoseconds,
+                    now + HealthRecoveryPolicy.automaticCooldownNanoseconds
+                )
             } else {
                 XCTAssertEqual(finish, .observe)
             }
         }
+
+        XCTAssertEqual(
+            state.record(
+                .failed(reason: "during cooldown"),
+                status: .running(pid: 7),
+                keepAlive: true,
+                nowUptimeNanoseconds: now + 1
+            ),
+            .observe
+        )
+        XCTAssertEqual(state.recoveryAttempts, 0)
+        XCTAssertEqual(
+            state.record(
+                .failed(reason: "after cooldown"),
+                status: .running(pid: 7),
+                keepAlive: true,
+                nowUptimeNanoseconds: now + HealthRecoveryPolicy.automaticCooldownNanoseconds + 1
+            ),
+            .observe
+        )
+        XCTAssertNil(state.cooldownUntilUptimeNanoseconds)
     }
 
     @MainActor
