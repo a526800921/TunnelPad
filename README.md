@@ -6,7 +6,9 @@ TunnelPad 是一个 macOS 菜单栏应用，用于统一管理本机与服务器
 
 - v1 隧道管理、菜单栏入口、`launchd` 生命周期、配置 v1 和 Rust Core 迁移已完成。
 - ECS 动态 SSH 公网 IP 同步阶段 2 已完成：SSH 隧道执行启动/重启前，App 会调用 `.app/Contents/Resources/update-ecs-ssh-ip`，同步受管安全组规则后再调用 Rust Core。
-- 稳定性与健康恢复、日志事件流和 Rust Core 风险收敛计划已完成；当前稳定性自动恢复范围固定为 `launchd`，未来 `app` 执行器另立计划。
+- 稳定性与健康恢复、日志事件流、日志保留与低写放大、后台健康监测能耗、无人值守受管 SSH 收敛恢复以及 Rust Core 风险收敛计划均已完成。
+- 当前生产执行器和自动恢复范围固定为 `launchd`；`app` 执行器仍是非目标，未来另立计划。
+- 日志优化已完成：正常追加采用增量采集，持久日志达到约 512 KiB 后才批量压缩，压缩后保留最近 2000 个逻辑行；正常 SSH 默认不带独立 `-v`，详细日志可按需开启。
 - 本机 HTTP API 已完成：App 启动时绑定 `127.0.0.1:9998`，提供隧道状态、启停、重启和日志接口；不提供远程访问、配置写入或 ECS API。
 - 计划状态与阶段依赖以 [`docs/PLAN_MAP.md`](docs/PLAN_MAP.md) 为准。
 
@@ -15,7 +17,8 @@ TunnelPad 是一个 macOS 菜单栏应用，用于统一管理本机与服务器
 - 菜单栏和主窗口管理多条 `launchd` SSH 隧道。
 - Rust Core 作为配置、生命周期、运行时状态、并发和退出清理的唯一 owner；SwiftUI/AppKit 负责界面和 FFI 适配。
 - HTTP 探针检查并展示隧道健康结果；`launchd` 范围内的后台健康恢复和资源收敛已完成。
-- 读取每条隧道的 `launchd` 日志文件并在详情页查看。
+- 对已核验的受管 SSH 进程执行无人值守假死收敛；身份不匹配或状态未知时保持 fail-closed，并进入自动冷却重试。
+- 以事件流和增量采集更新日志；面板关闭期间仍保留每条隧道最近 500 条内存日志，持久文件在压缩后保留最近 2000 个逻辑行。
 - 通过本机 HTTP API 对外提供受控的状态、生命周期和日志调用。
 - 接管旧版 LaunchAgent，提供备份与失败回滚边界。
 - 对识别为 SSH 的命令，在启动/重启前执行 ECS 动态 IP 同步；非 SSH 命令不触发该同步。
@@ -64,7 +67,7 @@ curl -X POST http://127.0.0.1:9998/api/tunnels/admin-tunnel/start
 curl http://127.0.0.1:9998/api/tunnels/admin-tunnel/logs
 ```
 
-启停请求会等待底层操作完成后返回；隧道不存在返回 `404`，已有操作进行中返回 `409`，失败和超时会返回明确错误。API 只返回状态、PID、探针结果等安全摘要，不返回命令、探针 URL、本地路径、环境变量、密钥或原始 stderr。
+启停请求会等待底层操作完成后返回；隧道不存在返回 `404`，已有操作进行中返回 `409`，失败和超时会返回明确错误。隧道列表、详情和操作响应只返回状态、PID、探针结果等安全摘要，不返回命令、探针 URL、本地路径、环境变量、密钥或完整错误中的本地敏感信息；日志接口单独返回对应隧道的有界纯文本快照。
 
 ## 构建与测试
 
@@ -113,6 +116,10 @@ open dist/TunnelPad.app
 - [ECS 动态 SSH 公网 IP 同步计划](docs/plans/ecs-dynamic-ssh-ip.md)
 - [隧道稳定性与健康恢复计划](docs/plans/tunnelpad-stability.md)
 - [日志事件流与面板生命周期计划](docs/plans/tunnelpad-log-streaming.md)
+- [日志保留与能耗回归修复计划](docs/plans/tunnelpad-log-retention-energy-regression.md)
+- [日志低写放大与流式保留计划](docs/plans/tunnelpad-log-write-amplification.md)
+- [后台健康监测能耗优化计划](docs/plans/tunnelpad-health-monitor-energy.md)
+- [无人值守受管 SSH 收敛恢复计划](docs/plans/tunnelpad-unattended-managed-ssh-recovery.md)
 - [本机 HTTP API 计划](docs/plans/tunnelpad-local-api.md)
 - [Rust Core 唯一生命周期 owner ADR](docs/adr/0001-rust-core-single-owner.md)
 - [TunnelPad 功能图谱](docs/graph/functional.yaml)
@@ -122,4 +129,5 @@ open dist/TunnelPad.app
 - 不要把阿里云凭证 CSV、CLI 配置文件、AccessKey、Secret、SSH 私钥或真实公网 IP 提交到仓库。
 - 本机 HTTP API 无鉴权，安全边界依赖回环监听；不要通过端口转发、代理或其他方式将 `9998` 暴露到局域网或公网。
 - ECS 同步只维护描述明确的受管 SSH `/32` 规则，其他安全组规则不在操作范围内。
+- 无人值守恢复只处理已核验的 TunnelPad 受管 SSH 进程；身份无法确认、状态未知或 ECS 前置失败时保持 fail-closed，不操作未知进程或远端资源。
 - 发现安全组规则、凭证或隧道状态异常时，先停止当前操作，并按计划中的失败与恢复边界处理。
