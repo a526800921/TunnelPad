@@ -2,8 +2,8 @@
 
 - 状态：已完成
 - 当前阶段：-
-- 最后更新：2026-09-04
-- 前置：`tunnelpad-stability`、`tunnelpad-rust-migration`、`tunnelpad-log-streaming` 已完成；纯 `SIGSTOP` 无人工释放的收敛依赖 [无人值守受管 SSH 收敛恢复计划](tunnelpad-unattended-managed-ssh-recovery.md)。本计划不重开既有前置；共享模块后续仍须串行编辑。
+- 最后更新：2026-09-05
+- 前置：`tunnelpad-stability`、`tunnelpad-rust-migration`、`tunnelpad-log-streaming` 和[日志保留与能耗回归修复计划](tunnelpad-log-retention-energy-regression.md)已完成；纯 `SIGSTOP` 无人工释放的收敛依赖 [无人值守受管 SSH 收敛恢复计划](tunnelpad-unattended-managed-ssh-recovery.md)。本计划不重开既有前置；共享模块后续仍须串行编辑。
 
 ## 背景
 
@@ -12,6 +12,8 @@ TunnelPad 空闲时出现约 10 秒一次的瞬时 CPU/能耗峰值。2026-09-03
 每轮 `runHealthProbeCycle()` 先要求 Rust Core 生成完整 `snapshot()`；Rust owner 对配置中每条隧道同步执行一次 `launchctl print`。当前仅一条隧道启用 HTTP 探针，但配置中两条隧道都被状态扫描。阶段 2 真实运行又确认：主窗口的 5 秒 UI 刷新任务会反复调用 `refreshAsync()`；移除该调用后，运行时栈继续显示 `ProbeService.check → NSURLSession.data`，说明每轮探针新建并销毁临时会话也是周期开销来源。详见[阶段 0 基线](../data-quality/tunnelpad-health-monitor-energy-stage0-20260903.md)和[阶段 2 真实 App 验收](../data-quality/tunnelpad-health-monitor-energy-stage2-real-app-acceptance-20260904.md)。
 
 本计划依赖已完成的 [Rust Core 迁移](tunnelpad-rust-migration.md) 所确立的 lifecycle owner，不能以 Swift 旁路或 ABI 变更规避扫描。日志事件流边界复用已完成的 [日志事件流与面板生命周期计划](tunnelpad-log-streaming.md)；因 `TunnelManager` 和测试路径共享，后续实现仍须串行。
+
+2026-09-05 隔夜复验未通过。已确认运行的是重新打包的新版本，现存主要热点为日志 watcher 触发的全文裁剪检查；CRLF 日志行数漏计导致文件保留上限失效。真实输入、两次运行栈、版本核验与拟议修复见[隔夜复验与诊断](../data-quality/tunnelpad-health-monitor-energy-overnight-revalidation-20260905.md)。日志缺陷已由[日志保留与能耗回归修复计划](tunnelpad-log-retention-energy-regression.md)完成修复和真实 Release 复验；当前以日志修复后的独立完成复核为准。
 
 ## 目标
 
@@ -55,13 +57,13 @@ TunnelPad 空闲时出现约 10 秒一次的瞬时 CPU/能耗峰值。2026-09-03
 |---|---|---|---|---|
 | 阶段 0 | 固定能耗基线、拆分契约、隔离样本矩阵和回滚边界 | 已记录真实运行与源码基线 | 25 秒采样、调用链/影响分析、fixture 设计、独立准入复核 | 已完成 |
 | 阶段 1 | 实施“探针优先、按需状态复核”的健康循环 | 阶段 0 完成；阶段 1 自己的 Step 0 与独立准入通过 | 调用计数、失败序列、回归与治理检查 | 已完成 |
-| 阶段 2 | 验证能耗改善与恢复契约 | 阶段 1 完成；阶段 2 自己的 Step 0 与独立准入通过 | 用户授权的真实 App 采样、受控恢复验收与独立完成复核 | 已完成 |
+| 阶段 2 | 验证能耗改善与恢复契约 | 阶段 1 完成；阶段 2 自己的 Step 0 与独立准入通过；日志保留回归已完成 | 用户授权的真实 App 采样、受控恢复验收、日志修复后真实窗口与独立完成复核 | 已完成 |
 
 ## 当前阶段
 
 ### 范围
 
-阶段 2 的真实 App 能耗和恢复契约验收已完成。阶段 1 已按“先执行既有 HTTP 探针，仅在异常或恢复前按目标隧道读取最新状态”的方向实现，并通过独立完成复核；真实运行定位并收敛了主窗口 5 秒全量刷新调用点和探针每轮新建 `URLSession` 两类周期开销。受管 SSH 的纯 `SIGSTOP` 无人工释放边界由独立专项计划完成并已回填本计划。本计划已关闭。
+阶段 2 的首轮真实 App 能耗和恢复契约验收作为历史证据保留。阶段 1 已完成按需状态读取，阶段 2 已调整主窗口周期刷新、复用探针会话并完成受管 SSH 恢复边界验证。2026-09-05 隔夜复验曾出现周期 CPU/能耗峰值，运行栈定位到日志裁剪全文扫描及 CRLF 行数漏计；日志保留计划随后完成阶段 1 修复、阶段 2 真实 Release 回归和独立完成复核。本计划已基于[日志修复后阶段 2 独立完成复核](../data-quality/tunnelpad-health-monitor-energy-post-log-retention-fix-independent-completion-review-20260905.md)重新满足完成条件并关闭。
 
 ### 阶段准入摘要
 
@@ -72,8 +74,8 @@ TunnelPad 空闲时出现约 10 秒一次的瞬时 CPU/能耗峰值。2026-09-03
 | 样本矩阵 | [阶段 2 Step 0](../data-quality/tunnelpad-health-monitor-energy-stage2-step0-20260904.md)；覆盖真实 Release App、配置、CPU、Activity Monitor 和资源边界 |
 | 验证方式 | 用户授权的真实 App 采样、回环 API、进程采样、Activity Monitor、Swift/Rust 回归和治理检查 |
 | 失败/回滚边界 | 旧 App 已本地备份；失败时只恢复本地 App，不改用户配置、真实 plist、ECS 或凭证 |
-| 当前阻塞项 | 无；能耗切片、状态收敛和受管 SSH 无人工恢复边界均已完成独立复核。 |
-| 最新独立准入复核 | [独立完成复核](../data-quality/tunnelpad-health-monitor-energy-independent-completion-review-20260904.md)；阶段 2 真实能耗和恢复证据见对应阶段记录 |
+| 当前阻塞项 | 无；日志保留缺陷已由独立计划完成修复、Release 回归和独立完成复核 |
+| 最新独立准入复核 | 通过并完成；[日志修复后阶段 2 独立完成复核](../data-quality/tunnelpad-health-monitor-energy-post-log-retention-fix-independent-completion-review-20260905.md)确认阶段 2 完成，本计划关闭 |
 
 ### 实施步骤
 
@@ -84,6 +86,8 @@ TunnelPad 空闲时出现约 10 秒一次的瞬时 CPU/能耗峰值。2026-09-03
 5. 已移除主窗口 5 秒全量 `refreshAsync()` 周期调用，保留首次/操作后刷新；真实活动 `admin-tunnel` 复测未再出现前一轮的 `70%–80%` 周期 CPU 峰值。
 6. 已让同一探针服务复用禁代理 `URLSession`；活动隧道复测的即时能耗约 `0.5`，12 小时现场读数约 `10.13`，后续 CPU 保持低个位数。
 7. 已补充两处有界重读：明确 `notLoaded` 才继续 ECS/start，明确 `running` 才完成恢复；带受控原 PID 释放和纯 `SIGSTOP` 无人工释放的真实活动隧道恢复链路均已通过。后者由[无人值守专项计划](tunnelpad-unattended-managed-ssh-recovery.md)在 Rust Core 受管身份核验后负责有界信号升级和自动冷却。
+8. 应用户要求重新开启阶段 2 夜间复验：保持当前实际配置运行一夜，次日复验 CPU、Activity Monitor 能耗、约 10 秒周期峰值、隧道状态和 `xpcproxy` 是否再次出现；复验完成前不修改代码、不重新关闭计划。
+9. 隔夜复验已完成且未通过；先记录日志裁剪热点和 CRLF 输入缺陷。修复样本、实现范围和安全边界转入[日志保留与能耗回归修复计划](tunnelpad-log-retention-energy-regression.md)，本轮不调整 10 秒契约或日志保留规则。
 
 ### Step 0 证据
 
@@ -99,12 +103,14 @@ TunnelPad 空闲时出现约 10 秒一次的瞬时 CPU/能耗峰值。2026-09-03
 | 4 | `[fail, fail, fail]` 与恢复成功 | 注入探针结果和 fake owner | 第 3 次失败、退避、恢复前状态门禁保持现有契约 | 少计/多计、提前/延后恢复或跨隧道操作 | 阶段 0 追加证据与专项测试 |
 | 5 | KeepAlive、手动操作、删除、重载和退出 | 隔离生命周期/代次 fixture | 取消、清零、busy 与迟到结果门禁不变 | 自动恢复越过操作或退出边界 | 阶段 0 追加证据与专项测试 |
 | 6 | 治理与反向引用 | `plan-governance-cli check . --strict-readiness`；`rg -n 'tunnelpad-health-monitor-energy|能耗优化|草案为准|以草案为事实源|详见草案' docs` | 状态、依赖与单一事实源一致 | 严格检查错误或文档漂移 | 本计划与 `PLAN_MAP.md` |
+| 7 | 用户授权的真实 App 一夜运行 | 保持当前配置运行一夜；次日复核 `top`/Activity Monitor、本机 API 状态和固定周期 CPU/能耗峰值 | 无固定周期峰值，隧道状态稳定且不再卡在 `xpcproxy` | 出现可重复的约 10 秒峰值、状态漂移或启动过渡态未收敛 | [隔夜复验与诊断](../data-quality/tunnelpad-health-monitor-energy-overnight-revalidation-20260905.md)：未通过 |
 
 ### 阶段证据
 
 | 日期 | 类型 | 动作/结果 | 证据 | 状态 | 记录者 |
 |---|---|---|---|---|---|
 | 2026-09-03 | 真实运行基线与计划建立 | 25 秒只读采样复现约 10 秒 CPU 峰值；核对当前两条隧道、健康循环、Rust owner 和 launchctl 调用链；未修改生产配置或代码 | [阶段 0 基线](../data-quality/tunnelpad-health-monitor-energy-stage0-20260903.md) | 进行中；独立准入未进行 | Codex |
+| 2026-09-05 | 隔夜反证与只读诊断 | 真实 CPU/能耗复验未通过；产物已核验，热点定位到 CRLF 大日志的全文裁剪检查 | `docs/data-quality/tunnelpad-health-monitor-energy-overnight-revalidation-20260905.md` | 未通过；待修复 | Codex |
 
 ### 最近实施/验证记录
 
@@ -121,18 +127,22 @@ TunnelPad 空闲时出现约 10 秒一次的瞬时 CPU/能耗峰值。2026-09-03
 | 2026-09-04 | 阶段 2 自动恢复后能耗尾检 | 自动恢复后的真实 App 继续运行 30 秒，31 个采样最高约 `18.4%` CPU，其中达到 `10%` 的采样 4 个；活动监视器即时能耗读数为 `0.0`，隧道探针保持 `401/satisfied` | `/tmp/tunnelpad-final-energy-30s.txt`；Activity Monitor；本机 API | 通过；不再出现旧基线的几十个百分点固定周期峰值 | Codex |
 | 2026-09-04 | 阶段 2 受管 SSH 无人值守边界关闭 | 真实 Release App 中目标受管 PID 单次 `SIGSTOP` 后无人工释放，自动恢复到新 PID 和 HTTP `401/satisfied`；非目标隧道保持不变 | [无人值守阶段 3 实施证据](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-implementation-20260904.md)；[能耗计划独立完成复核](../data-quality/tunnelpad-health-monitor-energy-independent-completion-review-20260904.md) | 通过；阶段 2 完成，本计划关闭 | Codex（独立只读复核） |
 | 2026-09-04 | 完成后 `xpcproxy` 状态回归修复 | `startAsync`/`restartAsync` 对当前隧道执行 30 次、100ms 间隔的有界状态复核；无探针隧道的 `xpcproxy` 可收敛为 `running`，不恢复后台全量刷新 | [回归修复与验证](../data-quality/tunnelpad-health-monitor-energy-post-completion-regression-fix-20260904.md)；Swift 140/140；GitNexus impact HIGH | 通过；不重开原阶段 | Codex |
+| 2026-09-04 | 用户请求重新开启阶段 2 夜间复验 | 首轮实现和独立完成复核保留；用户将运行一夜，次日复验长期 CPU/能耗和状态稳定性，结果尚未产生 | 本计划；待补夜间复验记录 | 实施中；暂不关闭 | Codex |
+| 2026-09-05 | 隔夜复验与根因定位 | 运行产物 UUID/代码段匹配；周期峰值仍在；两次运行栈和真实日志换行统计定位全文裁剪检查与 CRLF 漏计，补充拟议修复和测试缺口 | [隔夜复验与诊断](../data-quality/tunnelpad-health-monitor-energy-overnight-revalidation-20260905.md) | 未通过；仅文档，未修改实现 | Codex |
+| 2026-09-05 | 新增独立日志修复计划并完成阶段 0 准入 | 将 CRLF 行计数、全文裁剪热点、大日志小追加和并发失败边界从本计划拆出；独立日志计划阶段 0、阶段 1 实现/回归和阶段 2 Step 0 独立准入均已完成，本计划等待其真实长期回归 | [日志保留与能耗回归修复计划](tunnelpad-log-retention-energy-regression.md)；[阶段 1 实施证据](../data-quality/tunnelpad-log-retention-energy-regression-stage1-implementation-20260905.md)；[阶段 2 独立准入复核](../data-quality/tunnelpad-log-retention-energy-regression-stage2-independent-review-20260905.md)；`PLAN_MAP.md` | 通过；等待新计划阶段 2 完成 | Codex |
+| 2026-09-05 | 日志修复后阶段 2 重新验收与完成复核 | 日志保留计划阶段 2 真实两隧道窗口通过；CPU 最高约 7.7%，Activity Monitor 即时能耗约 2.0，日志均为 2000 LF，状态和退出清理通过；本计划完成条件重新满足 | [日志保留阶段 2 真实验收](../data-quality/tunnelpad-log-retention-energy-regression-stage2-implementation-20260905.md)；[日志修复后独立完成复核](../data-quality/tunnelpad-health-monitor-energy-post-log-retention-fix-independent-completion-review-20260905.md) | 通过；阶段 2 完成，本计划关闭 | Codex（独立只读复核） |
 
 阶段证据只声明仓库内相对路径；最近实施/验证记录采用追加式记录，不能替代独立准入复核。
 
 ### Attestation 说明
 
-本计划已完成；如需机器可验证快照，使用 `docs/attestations/tunnelpad-health-monitor-energy.json` 并保留本计划及独立完成复核。
+本计划首轮完成快照 `docs/attestations/tunnelpad-health-monitor-energy.json` 和首轮独立复核保留为历史；日志修复后的最新完成结论见[独立完成复核](../data-quality/tunnelpad-health-monitor-energy-post-log-retention-fix-independent-completion-review-20260905.md)，不覆盖历史文件。
 
 ### 验证方式
 
 - 阶段 0：只读采样、源码调用链、GitNexus impact、隔离 fixture 设计与治理检查，已完成。
 - 阶段 1：专项调用计数与状态机测试，随后运行 `swift test`、`cargo test --manifest-path rust/Cargo.toml`、`git diff --check`、治理检查与 GitNexus `detect_changes()`；已完成。
-- 阶段 2：按用户授权使用真实 App 采样；UI 全量刷新调用已移除、探针会话已复用，活动 `admin-tunnel` 下的 CPU/Activity Monitor 复测已通过；stop/start 两处状态收敛和纯 `SIGSTOP` 无人工释放的活动隧道恢复链路均已验收，独立完成复核通过。完成后针对无探针隧道的 `xpcproxy` UI/API 缓存回归，使用单隧道有界状态复核修复并通过 Swift 全量回归。
+- 阶段 2：首轮短窗口、状态收敛、受管恢复和 `xpcproxy` 回归证据保留；日志修复计划阶段 2 已覆盖真实 CRLF 日志追加、CPU/Activity Monitor、周期峰值、状态、运行栈和退出清理，结果通过。
 
 ### 测试覆盖率
 
@@ -140,21 +150,24 @@ TunnelPad 空闲时出现约 10 秒一次的瞬时 CPU/能耗峰值。2026-09-03
 
 ### 完成条件
 
+2026-09-05 隔夜复验曾否证首轮结论；日志保留缺陷已修复并完成新的真实回归和独立完成复核，以下结论以最新证据为准。
+
 - 阶段 0 的真实采样、隔离调用计数 fixture、恢复等价性矩阵和复核记录已通过；阶段 1 已完成；阶段 2 的 UI 周期调用和探针临时会话已收敛，活动隧道真实能耗复测已通过；stop/start 两处 launchd 短暂状态的有界重读、受控原 PID 释放和纯 `SIGSTOP` 无人工释放的真实恢复链路均已通过；阶段 2 独立完成复核已通过。
 - 健康时后台循环不再执行全量 snapshot 或无探针隧道的 `launchctl print`；恢复前读取目标隧道有效状态。
 - HTTP 探针、10 秒周期、3 次失败、固定退避、10 次熔断、ECS fail-closed、KeepAlive、手动操作、配置/退出代次和日志边界均有反证或回归证据。
 - 阶段 2 收敛后的真实 App 采样不再出现可归因于健康循环、UI 全量刷新定时任务或探针会话初始化的固定高 CPU 峰值；当前窗口未影响非目标隧道或远端资源；活动隧道恢复已在受控原 PID 释放窗口验收。纯 `SIGSTOP` 无人工释放的进程处置已决策为独立无人值守专项计划，待其完成真实验收。
 - 最新独立完成复核通过，`PLAN_MAP.md`、阶段证据和治理检查同步。
+- 日志修复后的真实 Release 两隧道窗口已记录 CPU/能耗、固定周期峰值、日志行数、隧道状态、运行栈和资源清理；最新独立完成复核通过，阶段 2 关闭。
 
 ## 最新独立准入复核
 
 | 字段 | 内容 |
 |---|---|
-| 日期 | 2026-09-04 |
+| 日期 | 2026-09-05 |
 | 阶段 | 阶段 2 |
-| 结论 | 通过，阶段 2 完成；本计划关闭 |
-| 证据 | [能耗计划独立完成复核](../data-quality/tunnelpad-health-monitor-energy-independent-completion-review-20260904.md)；阶段 2 Step 0 与准入记录仍保留 |
-| 复核者 | Codex（独立只读完成复核） |
+| 结论 | 通过；阶段 2 完成，本计划关闭 |
+| 证据 | [日志修复后阶段 2 独立完成复核](../data-quality/tunnelpad-health-monitor-energy-post-log-retention-fix-independent-completion-review-20260905.md)；[日志保留阶段 2 真实验收](../data-quality/tunnelpad-log-retention-energy-regression-stage2-implementation-20260905.md) |
+| 复核者 | Codex（基于当前仓库、真实 Release 窗口、日志元数据和清理结果的独立只读复核） |
 
 ## 独立复核记录
 
@@ -165,6 +178,8 @@ TunnelPad 空闲时出现约 10 秒一次的瞬时 CPU/能耗峰值。2026-09-03
 | 2026-09-04 | 独立准入复核 | 阶段 2 | 通过 | [阶段 2 独立准入复核](../data-quality/tunnelpad-health-monitor-energy-stage2-independent-review-20260904.md)；达到“待实施”标准，不代表阶段 2 完成 | Codex |
 | 2026-09-04 | 独立完成复核 | 阶段 2 | 通过，阶段 2 完成；本计划关闭 | [能耗计划独立完成复核](../data-quality/tunnelpad-health-monitor-energy-independent-completion-review-20260904.md)；受管 SSH 无人值守边界见[阶段 3 独立完成复核](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-independent-completion-review-20260904.md) | Codex（独立只读复核） |
 | 2026-09-04 | 完成后回归复核 | 阶段 2 | 通过；不重开原阶段 | [回归修复与验证](../data-quality/tunnelpad-health-monitor-energy-post-completion-regression-fix-20260904.md)；Swift 140/140；状态收敛仅限显式 start/restart | Codex（独立只读复核） |
+| 2026-09-05 | 隔夜完成复核与准入撤回 | 阶段 2 | 未通过；阶段 2 隔夜能耗复验失败，日志裁剪热点未修复 | [隔夜复验与诊断](../data-quality/tunnelpad-health-monitor-energy-overnight-revalidation-20260905.md)；真实运行反证，不授予新增修复准入 | Codex（基于真实运行与源码的只读复核） |
+| 2026-09-05 | 日志修复后独立完成复核 | 阶段 2 | 通过；阶段 2 完成，本计划关闭 | [日志修复后阶段 2 独立完成复核](../data-quality/tunnelpad-health-monitor-energy-post-log-retention-fix-independent-completion-review-20260905.md)；真实两隧道窗口和日志保留回归通过 | Codex（独立只读完成复核） |
 
 ## 未决问题
 
@@ -174,6 +189,7 @@ TunnelPad 空闲时出现约 10 秒一次的瞬时 CPU/能耗峰值。2026-09-03
 | 启动首次状态发现如何保留 | 保留启动阶段最多一次全量状态发现；持续健康周期不再重复扫描 | 否 | 已验证 |
 | 是否同时优化 UI 刷新或 URLSession 创建 | 阶段 2 已在不修改 `refreshAsync()` 实现的前提下移除其 5 秒周期调用，并复用探针服务的禁代理会话 | 否 | 已完成 |
 | 真实能耗验收阈值 | 以健康时无后台全量 snapshot/launchctl 为主判据；收敛后 30 秒以上采样验证固定周期峰值消失，不用跨设备绝对能耗作门槛 | 否 | 已冻结 |
+| 隔夜复验暴露日志全文扫描与 CRLF 漏计 | 由[日志保留与能耗回归修复计划](tunnelpad-log-retention-energy-regression.md)完成阶段 1 实现、回归和阶段 2 真实长期验证；完成后回到本计划验证日志保留和长期能耗 | 否 | 已解决；日志计划阶段 2 真实回归和本计划最新独立完成复核通过 |
 | 冻结 SSH 进程进入 launchd 终止过渡态时是否由自动恢复主动释放原进程 | 当前真实验收仅在核验过原 PID 且 launchd 进入终止过渡态后由测试窗口释放；是否把该信号处置纳入生产 Rust owner 需另行评估，避免绕过现有生命周期安全边界 | 是 | 待决策 |
 
 ## 风险和回滚

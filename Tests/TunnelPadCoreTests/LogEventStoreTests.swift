@@ -62,27 +62,111 @@ final class LogEventStoreTests: XCTestCase {
     func testMemoryCacheKeepsLatest500AndFileKeepsLatest2000Lines() async throws {
         let fixture = try LogEventFixture(id: "limits")
         defer { fixture.cleanup() }
-        let content = (1...2_001).map { "line-\($0)" }.joined(separator: "\n") + "\n"
+        let payload = String(repeating: "x", count: 300)
+        let content = (1...2_001).map { "line-\($0)-\(payload)" }.joined(separator: "\n") + "\n"
         try fixture.write(content)
 
         let store = LogEventStore(paths: fixture.paths, pollIntervalNanoseconds: 60_000_000_000)
         let snapshot = await store.openSession(for: fixture.id).snapshot
         let visibleLines = snapshot.text.split(separator: "\n")
         XCTAssertEqual(visibleLines.count, 500)
-        XCTAssertEqual(visibleLines.first, "line-1502")
-        XCTAssertEqual(visibleLines.last, "line-2001")
+        XCTAssertTrue(visibleLines.first?.hasPrefix("line-1502-") == true)
+        XCTAssertTrue(visibleLines.last?.hasPrefix("line-2001-") == true)
 
         let retained = try String(contentsOf: fixture.logURL, encoding: .utf8)
         let retainedLines = retained.split(separator: "\n", omittingEmptySubsequences: true)
         XCTAssertEqual(retainedLines.count, 2_000)
-        XCTAssertEqual(retainedLines.first, "line-2")
-        XCTAssertEqual(retainedLines.last, "line-2001")
+        XCTAssertTrue(retainedLines.first?.hasPrefix("line-2-") == true)
+        XCTAssertTrue(retainedLines.last?.hasPrefix("line-2001-") == true)
+    }
+
+    func testRetentionWaitsForHighWatermarkAndDoesNotRecompactEveryAppend() async throws {
+        let fixture = try LogEventFixture(id: "high-watermark")
+        defer { fixture.cleanup() }
+        let smallPayload = String(repeating: "s", count: 120)
+        try fixture.write((1...2_001).map { "base-\($0)-\(smallPayload)" }.joined(separator: "\n") + "\n")
+
+        let store = LogEventStore(paths: fixture.paths, pollIntervalNanoseconds: 60_000_000_000)
+        _ = await store.openSession(for: fixture.id)
+        try fixture.append("below-threshold\n")
+        _ = await store.refresh(for: fixture.id)
+        XCTAssertEqual(logicalLines(try Data(contentsOf: fixture.logURL)).count, 2_002)
+
+        let growthPayload = String(repeating: "g", count: 200)
+        let growth = (1...2_000).map { "growth-\($0)-\(growthPayload)" }.joined(separator: "\n") + "\n"
+        try fixture.append(growth)
+        _ = await store.refresh(for: fixture.id)
+        let retainedAfterWatermark = logicalLines(try Data(contentsOf: fixture.logURL))
+        XCTAssertEqual(retainedAfterWatermark.count, 2_000)
+        XCTAssertTrue(retainedAfterWatermark.last?.hasPrefix("growth-2000-") == true)
+
+        try fixture.append("one-more-line\n")
+        _ = await store.refresh(for: fixture.id)
+        let retainedAfterSingleAppend = logicalLines(try Data(contentsOf: fixture.logURL))
+        XCTAssertEqual(retainedAfterSingleAppend.count, 2_001)
+        XCTAssertEqual(retainedAfterSingleAppend.last, "one-more-line")
+    }
+
+    func testRetentionCountsCRLFAndPreservesRawLineEndings() throws {
+        let fixture = try LogEventFixture(id: "crlf-retention")
+        defer { fixture.cleanup() }
+        let content = (1...2_001).map { "line-\($0)" }.joined(separator: "\r\n") + "\r\n"
+        let original = Data(content.utf8)
+        try fixture.write(original)
+
+        XCTAssertTrue(try LogFileRetention.trimIfNeeded(of: fixture.logURL))
+
+        let retained = try Data(contentsOf: fixture.logURL)
+        XCTAssertNotNil(retained.range(of: Data("\r\n".utf8)))
+        XCTAssertNil(retained.range(of: Data("line-1\r\n".utf8)))
+        XCTAssertEqual(logicalLines(retained).count, 2_000)
+        XCTAssertEqual(logicalLines(retained).first, "line-2")
+        XCTAssertEqual(logicalLines(retained).last, "line-2001")
+    }
+
+    func testRetentionSupportsMixedLineEndingsAndUnterminatedFinalLine() throws {
+        let fixture = try LogEventFixture(id: "mixed-retention")
+        defer { fixture.cleanup() }
+        try fixture.write(Data("old\r\nkeep-a\nkeep-b\r\nbare\rvalue".utf8))
+
+        XCTAssertTrue(try LogFileRetention.trimIfNeeded(of: fixture.logURL, maxLines: 2))
+        XCTAssertEqual(try String(contentsOf: fixture.logURL, encoding: .utf8), "keep-b\r\nbare\rvalue")
+    }
+
+    func testRetentionLeavesEmptyAndSmallFilesUntouched() throws {
+        let emptyFixture = try LogEventFixture(id: "empty-retention")
+        defer { emptyFixture.cleanup() }
+        try emptyFixture.write(Data())
+        XCTAssertFalse(try LogFileRetention.trimIfNeeded(of: emptyFixture.logURL))
+        XCTAssertEqual(try Data(contentsOf: emptyFixture.logURL), Data())
+
+        let smallFixture = try LogEventFixture(id: "small-retention")
+        defer { smallFixture.cleanup() }
+        let original = Data("one\r\ntwo\rthree".utf8)
+        try smallFixture.write(original)
+        XCTAssertFalse(try LogFileRetention.trimIfNeeded(of: smallFixture.logURL, maxLines: 3))
+        XCTAssertEqual(try Data(contentsOf: smallFixture.logURL), original)
+    }
+
+    func testRetentionScansTailOfLargeCRLFFileForBoundedCost() throws {
+        let fixture = try LogEventFixture(id: "large-crlf-retention")
+        defer { fixture.cleanup() }
+        let payload = String(repeating: "x", count: 390)
+        let content = (1...20_001).map { "line-\($0)-\(payload)" }.joined(separator: "\r\n") + "\r\n"
+        let original = Data(content.utf8)
+        try fixture.write(original)
+
+        var metrics: LogRetentionMetrics? = LogRetentionMetrics()
+        XCTAssertTrue(try LogFileRetention.trimIfNeeded(of: fixture.logURL, maxLines: 2_000, metrics: &metrics))
+        XCTAssertLessThan(metrics?.scanBytes ?? UInt64(original.count), UInt64(original.count / 2))
+        XCTAssertEqual(logicalLines(try Data(contentsOf: fixture.logURL)).count, 2_000)
     }
 
     func testRetentionDefersWhenFileIsLockedAndRetriesLater() async throws {
         let fixture = try LogEventFixture(id: "locked-retention")
         defer { fixture.cleanup() }
-        let content = (1...2_001).map { "line-\($0)" }.joined(separator: "\n") + "\n"
+        let payload = String(repeating: "x", count: 300)
+        let content = (1...2_001).map { "line-\($0)-\(payload)" }.joined(separator: "\n") + "\n"
         try fixture.write(content)
 
         let descriptor = open(fixture.logURL.path, O_RDWR)
@@ -104,8 +188,8 @@ final class LogEventStoreTests: XCTestCase {
         let retainedAfterUnlock = try String(contentsOf: fixture.logURL, encoding: .utf8)
         let retainedLines = retainedAfterUnlock.split(separator: "\n", omittingEmptySubsequences: true)
         XCTAssertEqual(retainedLines.count, 2_000)
-        XCTAssertEqual(retainedLines.first, "line-2")
-        XCTAssertEqual(retainedLines.last, "line-2001")
+        XCTAssertTrue(retainedLines.first?.hasPrefix("line-2-") == true)
+        XCTAssertTrue(retainedLines.last?.hasPrefix("line-2001-") == true)
     }
 
     func testFileReplacementResetsOffsetWithoutRepeatingOldContent() async throws {
@@ -236,6 +320,24 @@ final class LogEventStoreTests: XCTestCase {
             return event
         }
     }
+
+private func logicalLines(_ data: Data) -> [String] {
+    var lines: [String] = []
+    var start = data.startIndex
+
+    for index in data.indices where data[index] == 0x0A {
+        let rawLine = data[start..<index]
+        let lineData = rawLine.last == 0x0D ? Data(rawLine.dropLast()) : Data(rawLine)
+        lines.append(String(decoding: lineData, as: UTF8.self))
+        start = data.index(after: index)
+    }
+
+    if start < data.endIndex {
+        lines.append(String(decoding: data[start...], as: UTF8.self))
+    }
+
+    return lines
+}
 }
 
 private struct LogEventFixture {

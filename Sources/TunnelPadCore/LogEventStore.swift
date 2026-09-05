@@ -86,6 +86,8 @@ private enum LogPolicy {
     static let memoryLineLimit = 500
     static let maxLineCharacters = 8_000
     static let persistedLineLimit = 2_000
+    static let persistedFileCompactionThresholdBytes: UInt64 = 512 * 1024
+    static let persistedFileCompactionHeadroomBytes: UInt64 = 64 * 1024
 }
 
 enum LogEventStoreError: Error, CustomStringConvertible {
@@ -149,10 +151,39 @@ struct LogLineParser: Sendable {
 }
 
 /// 文件超过上限时原位保留最近行，尽量保持 launchd 已打开的文件身份。
+struct LogRetentionMetrics: Equatable, Sendable {
+    var fileSize: UInt64 = 0
+    var scanBytes: UInt64 = 0
+    var bytesRead: UInt64 = 0
+}
+
 enum LogFileRetention {
+    private static let scanChunkSize = 64 * 1024
+
     @discardableResult
     static func trimIfNeeded(of url: URL, maxLines: Int = LogPolicy.persistedLineLimit) throws -> Bool {
+        var metrics: LogRetentionMetrics?
+        return try trimIfNeeded(of: url, maxLines: maxLines, metrics: &metrics)
+    }
+
+    @discardableResult
+    static func trimIfNeeded(
+        of url: URL,
+        maxLines: Int,
+        metrics: inout LogRetentionMetrics?
+    ) throws -> Bool {
         guard maxLines > 0, FileManager.default.fileExists(atPath: url.path) else { return false }
+        guard maxLines < Int.max else { return false }
+
+        let initialVersion: LogFileVersion
+        do {
+            initialVersion = try fileVersion(atPath: url.path)
+        } catch {
+            throw LogEventStoreError.io(String(describing: error))
+        }
+        metrics?.fileSize = initialVersion.size
+        guard initialVersion.size > 0 else { return false }
+
         let handle: FileHandle
         do {
             handle = try FileHandle(forUpdating: url)
@@ -165,24 +196,60 @@ enum LogFileRetention {
         }
         defer { _ = flock(handle.fileDescriptor, LOCK_UN) }
 
-        try handle.seek(toOffset: 0)
-        let original = try handle.readToEnd() ?? Data()
-        guard let text = String(data: original, encoding: .utf8) else {
-            throw LogEventStoreError.invalidUTF8
-        }
-        var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        let hasTrailingNewline = text.last == "\n"
-        if hasTrailingNewline, lines.last?.isEmpty == true { lines.removeLast() }
-        guard lines.count > maxLines else { return false }
-
-        var retained = lines.suffix(maxLines).joined(separator: "\n")
-        if hasTrailingNewline { retained.append("\n") }
-        let replacement = Data(retained.utf8)
-
-        try handle.seek(toOffset: 0)
-        guard (try handle.readToEnd() ?? Data()) == original else {
+        guard initialVersion == (try fileVersion(atPath: url.path)) else {
             throw LogEventStoreError.fileChanged
         }
+
+        var cursor = initialVersion.size
+        var remainingNewlines: Int?
+        var retainedStart: UInt64?
+        var isFirstChunk = true
+
+        while cursor > 0, retainedStart == nil {
+            let readSize = min(UInt64(Self.scanChunkSize), cursor)
+            cursor -= readSize
+            try handle.seek(toOffset: cursor)
+            let chunk = try handle.read(upToCount: Int(readSize)) ?? Data()
+            metrics?.scanBytes &+= UInt64(chunk.count)
+            metrics?.bytesRead &+= UInt64(chunk.count)
+            guard !chunk.isEmpty else { continue }
+
+            if isFirstChunk {
+                let hasTrailingNewline = chunk.last == 0x0A
+                remainingNewlines = hasTrailingNewline ? maxLines + 1 : maxLines
+                isFirstChunk = false
+            }
+
+            guard var remaining = remainingNewlines else { continue }
+            for index in stride(from: chunk.count - 1, through: 0, by: -1) {
+                guard chunk[index] == 0x0A else { continue }
+                remaining -= 1
+                if remaining == 0 {
+                    retainedStart = cursor + UInt64(index + 1)
+                    break
+                }
+            }
+            remainingNewlines = remaining
+        }
+
+        guard let retainedStart else { return false }
+        try handle.seek(toOffset: retainedStart)
+        let replacement = try handle.readToEnd() ?? Data()
+        metrics?.bytesRead &+= UInt64(replacement.count)
+
+        guard initialVersion == (try fileVersion(atPath: url.path)) else {
+            throw LogEventStoreError.fileChanged
+        }
+
+        let backupURL = url.deletingLastPathComponent()
+            .appendingPathComponent(".\(url.lastPathComponent).retention-\(UUID().uuidString).bak")
+        do {
+            try cloneOrCopyFile(from: url, to: backupURL)
+        } catch {
+            throw LogEventStoreError.io("无法建立日志裁剪回滚副本：\(error)")
+        }
+        defer { try? FileManager.default.removeItem(at: backupURL) }
+
         do {
             try handle.seek(toOffset: 0)
             try handle.write(contentsOf: replacement)
@@ -190,9 +257,10 @@ enum LogFileRetention {
             try handle.synchronize()
         } catch {
             do {
+                let backup = try Data(contentsOf: backupURL)
                 try handle.seek(toOffset: 0)
-                try handle.write(contentsOf: original)
-                try handle.truncate(atOffset: UInt64(original.count))
+                try handle.write(contentsOf: backup)
+                try handle.truncate(atOffset: UInt64(backup.count))
                 try handle.synchronize()
             } catch {
                 // 保留首个写入错误；恢复失败也不能报告裁剪成功。
@@ -200,6 +268,27 @@ enum LogFileRetention {
             throw LogEventStoreError.io(String(describing: error))
         }
         return true
+    }
+
+    private static func fileVersion(atPath path: String) throws -> LogFileVersion {
+        let attributes = try FileManager.default.attributesOfItem(atPath: path)
+        let modificationDate = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        return LogFileVersion(
+            device: (attributes[.systemNumber] as? NSNumber)?.uint64Value ?? 0,
+            inode: (attributes[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0,
+            size: (attributes[.size] as? NSNumber)?.uint64Value ?? 0,
+            modificationNanoseconds: Int64(modificationDate * 1_000_000_000)
+        )
+    }
+
+    private static func cloneOrCopyFile(from source: URL, to destination: URL) throws {
+        let cloneResult = source.path.withCString { sourcePath in
+            destination.path.withCString { destinationPath in
+                clonefile(sourcePath, destinationPath, 0)
+            }
+        }
+        if cloneResult == 0 { return }
+        try FileManager.default.copyItem(at: source, to: destination)
     }
 
     /// 原位清空日志文件，保持文件身份、路径和现有 watcher 不变。
@@ -241,6 +330,13 @@ enum LogFileRetention {
     }
 }
 
+private struct LogFileVersion: Equatable {
+    let device: UInt64
+    let inode: UInt64
+    let size: UInt64
+    let modificationNanoseconds: Int64
+}
+
 /// launchd 日志文件的后台增量采集、每隧道缓存和事件发布 owner。
 public actor LogEventStore {
     public static let memoryLineLimit = LogPolicy.memoryLineLimit
@@ -251,6 +347,9 @@ public actor LogEventStore {
         var parser = LogLineParser()
         var identity: FileIdentity?
         var offset: UInt64 = 0
+        var retentionWatermark = LogPolicy.persistedFileCompactionThresholdBytes
+        var retentionIdentity: FileIdentity?
+        var retentionNeedsRetry = false
         var snapshot: LogSnapshot
         var subscribers: [UUID: AsyncStream<LogEvent>.Continuation] = [:]
 
@@ -261,6 +360,12 @@ public actor LogEventStore {
         mutating func finish() {
             for subscriber in subscribers.values { subscriber.finish() }
             subscribers.removeAll()
+        }
+
+        mutating func resetRetention() {
+            retentionWatermark = LogPolicy.persistedFileCompactionThresholdBytes
+            retentionIdentity = nil
+            retentionNeedsRetry = false
         }
     }
 
@@ -341,6 +446,7 @@ public actor LogEventStore {
             state.parser.reset()
             state.offset = 0
             state.identity = nil
+            state.resetRetention()
             let status: LogFileStatus = FileManager.default.fileExists(atPath: url.path) ? .available : .missing
             let snapshot = LogSnapshot(
                 tunnelID: tunnelID,
@@ -443,10 +549,11 @@ public actor LogEventStore {
         let url = logURL(for: tunnelID)
         let previous = state.snapshot
 
-        do { _ = try LogFileRetention.trimIfNeeded(of: url) } catch { /* 保留原文件，下一次继续尝试 */ }
-
         guard FileManager.default.fileExists(atPath: url.path) else {
-            state.parser.reset(); state.identity = nil; state.offset = 0
+            state.parser.reset()
+            state.identity = nil
+            state.offset = 0
+            state.resetRetention()
             state.snapshot = nextSnapshot(
                 id: tunnelID, previous: previous, text: "", status: .missing,
                 appendedText: "", state: &state, publish: publish
@@ -459,7 +566,10 @@ public actor LogEventStore {
         do {
             attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         } catch {
-            state.parser.reset(); state.identity = nil; state.offset = 0
+            state.parser.reset()
+            state.identity = nil
+            state.offset = 0
+            state.resetRetention()
             state.snapshot = nextSnapshot(
                 id: tunnelID, previous: previous, text: "", status: .error(String(describing: error)),
                 appendedText: "", state: &state, publish: publish
@@ -471,7 +581,41 @@ public actor LogEventStore {
         let identity = FileIdentity(attributes: attributes)
         let size = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
         if state.identity != identity || size < state.offset {
-            state.parser.reset(); state.offset = 0
+            state.parser.reset()
+            state.offset = 0
+            state.resetRetention()
+        }
+
+        if state.retentionIdentity != identity {
+            state.retentionIdentity = identity
+            state.retentionWatermark = LogPolicy.persistedFileCompactionThresholdBytes
+            state.retentionNeedsRetry = false
+        }
+
+        var currentIdentity = identity
+        var currentSize = size
+        if state.retentionNeedsRetry || currentSize >= state.retentionWatermark {
+            do {
+                _ = try LogFileRetention.trimIfNeeded(of: url)
+                let refreshedAttributes = try FileManager.default.attributesOfItem(atPath: url.path)
+                currentIdentity = FileIdentity(attributes: refreshedAttributes)
+                currentSize = (refreshedAttributes[.size] as? NSNumber)?.uint64Value ?? 0
+                state.retentionIdentity = currentIdentity
+                state.retentionNeedsRetry = false
+                let (watermark, overflow) = currentSize.addingReportingOverflow(
+                    LogPolicy.persistedFileCompactionHeadroomBytes
+                )
+                state.retentionWatermark = overflow
+                    ? UInt64.max
+                    : max(LogPolicy.persistedFileCompactionThresholdBytes, watermark)
+            } catch {
+                state.retentionNeedsRetry = true
+            }
+        }
+
+        if state.identity != currentIdentity || currentSize < state.offset {
+            state.parser.reset()
+            state.offset = 0
         }
 
         do {
@@ -480,15 +624,18 @@ public actor LogEventStore {
             try handle.seek(toOffset: state.offset)
             let data = try handle.readToEnd() ?? Data()
             try state.parser.consume(data)
-            state.offset = size
-            state.identity = identity
+            state.offset = currentSize
+            state.identity = currentIdentity
             state.snapshot = nextSnapshot(
                 id: tunnelID, previous: previous, text: state.parser.renderedText, status: .available,
                 appendedText: appendText(data: data, old: previous.text, new: state.parser.renderedText),
                 state: &state, publish: publish
             )
         } catch {
-            state.parser.reset(); state.identity = nil; state.offset = 0
+            state.parser.reset()
+            state.identity = nil
+            state.offset = 0
+            state.resetRetention()
             state.snapshot = nextSnapshot(
                 id: tunnelID, previous: previous, text: "", status: .error(String(describing: error)),
                 appendedText: "", state: &state, publish: publish
