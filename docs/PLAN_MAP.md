@@ -26,12 +26,12 @@
 
 | 计划 | 状态 | 当前阶段 | 最后更新 | 依赖 | 证据 |
 |---|---|---|---|---|---|
-| [TunnelPad 日志低写放大与流式保留](plans/tunnelpad-log-write-amplification.md) | 已完成 | - | 2026-09-05 | tunnelpad-log-streaming, tunnelpad-log-retention-energy-regression, tunnelpad-rust-migration | [阶段 1 实施证据](data-quality/tunnelpad-log-write-amplification-stage1-implementation-20260905.md)；[阶段 2 真实 Release 实施证据](data-quality/tunnelpad-log-write-amplification-stage2-implementation-20260905.md)；[阶段 2 独立完成复核](data-quality/tunnelpad-log-write-amplification-stage2-independent-completion-review-20260905.md)；[专项计划](plans/tunnelpad-log-write-amplification.md) |
 
 ### 已完成
 
 | 计划 | 状态 | 当前阶段 | 最后更新 | 依赖 | 证据 |
 |---|---|---|---|---|---|
+| [TunnelPad 日志低写放大与流式保留](plans/tunnelpad-log-write-amplification.md) | 已完成 | - | 2026-09-05 | tunnelpad-log-streaming, tunnelpad-log-retention-energy-regression, tunnelpad-rust-migration | [阶段 1 实施证据](data-quality/tunnelpad-log-write-amplification-stage1-implementation-20260905.md)；[阶段 2 真实 Release 实施证据](data-quality/tunnelpad-log-write-amplification-stage2-implementation-20260905.md)；[阶段 2 独立完成复核](data-quality/tunnelpad-log-write-amplification-stage2-independent-completion-review-20260905.md)；[专项计划](plans/tunnelpad-log-write-amplification.md) |
 | [TunnelPad 隧道稳定性与健康恢复](plans/tunnelpad-stability.md) | 已完成 | - | 2026-09-02 | tunnelpad-v1, tunnelpad-code-quality-refactor, tunnelpad-rust-migration, ecs-dynamic-ssh-ip | [阶段 2 总体独立完成复核](data-quality/tunnelpad-stability-stage2-independent-completion-review-20260902.md)；[阶段 3 独立完成复核](data-quality/tunnelpad-stability-stage3-independent-completion-review-20260902.md)；[阶段 3 Step 0](data-quality/tunnelpad-stability-stage3-step0-20260902.md) |
 | [TunnelPad Rust Core 风险收敛与覆盖率提升](plans/tunnelpad-core-hardening.md) | 已完成 | - | 2026-09-02 | tunnelpad-stability, tunnelpad-rust-migration | [阶段 1 实施证据](data-quality/tunnelpad-core-hardening-stage1-implementation-20260902.md)；[阶段 2 独立完成复核](data-quality/tunnelpad-core-hardening-stage2-independent-completion-review-20260902.md) |
 | [TunnelPad v1 隧道管理应用](plans/tunnelpad-v1.md) | 已完成 | - | 2026-08-29 | - | [阶段 2 功能与验收记录](data-quality/tunnelpad-v1-stage2-features-20260829.md) |
