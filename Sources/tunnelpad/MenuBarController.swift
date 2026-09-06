@@ -141,7 +141,7 @@ final class MenuBarController: NSObject {
             .foregroundColor: NSColor.black,
             .paragraphStyle: paragraph,
         ]
-        let text = "T" as NSString
+        let text = "穿" as NSString
         let textSize = text.size(withAttributes: attributes)
         let textRect = NSRect(
             x: (size - textSize.width) / 2,
