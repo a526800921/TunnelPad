@@ -1,8 +1,7 @@
 # 计划：TunnelPad 后台健康监测能耗优化
 
-- 状态：已完成
-- 当前阶段：-
-- 最后更新：2026-09-05
+> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../PLAN_MAP.md#计划索引)为准。
+
 - 前置：`tunnelpad-stability`、`tunnelpad-rust-migration`、`tunnelpad-log-streaming` 和[日志保留与能耗回归修复计划](tunnelpad-log-retention-energy-regression.md)已完成；纯 `SIGSTOP` 无人工释放的收敛依赖 [无人值守受管 SSH 收敛恢复计划](tunnelpad-unattended-managed-ssh-recovery.md)。本计划不重开既有前置；共享模块后续仍须串行编辑。
 
 ## 背景
@@ -74,8 +73,10 @@ TunnelPad 空闲时出现约 10 秒一次的瞬时 CPU/能耗峰值。2026-09-03
 | 样本矩阵 | [阶段 2 Step 0](../data-quality/tunnelpad-health-monitor-energy-stage2-step0-20260904.md)；覆盖真实 Release App、配置、CPU、Activity Monitor 和资源边界 |
 | 验证方式 | 用户授权的真实 App 采样、回环 API、进程采样、Activity Monitor、Swift/Rust 回归和治理检查 |
 | 失败/回滚边界 | 旧 App 已本地备份；失败时只恢复本地 App，不改用户配置、真实 plist、ECS 或凭证 |
-| 当前阻塞项 | 无；日志保留缺陷已由独立计划完成修复、Release 回归和独立完成复核 |
+| 当前阻塞项 | 无 |
 | 最新独立准入复核 | 通过并完成；[日志修复后阶段 2 独立完成复核](../data-quality/tunnelpad-health-monitor-energy-post-log-retention-fix-independent-completion-review-20260905.md)确认阶段 2 完成，本计划关闭 |
+
+阻塞说明：日志保留缺陷已由独立计划完成修复、Release 回归和独立完成复核
 
 ### 实施步骤
 
@@ -185,12 +186,12 @@ TunnelPad 空闲时出现约 10 秒一次的瞬时 CPU/能耗峰值。2026-09-03
 
 | 问题 | 推荐方案 | 是否阻塞当前阶段 | 状态 |
 |---|---|---|---|
-| 如何消除健康周期全量读取且不改变失败计数 | 已用 fake owner/fake probe 固定“探针优先、异常/恢复前按需复核”路径；阶段 2 继续验证真实采样 | 否 | 隔离实现已验证 |
+| 如何消除健康周期全量读取且不改变失败计数 | 已用 fake owner/fake probe 固定“探针优先、异常/恢复前按需复核”路径；真实采样及日志修复后的结果见[最新独立完成复核](../data-quality/tunnelpad-health-monitor-energy-post-log-retention-fix-independent-completion-review-20260905.md) | 否 | 已完成 |
 | 启动首次状态发现如何保留 | 保留启动阶段最多一次全量状态发现；持续健康周期不再重复扫描 | 否 | 已验证 |
 | 是否同时优化 UI 刷新或 URLSession 创建 | 阶段 2 已在不修改 `refreshAsync()` 实现的前提下移除其 5 秒周期调用，并复用探针服务的禁代理会话 | 否 | 已完成 |
 | 真实能耗验收阈值 | 以健康时无后台全量 snapshot/launchctl 为主判据；收敛后 30 秒以上采样验证固定周期峰值消失，不用跨设备绝对能耗作门槛 | 否 | 已冻结 |
-| 隔夜复验暴露日志全文扫描与 CRLF 漏计 | 由[日志保留与能耗回归修复计划](tunnelpad-log-retention-energy-regression.md)完成阶段 1 实现、回归和阶段 2 真实长期验证；完成后回到本计划验证日志保留和长期能耗 | 否 | 已解决；日志计划阶段 2 真实回归和本计划最新独立完成复核通过 |
-| 冻结 SSH 进程进入 launchd 终止过渡态时是否由自动恢复主动释放原进程 | 当前真实验收仅在核验过原 PID 且 launchd 进入终止过渡态后由测试窗口释放；是否把该信号处置纳入生产 Rust owner 需另行评估，避免绕过现有生命周期安全边界 | 是 | 待决策 |
+| 隔夜复验暴露日志全文扫描与 CRLF 漏计 | [日志保留与能耗回归修复计划](tunnelpad-log-retention-energy-regression.md)已完成真实长期验证；本计划已据[日志修复后独立完成复核](../data-quality/tunnelpad-health-monitor-energy-post-log-retention-fix-independent-completion-review-20260905.md)重新关闭 | 否 | 已完成 |
+| 冻结 SSH 进程进入 launchd 终止过渡态时是否由自动恢复主动释放原进程 | 已由[无人值守受管 SSH 恢复计划](tunnelpad-unattended-managed-ssh-recovery.md)承接；[阶段 3 独立完成复核](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-independent-completion-review-20260904.md)确认身份核验、无人工释放、自动恢复及非目标隔离通过；此前人工释放的条件通过记录保留为历史 | 否 | 已完成 |
 
 ## 风险和回滚
 

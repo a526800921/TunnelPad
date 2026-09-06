@@ -1,5 +1,7 @@
 # 计划：TunnelPad v1 隧道管理应用
 
+> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../PLAN_MAP.md#计划索引)为准。
+
 ## 背景
 
 本机与 ECS 之间现有两条手工维护的 launchd 常驻 SSH 隧道（ECS 连接信息见 motorcycle-manual-app 仓库 `infra/production/ssh_config`；按本仓库敏感信息红线，ECS 地址不写入本仓库文档）：

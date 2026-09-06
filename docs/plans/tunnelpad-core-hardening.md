@@ -1,8 +1,7 @@
 # TunnelPad Rust Core 风险收敛与覆盖率提升计划
 
-状态：`已完成`
-当前阶段：`-`
-最后更新：2026-09-02
+> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../PLAN_MAP.md#计划索引)为准。
+
 
 ## 需求探索
 
@@ -28,7 +27,7 @@
 
 ## 当前阶段
 
-阶段 0–2 已完成。准备实施的改动只涉及 Rust Core 的生命周期 owner 和 Core FFI 测试；Swift/UI 以及未来 app executor 相关风险明确延后。
+阶段 0–2 已完成。本次实施只涉及 Rust Core 的生命周期 owner 和 Core FFI 测试；Swift/UI 以及未来 app executor 相关风险明确延后。
 
 ### P1/P2 选择
 
@@ -47,11 +46,11 @@
 | 当前阶段目标 | 已明确：Core 生命周期风险收敛、反证测试和 production-only 覆盖率 |
 | 范围与非目标 | 已明确：Rust Core；不含 UI、app executor、pidfile/orphan |
 | Step 0 基线 | 已记录：Rust 62 个 unit + 1 个 differential 通过；production-only 行覆盖率 80.60% |
-| 样本/fixture 矩阵 | 已建立，见下表；实现前仍需按命令复验并保存输出 |
+| 样本/fixture 矩阵 | 下表保留实施前的基线矩阵；实施及独立完成结果见[阶段 1 证据](../data-quality/tunnelpad-core-hardening-stage1-implementation-20260902.md)和[阶段 2 独立完成复核](../data-quality/tunnelpad-core-hardening-stage2-independent-completion-review-20260902.md) |
 | 验证、失败和回滚边界 | 已建立：不改 Schema/ABI/JSON 协议；单一 owner 改动失败可回退 |
 | 最新独立准入复核 | 阶段 0 已通过，阶段 1 达到 `待实施` 标准；阶段 1/2 实施和独立完成复核也已通过 |
 
-## 阶段准入摘要
+## 完成说明
 
 阶段 0–2 均已完成。阶段 1 实施前已执行符号级 impact，实施后已完成失败回滚边界、覆盖率和变更范围审计。
 

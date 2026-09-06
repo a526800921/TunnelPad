@@ -1,8 +1,7 @@
 # 计划：TunnelPad 无人值守受管 SSH 收敛恢复
 
-- 状态：已完成
-- 当前阶段：-
-- 最后更新：2026-09-04
+> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../PLAN_MAP.md#计划索引)为准。
+
 - 前置：[TunnelPad 隧道稳定性与健康恢复](tunnelpad-stability.md)、[TunnelPad Rust Core 迁移](tunnelpad-rust-migration.md) 已完成；此前阶段 2 的[真实 App 验收](../data-quality/tunnelpad-health-monitor-energy-stage2-real-app-acceptance-20260904.md)仅作为本计划的背景证据，不构成前置依赖。共享 Rust 生命周期文件必须串行编辑。
 
 ## 需求探索
@@ -110,8 +109,10 @@
 | 样本矩阵 | [阶段 3 Step 0](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-step0-20260904.md)；覆盖实时 Release App、目标/非目标身份、ECS 只读前置、`SIGSTOP`、无人工观察、恢复、清理和治理。 |
 | 验证方式 | 执行前实时身份核验；用户授权的单次 `SIGSTOP`；只读轮询目标 label/PID/HTTP 探针；Rust/Swift/差分回归、GitNexus `detect_changes()` 和严格治理检查。 |
 | 失败/回滚边界 | 身份未知/变化、状态异常、取消、ECS 前置失败或超时均 fail-closed；仅恢复目标隧道，不处理 `reverse-ssh`，不删除配置/凭证/远端规则。 |
-| 当前阻塞项 | 无；历史失败原因已修复，阶段 3 真实无人值守闭环和独立完成复核均已通过。 |
+| 当前阻塞项 | 无 |
 | 最新独立准入复核 | [阶段 3 独立完成复核](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-independent-completion-review-20260904.md)已通过；阶段 3 已完成。历史准入记录仍保留在下方。 |
+
+阻塞说明：历史失败原因已修复，阶段 3 真实无人值守闭环和独立完成复核均已通过。
 
 ### 实施步骤
 

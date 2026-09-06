@@ -6,14 +6,33 @@
 
 ## 文档权责
 
-- `docs/PLAN_MAP.md` 是状态、依赖、替代/合并/废弃关系、推荐顺序、阻塞项和证据链接的事实源。
-- `docs/plans/*.md` 是专项计划的实施细节事实源，记录字段方案、Schema、枚举、Step 0 证据、验证方式和完成条件。
+- `docs/PLAN_MAP.md` 是状态、当前阶段、最后更新、依赖、替代/合并/废弃关系、推荐顺序、阻塞项和证据链接的事实源。
+- `docs/plans/*.md` 记录本次行为差异、阶段、Step 0、验证与完成条件；现行契约优先引用已有 Schema/OpenAPI，没有独立来源时继续由计划中明确的契约章节承载，不为升级批量提取 spec。
+- ADR 记录持久决策及其后果；migration 记录迁移步骤、兼容窗口和回滚。计划引用这些事实源，不重复维护。
 - 总路线图、优先级计划和索引只记录顺序、状态摘要和专项计划链接，不复制字段级方案、枚举、Step 0 细节或完成定义。
 - 当专项计划变化时，必须同步所有引用该计划的路线图、优先级计划或索引。
 - 如果同一事实在多个文档中重复，保留一个事实源，其他文档改为链接引用。
 - `PLAN_MAP.md` 的 `状态` 是计划级生命周期，`当前阶段` 是阶段身份指针；阶段 N 完成后，阶段 N+1 默认保持 `设计中`。
-- 阶段准入摘要、样本矩阵和独立复核记录只写入专项计划，不复制到本索引。
+- 阶段准入摘要、样本矩阵和适用阶段复核记录只写入专项计划，不复制到本索引。
 - 启用治理后，已有草案、历史设计、归档计划和临时分析文档默认只作为背景材料，不再作为规范事实源；后续新规范默认进入 `docs/plans/*.md`、ADR、migration、正式 spec 或 `docs/PLAN_MAP.md`。
+
+## 规范适用与历史兼容
+
+- 规则入口为当前环境发现的 `plan-governance` skill 及其同源 `references/planning.md`、`verification.md`、`cli.md`；仅 CLI 可用时通过 `plan-governance-cli guide` 及对应主题读取。项目代理规则只保留入口与执行边界，避免复制整套规则后漂移。
+- 2026-09-06 同步时，14 个计划均已完成，当前阶段均为 `-`。各计划的背景、旧阶段摘要、探索结论和独立复核表保留为当时记录；本次不重开阶段、不改历史完成日期、不补写风险分类、用户接受或新的准入通过。
+- 已完成计划中的字段与行为按其明确的后续专项计划、ADR、migration 或现行 Schema/OpenAPI 演进；历史范围和非目标不自动约束后来已获准的独立能力。状态以本索引为准，完成证据仍只证明其记录的 revision、环境和场景。
+- 新建治理计划使用同源新模板，在当前阶段摘要显式声明 `复核策略：风险分流`，按 verification 维护 `最新阶段复核` 与追加式 `阶段复核记录`。低风险且后果可撤销、验证充分时自验；安全、权限、公开暴露、数据完整性、核心公共契约、生命周期或共享逻辑的高影响变更保留独立复核。
+- 旧计划未显式选择新策略时继续保留原独立门禁。后续确需重开或切换策略时，先明确本次差异与阶段自己的 Step 0、样本、验证/完成和失败边界，解除有效独立失败及历史冲突，再显式迁移当前阶段结构；不能用自验覆盖旧独立失败，也不能由新策略批准其自身变更。
+- 普通小改、纯落档不新增阶段或逐次用户签收。采用最终体验闭环的功能计划，技术完成待用户接受时保持 `实施中`，记录待验收场景及 `下一动作：等待用户验收`；用户明确接受后才关闭。
+- 验证范围以实际变更为准。纯文档做结构、链接、反向引用及治理检查，代码覆盖率不适用；复用旧全量证据须核对实际工作树、依赖、配置、环境和验收契约，不仅核对 HEAD。
+- 已使用的 attestation 需显式运行 `check --check-attestations --strict-readiness` 检查漂移；本次文档同步不重新生成业务完成快照。旧快照与历史报告保留，不能据结构检查通过宣称 hash 或当前运行验收有效。
+
+## 本次规范同步记录
+
+- 日期：2026-09-06；文档更新基线：`cf3cd37d1b8cf10965f532f4a828696a7d0f3b18`，开始时工作树干净。
+- 规范与工具：已安装 CLI `1.0.0`；其入口、三个 references 和两份计划模板与用户指定 skill 逐文件一致。只更新代理规则受管块及治理 Markdown；仓库 `scripts/check_plan_governance.py` 仍是旧副本，本次以已核对的 CLI 检查，不声称升级了仓库脚本。
+- 各计划索引的 `最后更新` 表示此次规范及状态说明同步日期，原实施/完成日期保留在各计划与证据记录中。结构化无阻塞字段统一为 `无`，原说明移到表外；仅按已有独立完成证据消除当前状态漂移。
+- 验证与独立文档复核：[规范同步复核记录](reviews/plan-governance-upgrade-20260906.md)。该复核只覆盖文档同步，不重新验收历史业务、运行服务或构建产物。
 
 ## 功能图谱
 
@@ -31,20 +50,20 @@
 
 | 计划 | 状态 | 当前阶段 | 最后更新 | 依赖 | 证据 |
 |---|---|---|---|---|---|
-| [TunnelPad 日志低写放大与流式保留](plans/tunnelpad-log-write-amplification.md) | 已完成 | - | 2026-09-05 | tunnelpad-log-streaming, tunnelpad-log-retention-energy-regression, tunnelpad-rust-migration | [阶段 1 实施证据](data-quality/tunnelpad-log-write-amplification-stage1-implementation-20260905.md)；[阶段 2 真实 Release 实施证据](data-quality/tunnelpad-log-write-amplification-stage2-implementation-20260905.md)；[阶段 2 独立完成复核](data-quality/tunnelpad-log-write-amplification-stage2-independent-completion-review-20260905.md)；[专项计划](plans/tunnelpad-log-write-amplification.md) |
-| [TunnelPad 隧道稳定性与健康恢复](plans/tunnelpad-stability.md) | 已完成 | - | 2026-09-02 | tunnelpad-v1, tunnelpad-code-quality-refactor, tunnelpad-rust-migration, ecs-dynamic-ssh-ip | [阶段 2 总体独立完成复核](data-quality/tunnelpad-stability-stage2-independent-completion-review-20260902.md)；[阶段 3 独立完成复核](data-quality/tunnelpad-stability-stage3-independent-completion-review-20260902.md)；[阶段 3 Step 0](data-quality/tunnelpad-stability-stage3-step0-20260902.md) |
-| [TunnelPad Rust Core 风险收敛与覆盖率提升](plans/tunnelpad-core-hardening.md) | 已完成 | - | 2026-09-02 | tunnelpad-stability, tunnelpad-rust-migration | [阶段 1 实施证据](data-quality/tunnelpad-core-hardening-stage1-implementation-20260902.md)；[阶段 2 独立完成复核](data-quality/tunnelpad-core-hardening-stage2-independent-completion-review-20260902.md) |
-| [TunnelPad v1 隧道管理应用](plans/tunnelpad-v1.md) | 已完成 | - | 2026-08-29 | - | [阶段 2 功能与验收记录](data-quality/tunnelpad-v1-stage2-features-20260829.md) |
-| [TunnelPad 界面优化](plans/tunnelpad-ui-refinements.md) | 已完成 | - | 2026-08-30 | tunnelpad-v1 | [阶段 1 证据](data-quality/tunnelpad-ui-refinements-stage1-20260829.md)；[阶段 2 证据](data-quality/tunnelpad-ui-refinements-stage2-20260829.md)；[阶段 3 与阶段 1 收尾证据](data-quality/tunnelpad-ui-refinements-stage3-20260830.md)；[阶段 4 证据](data-quality/tunnelpad-ui-refinements-stage4-20260830.md) |
-| [TunnelPad 代码质量重构](plans/tunnelpad-code-quality-refactor.md) | 已完成 | - | 2026-08-30 | tunnelpad-v1, tunnelpad-ui-refinements | [阶段 0 基线证据](data-quality/tunnelpad-code-quality-refactor-stage0-20260830.md)；[阶段 1 实施证据](data-quality/tunnelpad-code-quality-refactor-stage1-20260830.md)；[阶段 2–4 实施证据](data-quality/tunnelpad-code-quality-refactor-stage2-4-20260830.md)；[专项计划](plans/tunnelpad-code-quality-refactor.md) |
-| [TunnelPad Rust Core 迁移](plans/tunnelpad-rust-migration.md) | 已完成 | - | 2026-08-31 | tunnelpad-v1, tunnelpad-ui-refinements, tunnelpad-code-quality-refactor | [阶段 5 删除后收尾证据](data-quality/tunnelpad-rust-migration-stage5-step0-20260830.md)；[ADR-0001](adr/0001-rust-core-single-owner.md)；[ADR-0002](adr/0002-app-bundle-id-migration.md)；[迁移说明](migrations/tunnelpad-rust-owner-cutover.md)；[专项计划](plans/tunnelpad-rust-migration.md) |
-| [ECS 动态 SSH 公网 IP 同步](plans/ecs-dynamic-ssh-ip.md) | 已完成 | - | 2026-08-31 | tunnelpad-rust-migration（阶段 2 前置已完成） | [阶段 1 实现与验证](data-quality/ecs-dynamic-ssh-ip-stage1-implementation-20260829.md)；[阶段 2 实施与验收证据](data-quality/ecs-dynamic-ssh-ip-stage2-step0-20260831.md)（真实 App 启动/重启、负向隔离、恢复和 SSH 闭环通过，2026-08-31）；[专项计划](plans/ecs-dynamic-ssh-ip.md) |
-| [TunnelPad 隧道备注说明与列表副标题](plans/tunnelpad-tunnel-remarks.md) | 已完成 | - | 2026-08-31 | tunnelpad-v1, tunnelpad-code-quality-refactor, tunnelpad-rust-migration | [阶段 1–3 实施证据](data-quality/tunnelpad-tunnel-remarks-stage1-3-20260831.md)；[专项计划](plans/tunnelpad-tunnel-remarks.md) |
-| [TunnelPad 日志事件流与面板生命周期](plans/tunnelpad-log-streaming.md) | 已完成 | - | 2026-09-01 | tunnelpad-v1, tunnelpad-code-quality-refactor, tunnelpad-rust-migration, tunnelpad-stability | [专项计划](plans/tunnelpad-log-streaming.md)；[阶段 0 基线证据](data-quality/tunnelpad-log-streaming-stage0-20260831.md)；[阶段 1 实施证据](data-quality/tunnelpad-log-streaming-stage1-step0-20260901.md)；[阶段 2 Step 0](data-quality/tunnelpad-log-streaming-stage2-step0-20260901.md)；[阶段 3 Step 0](data-quality/tunnelpad-log-streaming-stage3-step0-20260901.md)；[ADR-0003](adr/0003-log-event-stream-and-retention.md) |
-| [TunnelPad 日志保留与能耗回归修复](plans/tunnelpad-log-retention-energy-regression.md) | 已完成 | - | 2026-09-05 | tunnelpad-log-streaming, tunnelpad-rust-migration | [阶段 1 实施证据](data-quality/tunnelpad-log-retention-energy-regression-stage1-implementation-20260905.md)；[阶段 2 真实验收](data-quality/tunnelpad-log-retention-energy-regression-stage2-implementation-20260905.md)；[阶段 2 独立完成复核](data-quality/tunnelpad-log-retention-energy-regression-stage2-independent-completion-review-20260905.md) |
-| [TunnelPad 后台健康监测能耗优化](plans/tunnelpad-health-monitor-energy.md) | 已完成 | - | 2026-09-05 | tunnelpad-stability, tunnelpad-rust-migration, tunnelpad-log-streaming, tunnelpad-unattended-managed-ssh-recovery, tunnelpad-log-retention-energy-regression | [日志修复后独立完成复核](data-quality/tunnelpad-health-monitor-energy-post-log-retention-fix-independent-completion-review-20260905.md)；[阶段 2 真实验收](data-quality/tunnelpad-log-retention-energy-regression-stage2-implementation-20260905.md) |
-| [TunnelPad 本机 HTTP API 服务](plans/tunnelpad-local-api.md) | 已完成 | - | 2026-09-02 | tunnelpad-stability, tunnelpad-rust-migration, tunnelpad-log-streaming, tunnelpad-core-hardening | [专项计划](plans/tunnelpad-local-api.md)；[阶段 0 基线证据](data-quality/tunnelpad-local-api-stage0-20260902.md)；[阶段 0 独立准入复核](data-quality/tunnelpad-local-api-stage0-independent-review-20260902.md)；[阶段 1 实施证据](data-quality/tunnelpad-local-api-stage1-implementation-20260902.md)；[阶段 1 真实环境验收](data-quality/tunnelpad-local-api-stage1-real-app-acceptance-20260902.md)；[阶段 2 Step 0](data-quality/tunnelpad-local-api-stage2-step0-20260902.md)；[阶段 2 独立完成复核](data-quality/tunnelpad-local-api-stage2-independent-completion-review-20260902.md) |
-| [TunnelPad 无人值守受管 SSH 收敛恢复](plans/tunnelpad-unattended-managed-ssh-recovery.md) | 已完成 | - | 2026-09-04 | tunnelpad-stability, tunnelpad-rust-migration | [专项计划](plans/tunnelpad-unattended-managed-ssh-recovery.md)；[阶段 3 实施与真实验收](data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-implementation-20260904.md)；[阶段 3 独立完成复核](data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-independent-completion-review-20260904.md) |
+| [TunnelPad 日志低写放大与流式保留](plans/tunnelpad-log-write-amplification.md) | 已完成 | - | 2026-09-06 | tunnelpad-log-streaming, tunnelpad-log-retention-energy-regression, tunnelpad-rust-migration | [阶段 1 实施证据](data-quality/tunnelpad-log-write-amplification-stage1-implementation-20260905.md)；[阶段 2 真实 Release 实施证据](data-quality/tunnelpad-log-write-amplification-stage2-implementation-20260905.md)；[阶段 2 独立完成复核](data-quality/tunnelpad-log-write-amplification-stage2-independent-completion-review-20260905.md)；[专项计划](plans/tunnelpad-log-write-amplification.md) |
+| [TunnelPad 隧道稳定性与健康恢复](plans/tunnelpad-stability.md) | 已完成 | - | 2026-09-06 | tunnelpad-v1, tunnelpad-code-quality-refactor, tunnelpad-rust-migration, ecs-dynamic-ssh-ip | [阶段 2 总体独立完成复核](data-quality/tunnelpad-stability-stage2-independent-completion-review-20260902.md)；[阶段 3 独立完成复核](data-quality/tunnelpad-stability-stage3-independent-completion-review-20260902.md)；[阶段 3 Step 0](data-quality/tunnelpad-stability-stage3-step0-20260902.md) |
+| [TunnelPad Rust Core 风险收敛与覆盖率提升](plans/tunnelpad-core-hardening.md) | 已完成 | - | 2026-09-06 | tunnelpad-stability, tunnelpad-rust-migration | [阶段 1 实施证据](data-quality/tunnelpad-core-hardening-stage1-implementation-20260902.md)；[阶段 2 独立完成复核](data-quality/tunnelpad-core-hardening-stage2-independent-completion-review-20260902.md) |
+| [TunnelPad v1 隧道管理应用](plans/tunnelpad-v1.md) | 已完成 | - | 2026-09-06 | - | [阶段 2 功能与验收记录](data-quality/tunnelpad-v1-stage2-features-20260829.md) |
+| [TunnelPad 界面优化](plans/tunnelpad-ui-refinements.md) | 已完成 | - | 2026-09-06 | tunnelpad-v1 | [阶段 1 证据](data-quality/tunnelpad-ui-refinements-stage1-20260829.md)；[阶段 2 证据](data-quality/tunnelpad-ui-refinements-stage2-20260829.md)；[阶段 3 与阶段 1 收尾证据](data-quality/tunnelpad-ui-refinements-stage3-20260830.md)；[阶段 4 证据](data-quality/tunnelpad-ui-refinements-stage4-20260830.md) |
+| [TunnelPad 代码质量重构](plans/tunnelpad-code-quality-refactor.md) | 已完成 | - | 2026-09-06 | tunnelpad-v1, tunnelpad-ui-refinements | [阶段 0 基线证据](data-quality/tunnelpad-code-quality-refactor-stage0-20260830.md)；[阶段 1 实施证据](data-quality/tunnelpad-code-quality-refactor-stage1-20260830.md)；[阶段 2–4 实施证据](data-quality/tunnelpad-code-quality-refactor-stage2-4-20260830.md)；[专项计划](plans/tunnelpad-code-quality-refactor.md) |
+| [TunnelPad Rust Core 迁移](plans/tunnelpad-rust-migration.md) | 已完成 | - | 2026-09-06 | tunnelpad-v1, tunnelpad-ui-refinements, tunnelpad-code-quality-refactor | [阶段 5 删除后收尾证据](data-quality/tunnelpad-rust-migration-stage5-step0-20260830.md)；[ADR-0001](adr/0001-rust-core-single-owner.md)；[ADR-0002](adr/0002-app-bundle-id-migration.md)；[迁移说明](migrations/tunnelpad-rust-owner-cutover.md)；[专项计划](plans/tunnelpad-rust-migration.md) |
+| [ECS 动态 SSH 公网 IP 同步](plans/ecs-dynamic-ssh-ip.md) | 已完成 | - | 2026-09-06 | tunnelpad-rust-migration（阶段 2 前置已完成） | [阶段 1 实现与验证](data-quality/ecs-dynamic-ssh-ip-stage1-implementation-20260829.md)；[阶段 2 实施与验收证据](data-quality/ecs-dynamic-ssh-ip-stage2-step0-20260831.md)（真实 App 启动/重启、负向隔离、恢复和 SSH 闭环通过，2026-08-31）；[专项计划](plans/ecs-dynamic-ssh-ip.md) |
+| [TunnelPad 隧道备注说明与列表副标题](plans/tunnelpad-tunnel-remarks.md) | 已完成 | - | 2026-09-06 | tunnelpad-v1, tunnelpad-code-quality-refactor, tunnelpad-rust-migration | [阶段 1–3 实施证据](data-quality/tunnelpad-tunnel-remarks-stage1-3-20260831.md)；[专项计划](plans/tunnelpad-tunnel-remarks.md) |
+| [TunnelPad 日志事件流与面板生命周期](plans/tunnelpad-log-streaming.md) | 已完成 | - | 2026-09-06 | tunnelpad-v1, tunnelpad-code-quality-refactor, tunnelpad-rust-migration, tunnelpad-stability | [专项计划](plans/tunnelpad-log-streaming.md)；[阶段 0 基线证据](data-quality/tunnelpad-log-streaming-stage0-20260831.md)；[阶段 1 实施证据](data-quality/tunnelpad-log-streaming-stage1-step0-20260901.md)；[阶段 2 Step 0](data-quality/tunnelpad-log-streaming-stage2-step0-20260901.md)；[阶段 3 Step 0](data-quality/tunnelpad-log-streaming-stage3-step0-20260901.md)；[ADR-0003](adr/0003-log-event-stream-and-retention.md) |
+| [TunnelPad 日志保留与能耗回归修复](plans/tunnelpad-log-retention-energy-regression.md) | 已完成 | - | 2026-09-06 | tunnelpad-log-streaming, tunnelpad-rust-migration | [阶段 1 实施证据](data-quality/tunnelpad-log-retention-energy-regression-stage1-implementation-20260905.md)；[阶段 2 真实验收](data-quality/tunnelpad-log-retention-energy-regression-stage2-implementation-20260905.md)；[阶段 2 独立完成复核](data-quality/tunnelpad-log-retention-energy-regression-stage2-independent-completion-review-20260905.md) |
+| [TunnelPad 后台健康监测能耗优化](plans/tunnelpad-health-monitor-energy.md) | 已完成 | - | 2026-09-06 | tunnelpad-stability, tunnelpad-rust-migration, tunnelpad-log-streaming, tunnelpad-unattended-managed-ssh-recovery, tunnelpad-log-retention-energy-regression | [日志修复后独立完成复核](data-quality/tunnelpad-health-monitor-energy-post-log-retention-fix-independent-completion-review-20260905.md)；[阶段 2 真实验收](data-quality/tunnelpad-log-retention-energy-regression-stage2-implementation-20260905.md) |
+| [TunnelPad 本机 HTTP API 服务](plans/tunnelpad-local-api.md) | 已完成 | - | 2026-09-06 | tunnelpad-stability, tunnelpad-rust-migration, tunnelpad-log-streaming, tunnelpad-core-hardening | [专项计划](plans/tunnelpad-local-api.md)；[阶段 0 基线证据](data-quality/tunnelpad-local-api-stage0-20260902.md)；[阶段 0 独立准入复核](data-quality/tunnelpad-local-api-stage0-independent-review-20260902.md)；[阶段 1 实施证据](data-quality/tunnelpad-local-api-stage1-implementation-20260902.md)；[阶段 1 真实环境验收](data-quality/tunnelpad-local-api-stage1-real-app-acceptance-20260902.md)；[阶段 2 Step 0](data-quality/tunnelpad-local-api-stage2-step0-20260902.md)；[阶段 2 独立完成复核](data-quality/tunnelpad-local-api-stage2-independent-completion-review-20260902.md) |
+| [TunnelPad 无人值守受管 SSH 收敛恢复](plans/tunnelpad-unattended-managed-ssh-recovery.md) | 已完成 | - | 2026-09-06 | tunnelpad-stability, tunnelpad-rust-migration | [专项计划](plans/tunnelpad-unattended-managed-ssh-recovery.md)；[阶段 3 实施与真实验收](data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-implementation-20260904.md)；[阶段 3 独立完成复核](data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-independent-completion-review-20260904.md) |
 
 ### 已废弃
 
@@ -55,20 +74,12 @@
 
 ## 推荐顺序
 
-1. `tunnelpad-v1`、`tunnelpad-ui-refinements`、`tunnelpad-code-quality-refactor`、`tunnelpad-rust-migration` 与 `ecs-dynamic-ssh-ip` 均已完成，作为当前实现基线。
-2. `ecs-dynamic-ssh-ip` 已完成 Finder/launchd 运行环境修复及真实 App→ECS→隧道→SSH 端到端验收；后续如需定时同步、UI 设置项或 Keychain 凭证管理，另立计划。
-3. `tunnelpad-ui-refinements` 已完成；后续与当前未完成计划无运行时依赖。
-4. `tunnelpad-code-quality-refactor` 阶段 0–4 已完成；后续共享模块改动按各专项计划的独立准入顺序推进。
-5. `tunnelpad-rust-migration` 阶段 5 已完成并关闭；当前 Rust `launchd` owner、配置事实源和 Bundle ID 决策以专项计划及 ADR 为准。
-6. `tunnelpad-tunnel-remarks` 阶段 0–3 已完成；Rust Core 迁移阶段 5 已完成并确定 Rust 配置事实源，备注模型、双表单、列表副标题、差分、Release/AX 和回归证据已落盘。
-7. `tunnelpad-log-streaming` 阶段 0–3 已完成并通过独立复核；阶段 1 的 launchd 文件采集、事件、500 条缓存、8000 字符单行、2000 行文件保留和锁失败重试已通过 10/10 专项测试与 101/101 全量回归，阶段 2 的隔离 App 追加、关闭/重开、切换和滚动位置冒烟及阶段 3 的 Rust/Swift、Release、签名和治理门禁已通过。共享模块改动继续使用单一编辑窗口。
-8. `tunnelpad-stability` 阶段 0–3 已完成并通过各自独立复核；阶段 2 的 ECS 自动恢复、启动/退出资源收敛、跨层状态一致性和配置重载资源收敛切片均已完成，真实 App/launchd 生命周期与探针假死触发 ECS 自动恢复验收已通过；阶段 3 的隔离 demo、Release 产物、受控 App 和最终治理门禁也已通过，稳定性计划已关闭。日志计划阶段 0–3 已完成，不再构成稳定性前置；后续稳定性若修改 `TunnelManager`、`TunnelRuntimeState`、主面板或共享测试目录，仍使用单一编辑窗口，不覆盖日志计划已验收行为。
-9. `tunnelpad-log-retention-energy-regression` 阶段 0–2 已完成并通过独立复核；CRLF 行计数、尾部扫描、大日志日志保留、真实 CPU/Activity Monitor、两隧道状态和退出清理均已收口。
-10. `tunnelpad-log-write-amplification` 新增为日志保留计划完成后的后续优化；阶段 0 基线、阶段 1 实现与回归、阶段 2 真实 Release 长期验收、Activity Monitor、退出清理和独立完成复核均已通过，计划已关闭。
-11. `tunnelpad-health-monitor-energy` 首轮验收和隔夜反证均保留为历史；日志修复后的真实 Release 回归和最新独立完成复核已通过，计划已关闭；`refreshAsync` 实现仍不在范围。
-12. `tunnelpad-unattended-managed-ssh-recovery` 阶段 0–3 已完成并通过独立完成复核；真实 Release App 单次目标 `SIGSTOP` 无人工释放、自动恢复、HTTP 探针和非目标隔离均已通过，计划已关闭。
-13. `tunnelpad-core-hardening` 先完成 Rust Core 的 Step 0 独立准入，再实施 shutdown 重试修复、Core/FFI 反证测试和 production-only 覆盖率复测；不重新打开 `tunnelpad-stability`，也不引入 UI、app executor 或 pidfile/orphan 范围。
-14. `tunnelpad-local-api` 阶段 0–2 已完成并通过独立复核；真实 Debug/签名 Release App 的固定 9998 启动、基础接口、端口冲突和退出清理验收已落盘。后续不扩大到远程访问、配置写入或 ECS。
+当前无待推进阶段；已完成计划作为历史实施与验证基线。新增需求先明确本次差异、相关计划和适用准入，不能沿旧步骤直接继续实施。
+
+1. 核心生命周期或恢复变更先核对 [Rust Core 迁移](plans/tunnelpad-rust-migration.md)、[稳定性](plans/tunnelpad-stability.md)、[Core 风险收敛](plans/tunnelpad-core-hardening.md)和[无人值守 SSH 恢复](plans/tunnelpad-unattended-managed-ssh-recovery.md)的职责边界。
+2. 日志与资源开销变更按[日志事件流](plans/tunnelpad-log-streaming.md)、[保留回归修复](plans/tunnelpad-log-retention-energy-regression.md)、[低写放大](plans/tunnelpad-log-write-amplification.md)的演进关系读取；能耗验收以[后台健康监测](plans/tunnelpad-health-monitor-energy.md)的最新有效证据为入口。
+3. 云端前置与本机 API 分别归属 [ECS 动态 SSH IP](plans/ecs-dynamic-ssh-ip.md)和[本机 HTTP API](plans/tunnelpad-local-api.md)；后续能力按各自非目标、授权与外部边界判断。
+4. 界面和配置展示复用 [v1](plans/tunnelpad-v1.md)、[界面优化](plans/tunnelpad-ui-refinements.md)、[代码质量重构](plans/tunnelpad-code-quality-refactor.md)和[隧道备注](plans/tunnelpad-tunnel-remarks.md)。共享模块编辑仍须串行；具体影响、字段与验证从专项计划读取。
 
 ## 依赖关系
 
@@ -169,7 +180,7 @@
 | tunnelpad-unattended-managed-ssh-recovery | 阶段 2 实施与完成复核 | [阶段 2 实施证据](data-quality/tunnelpad-unattended-managed-ssh-recovery-stage2-implementation-20260904.md)；[独立完成复核](data-quality/tunnelpad-unattended-managed-ssh-recovery-stage2-independent-completion-review-20260904.md)（Release/FFI/隔离 App、签名/资源和启动退出通过；2026-09-04） |
 | tunnelpad-unattended-managed-ssh-recovery | 阶段 3 Step 0 与准入 | [阶段 3 Step 0](data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-step0-20260904.md)；[独立准入复核](data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-independent-review-20260904.md)（真实目标/非目标、身份核验、单次 SIGSTOP、无人工观察和回滚矩阵通过，达到待实施标准；2026-09-04） |
 | tunnelpad-unattended-managed-ssh-recovery | 阶段 3 实施与完成复核 | [阶段 3 实施与真实验收](data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-implementation-20260904.md)；[阶段 3 独立完成复核](data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-independent-completion-review-20260904.md)（真实 Release App 单次目标 SIGSTOP 无人工释放，自动恢复到新 PID 与 HTTP 401/satisfied，非目标隧道不变；Rust 76+1、Swift 139/139、Release/治理门禁通过；2026-09-04） |
-| tunnelpad-health-monitor-energy | 阶段 2 首轮独立完成复核（历史） | [能耗计划独立完成复核](data-quality/tunnelpad-health-monitor-energy-independent-completion-review-20260904.md)（仅保留首轮窗口结论；当前以[2026-09-05 隔夜复验未通过](data-quality/tunnelpad-health-monitor-energy-overnight-revalidation-20260905.md)为准，不能据历史记录关闭计划） |
+| tunnelpad-health-monitor-energy | 阶段 2 首轮独立完成复核（历史） | [能耗计划独立完成复核](data-quality/tunnelpad-health-monitor-energy-independent-completion-review-20260904.md)（首轮结论曾被[2026-09-05 隔夜反证](data-quality/tunnelpad-health-monitor-energy-overnight-revalidation-20260905.md)撤回；当前完成结论见[日志修复后独立完成复核](data-quality/tunnelpad-health-monitor-energy-post-log-retention-fix-independent-completion-review-20260905.md)，失败历史保留） |
 | tunnelpad-health-monitor-energy | 完成后回归修复 | [回归修复与验证](data-quality/tunnelpad-health-monitor-energy-post-completion-regression-fix-20260904.md)（无探针隧道启动后的 `xpcproxy` 状态仅在显式 start/restart 内有界复核；Swift 140/140，治理检查通过，2026-09-04） |
 | tunnelpad-log-retention-energy-regression | 阶段 0–2 | [阶段 0 独立准入复核](data-quality/tunnelpad-log-retention-energy-regression-stage0-independent-review-20260905.md)；[阶段 1 实施证据](data-quality/tunnelpad-log-retention-energy-regression-stage1-implementation-20260905.md)；[阶段 2 真实验收](data-quality/tunnelpad-log-retention-energy-regression-stage2-implementation-20260905.md)；[阶段 2 独立完成复核](data-quality/tunnelpad-log-retention-energy-regression-stage2-independent-completion-review-20260905.md)（CRLF/尾部扫描修复、Swift/Rust/Release、真实两隧道 CPU/能耗、日志 2000 LF、运行栈和清理通过，2026-09-05） |
 | tunnelpad-health-monitor-energy | 阶段 2 日志修复后重新完成复核 | [日志修复后独立完成复核](data-quality/tunnelpad-health-monitor-energy-post-log-retention-fix-independent-completion-review-20260905.md)（真实两隧道 Release 窗口、CPU/Activity Monitor、日志保留、状态、运行栈和资源清理通过，阶段 2 关闭，2026-09-05） |

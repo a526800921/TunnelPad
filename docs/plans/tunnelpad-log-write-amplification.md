@@ -1,8 +1,7 @@
 # 计划：TunnelPad 日志低写放大与流式保留
 
-- 状态：已完成
-- 当前阶段：-
-- 最后更新：2026-09-05
+> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../PLAN_MAP.md#计划索引)为准。
+
 - 前置：[TunnelPad 日志事件流与面板生命周期计划](tunnelpad-log-streaming.md)、[TunnelPad 日志保留与能耗回归修复计划](tunnelpad-log-retention-energy-regression.md)和[TunnelPad Rust Core 迁移计划](tunnelpad-rust-migration.md)已完成；本计划复用既有日志路径、launchd 生命周期和 2000 行裁剪契约，并承接真实运行中新发现的磁盘写放大问题。
 
 ## 背景

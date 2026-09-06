@@ -1,8 +1,7 @@
 # 计划：TunnelPad Rust Core 迁移
 
-- 状态：已完成
-- 当前阶段：-
-- 最后更新：2026-08-31
+> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../PLAN_MAP.md#计划索引)为准。
+
 - 前置：`tunnelpad-v1`、`tunnelpad-ui-refinements` 与 `tunnelpad-code-quality-refactor` 已完成；阶段 0–5 已完成
 
 当前说明：用户已确认保留 SwiftUI/AppKit 菜单栏与窗口 UI，Rust 通过进程内 C ABI 成为唯一 Core owner。阶段 4 的 shadow bridge 与阶段 5 的 `launchd`/`config.json` owner 切换、旧 Swift Core 删除、真实隧道验证和收尾复核均已完成；不保留同一 App 内的 Swift fallback。后续稳定性、日志和备注能力按各自计划推进。
@@ -204,8 +203,10 @@ TunnelPad 当前是 SwiftUI/AppKit + SwiftPM 的 macOS 菜单栏应用。Swift U
 | 样本矩阵 | 8 行（6 列）：现有回归、配置 owner、fake launchd、并发、admin-tunnel、其他 launchd、UI/退出、旧 owner 删除审计 |
 | 验证方式 | cargo/swift 回归、Rust/Swift 差分、fake launchd、并发/退出 fixture、真实隧道逐条验证、Release/AX 和治理检查 |
 | 失败/回滚边界 | 不保留 App 内 Swift fallback；验证失败停止扩大范围并修复 Rust；独立复核通过前不得删除 Swift Core |
-| 当前阻塞项 | 无；阶段 5 独立收尾复核已通过 |
+| 当前阻塞项 | 无 |
 | 最新独立准入复核 | 阶段 5 于 2026-08-31 完成独立收尾复核 |
+
+阻塞说明：阶段 5 独立收尾复核已通过
 
 ## 阶段 4 完成摘要
 
