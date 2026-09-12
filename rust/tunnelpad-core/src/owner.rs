@@ -26,6 +26,30 @@ use crate::{error_code, AppConfig, ExecutorKind, TpError, TunnelConfig};
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 pub enum CoreCommand {
+    LaunchRecoveryCapabilities,
+    LaunchRecoveryBegin {
+        id: String,
+    },
+    LaunchRecoveryStatus {
+        id: String,
+        generation: u64,
+        #[serde(rename = "timeoutMs")]
+        timeout_ms: u64,
+    },
+    LaunchRecoveryStart {
+        id: String,
+        generation: u64,
+        #[serde(rename = "timeoutMs")]
+        timeout_ms: u64,
+        #[serde(rename = "expectedConfig")]
+        expected_config: TunnelConfig,
+    },
+    LaunchRecoveryStop {
+        id: String,
+        generation: u64,
+        #[serde(rename = "timeoutMs")]
+        timeout_ms: u64,
+    },
     LoadConfig,
     SaveConfig {
         config: AppConfig,
@@ -133,6 +157,32 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
     /// 直接提供给 Rust fixture 的命令入口；C ABI 再负责 JSON 字符串分配。
     pub fn execute(&self, command: CoreCommand) -> CoreResponse {
         let outcome = match command {
+            CoreCommand::LaunchRecoveryCapabilities => {
+                Ok(json!({"version":1,"checkedStart":true,"deadline":true}))
+            }
+            CoreCommand::LaunchRecoveryBegin { id } => self.launch_recovery_begin(&id),
+            CoreCommand::LaunchRecoveryStatus {
+                id,
+                generation,
+                timeout_ms,
+            } => self.launch_recovery_execute(&id, generation, timeout_ms, None, false),
+            CoreCommand::LaunchRecoveryStart {
+                id,
+                generation,
+                timeout_ms,
+                expected_config,
+            } => self.launch_recovery_execute(
+                &id,
+                generation,
+                timeout_ms,
+                Some(expected_config),
+                false,
+            ),
+            CoreCommand::LaunchRecoveryStop {
+                id,
+                generation,
+                timeout_ms,
+            } => self.launch_recovery_execute(&id, generation, timeout_ms, None, true),
             CoreCommand::LoadConfig => self.load_config().map(|config| json!({ "config": config })),
             CoreCommand::SaveConfig { config } => {
                 self.save_config(config).map(|()| json!({ "saved": true }))
@@ -279,6 +329,19 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
             .ok_or_else(|| TpError::new(error_code::TUNNEL_NOT_FOUND, format!("找不到隧道：{id}")))
     }
 
+    fn try_recovery_tunnel(&self, id: &str) -> Result<Option<TunnelConfig>, TpError> {
+        let Ok(config) = self.config.try_lock() else {
+            return Ok(None);
+        };
+        config
+            .tunnels
+            .iter()
+            .find(|tunnel| tunnel.id == id)
+            .cloned()
+            .map(Some)
+            .ok_or_else(|| TpError::new(error_code::TUNNEL_NOT_FOUND, "找不到自动恢复隧道"))
+    }
+
     fn next_generation(&self, id: &str) -> (u64, CancellationToken) {
         let mut operations = self
             .operations
@@ -330,9 +393,151 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
         Ok(json!({ "id": id, "operation": "begin", "generation": generation }))
     }
 
+    /// 非阻塞准入：忙时既不创建代次，也不留下后台等待者。
+    fn launch_recovery_begin(&self, id: &str) -> Result<Value, TpError> {
+        self.ensure_open()?;
+        let lock = self.lock_for(id);
+        let Ok(_guard) = lock.try_lock() else {
+            return Ok(json!({"id":id,"operation":"busy","generation":null}));
+        };
+        self.ensure_open()?;
+        if self.try_recovery_tunnel(id)?.is_none() {
+            return Ok(json!({"id":id,"operation":"busy","generation":null}));
+        }
+        let (generation, _) = self.next_generation(id);
+        Ok(json!({"id":id,"operation":"begin","generation":generation}))
+    }
+
+    fn launch_recovery_execute(
+        &self,
+        id: &str,
+        generation: u64,
+        timeout_ms: u64,
+        expected: Option<TunnelConfig>,
+        stop: bool,
+    ) -> Result<Value, TpError> {
+        use std::time::{Duration, Instant};
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms.min(55_000));
+        let check = || -> Result<(), TpError> {
+            self.ensure_open()?;
+            self.ensure_generation(id, Some(generation))?;
+            if Instant::now() >= deadline {
+                return Err(TpError::new(
+                    error_code::RECOVERY_TIMEOUT,
+                    "自动恢复预算耗尽",
+                ));
+            }
+            Ok(())
+        };
+        check()?;
+        let lock = self.lock_for(id);
+        let Ok(_guard) = lock.try_lock() else {
+            return Ok(json!({"id":id,"operation":"busy"}));
+        };
+        check()?;
+        let Some(tunnel) = self.try_recovery_tunnel(id)? else {
+            return Ok(json!({"id":id,"operation":"busy"}));
+        };
+        check()?;
+        if expected
+            .as_ref()
+            .is_some_and(|expected| !same_launch_runtime(expected, &tunnel))
+        {
+            return Err(TpError::new(
+                error_code::STALE_OPERATION,
+                "自动恢复配置已变化",
+            ));
+        }
+        let cancellation = self.cancellation_for(id, Some(generation));
+        let label = tunnel.launchd_label();
+        let status = self
+            .launchd
+            .recovery_status(
+                &label,
+                &cancellation,
+                deadline.saturating_duration_since(Instant::now()),
+            )
+            .map_err(|error| recovery_executor_error(error, deadline))?;
+        check()?;
+        if stop {
+            // 仅为 KeepAlive=false 的确定停止作业提供受管停止入口。
+            if tunnel.keep_alive || !matches!(status, TunnelStatus::NotRunning) {
+                return Ok(json!({"id":id,"operation":"observe","status":status}));
+            }
+            self.launchd
+                .recovery_stop(
+                    &label,
+                    Path::new(&tunnel.command[0]),
+                    is_ssh(&tunnel.command),
+                    &cancellation,
+                    deadline.saturating_duration_since(Instant::now()),
+                )
+                .map_err(|error| recovery_executor_error(error, deadline))?;
+        } else if expected.is_some() && status == TunnelStatus::NotLoaded {
+            check()?;
+            // 再核对配置；不把 checked 失败或 loaded 状态折叠为 notLoaded。
+            let Ok(config_guard) = self.config.try_lock() else {
+                return Ok(json!({"id":id,"operation":"busy"}));
+            };
+            check()?;
+            if !config_guard
+                .tunnels
+                .iter()
+                .find(|item| item.id == id)
+                .is_some_and(|item| same_launch_runtime(item, &tunnel))
+            {
+                return Err(TpError::new(
+                    error_code::STALE_OPERATION,
+                    "自动恢复配置已变化",
+                ));
+            }
+            check()?;
+            let plist = write_plist(&tunnel, &self.paths)
+                .map_err(|_| TpError::new(error_code::CONFIG_IO, "写入自动恢复 plist 失败"))?;
+            check()?;
+            self.launchd
+                .recovery_bootstrap(
+                    &label,
+                    &plist,
+                    &cancellation,
+                    deadline
+                        .saturating_duration_since(Instant::now())
+                        .min(Duration::from_secs(10)),
+                )
+                .map_err(|error| recovery_executor_error(error, deadline))?;
+            drop(config_guard);
+        } else {
+            return Ok(json!({"id":id,"operation":"observe","status":status}));
+        }
+        let settle_deadline = deadline.min(Instant::now() + Duration::from_secs(10));
+        loop {
+            check()?;
+            let status = self
+                .launchd
+                .recovery_status(
+                    &label,
+                    &cancellation,
+                    settle_deadline.saturating_duration_since(Instant::now()),
+                )
+                .map_err(|error| recovery_executor_error(error, deadline))?;
+            check()?;
+            if stop
+                || matches!(status, TunnelStatus::Running { pid: Some(pid) } if pid > 0)
+                || Instant::now() >= settle_deadline
+            {
+                return Ok(
+                    json!({"id":id,"operation":if stop {"stop"} else {"start"},"status":status}),
+                );
+            }
+            std::thread::sleep(
+                Duration::from_millis(50)
+                    .min(settle_deadline.saturating_duration_since(Instant::now())),
+            );
+        }
+    }
+
     pub fn cancel(&self, id: &str, generation: u64) -> Result<Value, TpError> {
         self.ensure_open()?;
-        self.tunnel(id)?;
         // 取消不能等待生命周期锁：它必须能在 launchctl 正在运行时立即发出
         // 信号。生命周期仍在每个副作用边界检查 generation，系统 runner 还
         // 会终止正在运行的 launchctl 子进程。
@@ -341,6 +546,8 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
             .lock()
             .expect("owner operation mutex 不应中毒");
         let Some(state) = operations.get_mut(id) else {
+            drop(operations);
+            self.tunnel(id)?;
             return Ok(json!({ "id": id, "operation": "stale", "generation": null }));
         };
         if state.generation == generation {
@@ -703,6 +910,29 @@ fn load_owner_config(paths: &TunnelPaths) -> Result<AppConfig, TpError> {
     crate::parse_config_envelope(input)
 }
 
+fn recovery_executor_error(error: ExecutorError, deadline: std::time::Instant) -> TpError {
+    let timed_out = std::time::Instant::now() >= deadline
+        || matches!(&error,
+        ExecutorError::CommandFailed { operation, exit_code: -1, .. } if operation == "status");
+    if timed_out {
+        TpError::new(error_code::RECOVERY_TIMEOUT, "自动恢复有界操作超时")
+    } else if matches!(error, ExecutorError::Cancelled) {
+        TpError::new(error_code::STALE_OPERATION, "自动恢复已取消")
+    } else {
+        TpError::new(error_code::EXECUTOR, "自动恢复状态或执行前提未确认")
+    }
+}
+
+fn same_launch_runtime(a: &TunnelConfig, b: &TunnelConfig) -> bool {
+    a.id == b.id
+        && a.command == b.command
+        && a.executor == b.executor
+        && a.keep_alive == b.keep_alive
+        && a.throttle_interval == b.throttle_interval
+        && a.probe == b.probe
+        && a.auto_start == b.auto_start
+}
+
 fn executor_error(operation: &str, error: ExecutorError) -> TpError {
     let cancelled = matches!(&error, ExecutorError::Cancelled);
     let message = match error {
@@ -1034,6 +1264,359 @@ mod tests {
         let paths = TunnelPaths::new(home);
         ConfigStore::new(paths.clone()).save(&config(ids)).unwrap();
         CoreOwner::new(paths, LaunchCtlExecutor::new(runner, 501)).unwrap()
+    }
+
+    struct RecoveryBoundedRunner {
+        entered: Mutex<mpsc::Sender<()>>,
+    }
+    impl ProcessRunning for RecoveryBoundedRunner {
+        fn run(&self, _: &str, _: &[String]) -> Result<ProcessResult, String> {
+            panic!("strict path must be bounded")
+        }
+        fn run_cancellable_with_timeout(
+            &self,
+            _: &str,
+            args: &[String],
+            cancellation: &CancellationToken,
+            timeout: Duration,
+        ) -> Result<ProcessResult, ProcessRunError> {
+            assert!(timeout <= Duration::from_millis(200));
+            if args[0] == "print" {
+                return Ok(not_loaded().unwrap());
+            }
+            assert_eq!(args[0], "bootstrap");
+            let _ = self.entered.lock().unwrap().send(());
+            let until = std::time::Instant::now() + timeout;
+            loop {
+                if cancellation.is_cancelled() {
+                    return Err(ProcessRunError::Cancelled);
+                }
+                if std::time::Instant::now() >= until {
+                    return Err(ProcessRunError::TimedOut);
+                }
+                thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
+    #[test]
+    fn recovery_cancellation_does_not_wait_for_config_guard_and_timeout_is_typed() {
+        for cancel in [true, false] {
+            let home = temp_home(if cancel {
+                "strict-cancel"
+            } else {
+                "strict-timeout"
+            });
+            let paths = TunnelPaths::new(&home);
+            ConfigStore::new(paths.clone())
+                .save(&config(&["one"]))
+                .unwrap();
+            let (tx, rx) = mpsc::channel();
+            let owner = Arc::new(
+                CoreOwner::new(
+                    paths,
+                    LaunchCtlExecutor::new(
+                        RecoveryBoundedRunner {
+                            entered: Mutex::new(tx),
+                        },
+                        501,
+                    ),
+                )
+                .unwrap(),
+            );
+            let generation = owner.launch_recovery_begin("one").unwrap()["generation"]
+                .as_u64()
+                .unwrap();
+            let tunnel = owner.tunnel("one").unwrap();
+            let other = owner.clone();
+            let work = thread::spawn(move || {
+                other.launch_recovery_execute("one", generation, 200, Some(tunnel), false)
+            });
+            rx.recv_timeout(Duration::from_secs(1)).unwrap();
+            if cancel {
+                let before = std::time::Instant::now();
+                owner.cancel("one", generation).unwrap();
+                assert!(before.elapsed() < Duration::from_millis(100));
+            }
+            let error = work.join().unwrap().unwrap_err();
+            assert_eq!(
+                error.code,
+                if cancel {
+                    error_code::STALE_OPERATION
+                } else {
+                    error_code::RECOVERY_TIMEOUT
+                }
+            );
+            let _ = fs::remove_dir_all(home);
+        }
+    }
+
+    #[test]
+    fn recovery_cross_id_config_contention_never_waits_or_creates_late_generation() {
+        let home = temp_home("strict-cross-id");
+        let paths = TunnelPaths::new(&home);
+        ConfigStore::new(paths.clone())
+            .save(&config(&["one", "two", "three"]))
+            .unwrap();
+        let (tx, rx) = mpsc::channel();
+        let owner = Arc::new(
+            CoreOwner::new(
+                paths,
+                LaunchCtlExecutor::new(
+                    RecoveryBoundedRunner {
+                        entered: Mutex::new(tx),
+                    },
+                    501,
+                ),
+            )
+            .unwrap(),
+        );
+        let two = owner.tunnel("two").unwrap();
+        let gen_two = owner.launch_recovery_begin("two").unwrap()["generation"]
+            .as_u64()
+            .unwrap();
+        let one = owner.tunnel("one").unwrap();
+        let gen_one = owner.launch_recovery_begin("one").unwrap()["generation"]
+            .as_u64()
+            .unwrap();
+        let other = owner.clone();
+        let work = thread::spawn(move || {
+            other.launch_recovery_execute("one", gen_one, 200, Some(one), false)
+        });
+        rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        let before = std::time::Instant::now();
+        assert_eq!(
+            owner.launch_recovery_begin("three").unwrap()["operation"],
+            "busy"
+        );
+        assert!(!owner.operations.lock().unwrap().contains_key("three"));
+        assert_eq!(
+            owner
+                .launch_recovery_execute("two", gen_two, 100, Some(two.clone()), false)
+                .unwrap()["operation"],
+            "busy"
+        );
+        assert_eq!(
+            owner
+                .launch_recovery_execute("two", gen_two, 0, Some(two.clone()), false)
+                .unwrap_err()
+                .code,
+            error_code::RECOVERY_TIMEOUT
+        );
+        owner.cancel("two", gen_two).unwrap();
+        assert_eq!(
+            owner
+                .launch_recovery_execute("two", gen_two, 100, Some(two.clone()), false)
+                .unwrap_err()
+                .code,
+            error_code::STALE_OPERATION
+        );
+        assert!(before.elapsed() < Duration::from_millis(100));
+        assert!(!owner.paths.launchd_plist_url(&two).exists());
+        owner.cancel("one", gen_one).unwrap();
+        assert!(work.join().unwrap().is_err());
+        assert!(!owner.operations.lock().unwrap().contains_key("three"));
+        let _ = fs::remove_dir_all(home);
+    }
+
+    struct RecoveryStatusGate {
+        entered: Mutex<mpsc::Sender<()>>,
+        release: Mutex<mpsc::Receiver<()>>,
+    }
+    impl ProcessRunning for RecoveryStatusGate {
+        fn run(&self, _: &str, _: &[String]) -> Result<ProcessResult, String> {
+            panic!("strict path must be bounded")
+        }
+        fn run_cancellable_with_timeout(
+            &self,
+            _: &str,
+            args: &[String],
+            _: &CancellationToken,
+            _: Duration,
+        ) -> Result<ProcessResult, ProcessRunError> {
+            assert_eq!(
+                args[0], "print",
+                "busy/cancelled/expired commit must never bootstrap"
+            );
+            self.entered.lock().unwrap().send(()).unwrap();
+            self.release
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(1))
+                .unwrap();
+            Ok(not_loaded().unwrap())
+        }
+    }
+    #[test]
+    fn recovery_final_config_commit_is_nonblocking_and_checks_cancel_and_deadline() {
+        for mode in ["busy", "cancel", "deadline"] {
+            let home = temp_home(mode);
+            let paths = TunnelPaths::new(&home);
+            ConfigStore::new(paths.clone())
+                .save(&config(&["one", "two"]))
+                .unwrap();
+            let (tx, rx) = mpsc::channel();
+            let (release, wait) = mpsc::channel();
+            let owner = Arc::new(
+                CoreOwner::new(
+                    paths,
+                    LaunchCtlExecutor::new(
+                        RecoveryStatusGate {
+                            entered: Mutex::new(tx),
+                            release: Mutex::new(wait),
+                        },
+                        501,
+                    ),
+                )
+                .unwrap(),
+            );
+            let tunnel = owner.tunnel("two").unwrap();
+            let generation = owner.launch_recovery_begin("two").unwrap()["generation"]
+                .as_u64()
+                .unwrap();
+            let expected = tunnel.clone();
+            let other = owner.clone();
+            let work = thread::spawn(move || {
+                other.launch_recovery_execute(
+                    "two",
+                    generation,
+                    if mode == "deadline" { 30 } else { 1000 },
+                    Some(expected),
+                    false,
+                )
+            });
+            rx.recv_timeout(Duration::from_secs(1)).unwrap();
+            // Another ID's configuration transaction holds the shared mutex after checked status begins.
+            let guard = owner.config.lock().unwrap();
+            if mode == "cancel" {
+                owner.cancel("two", generation).unwrap();
+            }
+            if mode == "deadline" {
+                thread::sleep(Duration::from_millis(40));
+            }
+            release.send(()).unwrap();
+            let until = std::time::Instant::now() + Duration::from_millis(100);
+            while !work.is_finished() && std::time::Instant::now() < until {
+                thread::sleep(Duration::from_millis(1));
+            }
+            let finished_while_locked = work.is_finished();
+            drop(guard);
+            let result = work.join().unwrap();
+            assert!(
+                finished_while_locked,
+                "strict commit waited for shared configuration"
+            );
+            match mode {
+                "busy" => assert_eq!(result.unwrap()["operation"], "busy"),
+                "cancel" => assert_eq!(result.unwrap_err().code, error_code::STALE_OPERATION),
+                _ => assert_eq!(result.unwrap_err().code, error_code::RECOVERY_TIMEOUT),
+            }
+            assert!(!owner.paths.launchd_plist_url(&tunnel).exists());
+            let _ = fs::remove_dir_all(home);
+        }
+    }
+
+    #[test]
+    fn recovery_busy_has_no_late_generation_and_cancel_blocks_start() {
+        let home = temp_home("recovery-busy");
+        let runner = ScriptedRunner::new(vec![]);
+        let owner = scripted_owner(&home, &["one"], runner.clone());
+        let lock = owner.lock_for("one");
+        let guard = lock.lock().unwrap();
+        assert_eq!(
+            owner.launch_recovery_begin("one").unwrap()["operation"],
+            "busy"
+        );
+        assert!(owner.operations.lock().unwrap().is_empty());
+        drop(guard);
+        let generation = owner.begin("one").unwrap()["generation"].as_u64().unwrap();
+        assert_eq!(generation, 1);
+        owner.cancel("one", generation).unwrap();
+        assert!(owner
+            .launch_recovery_execute(
+                "one",
+                generation,
+                1000,
+                Some(owner.tunnel("one").unwrap()),
+                false
+            )
+            .is_err());
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn recovery_never_bootstraps_unknown_loaded_changed_or_expired() {
+        for (suffix, response) in [
+            ("unknown", process(9, "", "denied")),
+            ("loaded", process(0, "state = waiting", "")),
+        ] {
+            let home = temp_home(suffix);
+            let runner = ScriptedRunner::new(vec![response]);
+            let owner = scripted_owner(&home, &["one"], runner.clone());
+            let generation = owner.launch_recovery_begin("one").unwrap()["generation"]
+                .as_u64()
+                .unwrap();
+            let _ = owner.launch_recovery_execute(
+                "one",
+                generation,
+                1000,
+                Some(owner.tunnel("one").unwrap()),
+                false,
+            );
+            assert_eq!(runner.calls().len(), 1);
+            assert_eq!(runner.calls()[0][0], "print");
+            runner.assert_exhausted();
+            let _ = fs::remove_dir_all(home);
+        }
+        let home = temp_home("recovery-invalid");
+        let runner = ScriptedRunner::new(vec![]);
+        let owner = scripted_owner(&home, &["one"], runner.clone());
+        let generation = owner.launch_recovery_begin("one").unwrap()["generation"]
+            .as_u64()
+            .unwrap();
+        let mut changed = owner.tunnel("one").unwrap();
+        changed.command.push("changed".into());
+        assert!(owner
+            .launch_recovery_execute("one", generation, 1000, Some(changed), false)
+            .is_err());
+        assert!(owner
+            .launch_recovery_execute("one", generation, 0, None, false)
+            .is_err());
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn recovery_checked_start_converges_with_fresh_pid() {
+        let home = temp_home("recovery-start");
+        let runner = ScriptedRunner::new(vec![not_loaded(), process(0, "", ""), running(1234)]);
+        let owner = scripted_owner(&home, &["one"], runner.clone());
+        let generation = owner.launch_recovery_begin("one").unwrap()["generation"]
+            .as_u64()
+            .unwrap();
+        let result = owner
+            .launch_recovery_execute(
+                "one",
+                generation,
+                1000,
+                Some(owner.tunnel("one").unwrap()),
+                false,
+            )
+            .unwrap();
+        assert_eq!(
+            result["status"],
+            serde_json::to_value(TunnelStatus::Running { pid: Some(1234) }).unwrap()
+        );
+        assert_eq!(
+            runner
+                .calls()
+                .iter()
+                .map(|call| call[0].as_str())
+                .collect::<Vec<_>>(),
+            vec!["print", "bootstrap", "print"]
+        );
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
     }
 
     #[test]

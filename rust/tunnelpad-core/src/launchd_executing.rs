@@ -7,6 +7,35 @@ use crate::launchctl::{
 };
 
 pub trait LaunchdExecuting: Send + Sync {
+    // 默认拒绝不支持有界执行的外部实现，禁止自动退回宽松入口。
+    fn recovery_status(
+        &self,
+        _label: &str,
+        _cancel: &CancellationToken,
+        _timeout: std::time::Duration,
+    ) -> Result<TunnelStatus, ExecutorError> {
+        Err(ExecutorError::Cancelled)
+    }
+    fn recovery_bootstrap(
+        &self,
+        _label: &str,
+        _plist: &Path,
+        _cancel: &CancellationToken,
+        _timeout: std::time::Duration,
+    ) -> Result<(), ExecutorError> {
+        Err(ExecutorError::Cancelled)
+    }
+    fn recovery_stop(
+        &self,
+        _label: &str,
+        _path: &Path,
+        _ssh: bool,
+        _cancel: &CancellationToken,
+        _timeout: std::time::Duration,
+    ) -> Result<bool, ExecutorError> {
+        Err(ExecutorError::Cancelled)
+    }
+
     fn bootstrap(&self, label: &str, plist_path: &Path) -> Result<(), ExecutorError>;
     fn bootout(&self, label: &str) -> Result<bool, ExecutorError>;
     fn status(&self, label: &str) -> TunnelStatus;
@@ -64,6 +93,63 @@ pub trait LaunchdExecuting: Send + Sync {
 }
 
 impl<R: ProcessRunning> LaunchdExecuting for LaunchCtlExecutor<R> {
+    fn recovery_status(
+        &self,
+        label: &str,
+        cancel: &CancellationToken,
+        timeout: std::time::Duration,
+    ) -> Result<TunnelStatus, ExecutorError> {
+        self.recovery_status_checked(label, cancel, timeout)
+    }
+    fn recovery_bootstrap(
+        &self,
+        _label: &str,
+        plist: &Path,
+        cancel: &CancellationToken,
+        timeout: std::time::Duration,
+    ) -> Result<(), ExecutorError> {
+        self.recovery_command(
+            &[
+                "bootstrap".into(),
+                self.domain(),
+                plist.to_string_lossy().into(),
+            ],
+            cancel,
+            timeout,
+        )
+        .map(|_| ())
+    }
+    fn recovery_stop(
+        &self,
+        label: &str,
+        path: &Path,
+        ssh: bool,
+        cancel: &CancellationToken,
+        timeout: std::time::Duration,
+    ) -> Result<bool, ExecutorError> {
+        if !ssh {
+            return self
+                .recovery_command(
+                    &["bootout".into(), format!("{}/{}", self.domain(), label)],
+                    cancel,
+                    timeout,
+                )
+                .map(|_| true);
+        }
+        // 对现有身份核验/信号升级过程追加整体 deadline；取消仍用同一 token。
+        let (done, receiver) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            scope.spawn(move || {
+                if receiver.recv_timeout(timeout).is_err() {
+                    cancel.cancel();
+                }
+            });
+            let result = self.stop_managed_cancellable(label, path, cancel);
+            let _ = done.send(());
+            result
+        })
+    }
+
     fn bootstrap(&self, label: &str, plist_path: &Path) -> Result<(), ExecutorError> {
         LaunchCtlExecutor::bootstrap(self, label, plist_path)
     }

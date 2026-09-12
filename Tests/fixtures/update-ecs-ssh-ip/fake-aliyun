@@ -49,7 +49,7 @@ case "$action" in
       exit 0
     fi
     tmp_file="${STATE_FILE}.tmp.$$"
-    "$JQ_BIN" --arg cidr "$source_cidr" '.Permissions.Permission += [{"Description":"tunnelpad-dynamic-ssh-managed","Direction":"ingress","IpProtocol":"TCP","PortRange":"22/22","Policy":"Accept","NicType":"intranet","SourceCidrIp":$cidr,"SecurityGroupRuleId":"sgr-fixture-new"}]' "$STATE_FILE" >"$tmp_file"
+    "$JQ_BIN" --arg priority "${FAKE_NEW_PRIORITY:-1}" --arg cidr "$source_cidr" --arg new_id "sgr-fixture-${client_token}" '.Permissions.Permission += [{"Description":"tunnelpad-dynamic-ssh-managed","Direction":"ingress","IpProtocol":"TCP","PortRange":"22/22","Policy":"Accept","Priority":$priority,"NicType":"intranet","SourceCidrIp":$cidr,"SecurityGroupRuleId":$new_id}]' "$STATE_FILE" >"$tmp_file"
     mv "$tmp_file" "$STATE_FILE"
     if [ "${FAKE_AUTHORIZE_ERROR_AFTER_APPLY:-0}" = "1" ]; then
       printf '%s\n' 'ErrorCode: FixtureAuthorizeResponseLost'

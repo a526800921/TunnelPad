@@ -515,6 +515,63 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
 
     pub const LAUNCHCTL_PATH: &'static str = "/bin/launchctl";
 
+    pub(crate) fn recovery_command(
+        &self,
+        args: &[String],
+        cancel: &CancellationToken,
+        timeout: Duration,
+    ) -> Result<ProcessResult, ExecutorError> {
+        if timeout.is_zero() {
+            return Err(status_query_timeout_error());
+        }
+        let result = self
+            .runner
+            .run_cancellable_with_timeout(Self::LAUNCHCTL_PATH, args, cancel, timeout)
+            .map_err(|error| match error {
+                ProcessRunError::Cancelled => ExecutorError::Cancelled,
+                ProcessRunError::TimedOut => status_query_timeout_error(),
+                ProcessRunError::Spawn { message } => ExecutorError::Spawn { message },
+            })?;
+        if result.exit_code != 0
+            && !(args[0] == "print" && is_not_found_message(&result.stderr, &result.stdout))
+        {
+            return Err(ExecutorError::CommandFailed {
+                operation: args[0].clone(),
+                exit_code: result.exit_code,
+                stderr: "自动恢复命令失败".into(),
+            });
+        }
+        Ok(result)
+    }
+
+    pub(crate) fn recovery_status_checked(
+        &self,
+        label: &str,
+        cancel: &CancellationToken,
+        timeout: Duration,
+    ) -> Result<TunnelStatus, ExecutorError> {
+        let result = self.recovery_command(
+            &["print".into(), format!("{}/{}", self.domain(), label)],
+            cancel,
+            timeout.min(Duration::from_secs(2)),
+        )?;
+        let details = if result.exit_code != 0 {
+            (TunnelStatus::NotLoaded, None)
+        } else {
+            let details = parse_status_details(&result.stdout);
+            if details.0 == TunnelStatus::NotLoaded {
+                return Err(ExecutorError::CommandFailed {
+                    operation: "status".into(),
+                    exit_code: 0,
+                    stderr: "无法解析 launchctl 状态".into(),
+                });
+            }
+            details
+        };
+        self.remember_status(label, details.clone());
+        Ok(details.0)
+    }
+
     pub fn domain(&self) -> String {
         format!("gui/{}", self.uid)
     }

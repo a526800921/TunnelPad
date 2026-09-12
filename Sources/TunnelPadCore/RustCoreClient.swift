@@ -346,3 +346,34 @@ final class RustCoreClient: @unchecked Sendable {
             || CommandLine.arguments.first?.contains("xctest") == true
     }
 }
+
+extension RustCoreClient: RustLaunchRecoveryOwner {
+    func supportsLaunchRecovery() throws -> Bool {
+        let result = try send(["op": "launchRecoveryCapabilities"])
+        return (result["version"] as? Int) == 1 && (result["checkedStart"] as? Bool) == true && (result["deadline"] as? Bool) == true
+    }
+    func beginLaunchRecovery(id: String) throws -> UInt64? {
+        let result = try send(["op": "launchRecoveryBegin", "id": id])
+        if result["operation"] as? String == "busy" { return nil }
+        guard let number = result["generation"] as? NSNumber, number.uint64Value > 0 else {
+            throw ClientError.invalidResponse("严格 begin 缺少 generation")
+        }
+        return number.uint64Value
+    }
+    func launchRecoveryStatus(id: String, generation: UInt64, timeout: TimeInterval) throws -> TunnelStatus? {
+        try recoveryCommand("launchRecoveryStatus", id: id, generation: generation, timeout: timeout)
+    }
+    func launchRecoveryStart(tunnel: TunnelConfig, generation: UInt64, timeout: TimeInterval) throws -> TunnelStatus? {
+        try recoveryCommand("launchRecoveryStart", id: tunnel.id, generation: generation, timeout: timeout, tunnel: tunnel)
+    }
+    func launchRecoveryStop(id: String, generation: UInt64, timeout: TimeInterval) throws -> TunnelStatus? {
+        try recoveryCommand("launchRecoveryStop", id: id, generation: generation, timeout: timeout)
+    }
+    private func recoveryCommand(_ op: String, id: String, generation: UInt64, timeout: TimeInterval, tunnel: TunnelConfig? = nil) throws -> TunnelStatus? {
+        var command: [String: Any] = ["op": op, "id": id, "generation": NSNumber(value: generation), "timeoutMs": Int(min(55, max(0, timeout)) * 1000)]
+        if let tunnel { command["expectedConfig"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(tunnel)) }
+        let result = try send(command)
+        if result["operation"] as? String == "busy" { return nil }
+        return try decodeStatus(result["status"])
+    }
+}

@@ -45,6 +45,7 @@
 
 | 计划 | 状态 | 当前阶段 | 最后更新 | 依赖 | 证据 |
 |---|---|---|---|---|---|
+| [TunnelPad 无人值守启动恢复](plans/tunnelpad-unattended-launch-recovery.md) | 设计中 | 阶段 2 | 2026-09-12 | tunnelpad-launch-autostart, tunnelpad-unattended-managed-ssh-recovery, ecs-dynamic-ssh-ip, tunnelpad-health-monitor-energy, tunnelpad-rust-migration | [阶段 0 基线](data-quality/tunnelpad-unattended-launch-recovery-stage0-step0-20260912.md)；[阶段 0 独立设计复核](data-quality/tunnelpad-unattended-launch-recovery-stage0-independent-review-20260912.md)；[专项计划](plans/tunnelpad-unattended-launch-recovery.md) |
 
 ### 已完成
 
@@ -75,7 +76,7 @@
 
 ## 推荐顺序
 
-当前无待推进阶段；[开机自启与隧道自动恢复](plans/tunnelpad-launch-autostart.md)已于 2026-09-12 通过用户验收关闭，进入历史基线。新增需求先明确本次差异、相关计划和适用准入，不能沿旧步骤直接继续实施。
+已完成[无人值守启动恢复](plans/tunnelpad-unattended-launch-recovery.md)阶段 0，虚拟时钟/假云基线及独立设计复核通过。阶段 1 实现、隔离回归、同版打包和独立恢复完成复核通过；阶段 2 设计中，真实目标、操作授权、Step 0 与准入尚待明确。[开机自启与隧道自动恢复](plans/tunnelpad-launch-autostart.md)仍为已完成历史基线；独立的[日志修复](reviews/tunnelpad-launch-autostart-followup-20260912.md)只修正成功判定和汇总。
 
 1. 核心生命周期或恢复变更先核对 [Rust Core 迁移](plans/tunnelpad-rust-migration.md)、[稳定性](plans/tunnelpad-stability.md)、[Core 风险收敛](plans/tunnelpad-core-hardening.md)和[无人值守 SSH 恢复](plans/tunnelpad-unattended-managed-ssh-recovery.md)的职责边界。
 2. 日志与资源开销变更按[日志事件流](plans/tunnelpad-log-streaming.md)、[保留回归修复](plans/tunnelpad-log-retention-energy-regression.md)、[低写放大](plans/tunnelpad-log-write-amplification.md)的演进关系读取；能耗验收以[后台健康监测](plans/tunnelpad-health-monitor-energy.md)的最新有效证据为入口。
@@ -86,6 +87,7 @@
 
 | 计划 | 依赖 | 原因 |
 |---|---|---|
+| tunnelpad-unattended-launch-recovery | tunnelpad-launch-autostart, tunnelpad-unattended-managed-ssh-recovery, ecs-dynamic-ssh-ip, tunnelpad-health-monitor-energy, tunnelpad-rust-migration | 承接首次启动失败的持续限频恢复，复用 autoStart、既有健康恢复所有权、ECS fail-closed 和能耗边界；追加严格自动启动命令及同版打包前置监督，不重开历史完成阶段。 |
 | tunnelpad-launch-autostart | tunnelpad-stability, tunnelpad-rust-migration, ecs-dynamic-ssh-ip, tunnelpad-health-monitor-energy | 恢复入口复用已完成的首轮状态发现/busy 保护/CfgR 不变量与 Rust 配置 owner 边界；SSH 隧道恢复沿用 ECS 前置同步 fail-closed；启动期不做重试循环沿用能耗计划的边界；四计划均已完成，阶段 3 实施与共享生命周期文件编辑需保持单一编辑窗口。 |
 | tunnelpad-v1 | - | - |
 | ecs-dynamic-ssh-ip | tunnelpad-rust-migration（仅阶段 2，已完成） | 阶段 0/1 不依赖 Rust 迁移；当前阶段 2 只消费已完成的 Rust Core 唯一 owner、version=1 配置和 launchd 边界，不重新修改迁移 owner。 |
@@ -112,6 +114,13 @@
 
 | 问题 | 推荐方案 | 影响范围 | 是否阻塞当前阶段 | 状态 |
 |---|---|---|---|---|
+| 可执行基线与错误分类 | [阶段 0 基线](data-quality/tunnelpad-unattended-launch-recovery-stage0-step0-20260912.md)已通过，分类契约已收敛 | tunnelpad-unattended-launch-recovery | 否 | 已完成 |
+| 退避与全局并发初值 | [新计划](plans/tunnelpad-unattended-launch-recovery.md)已冻结初值，运行性能由后续阶段验收 | tunnelpad-unattended-launch-recovery | 否 | 已完成 |
+| 阶段 0 独立设计准入 | [独立复核已通过](data-quality/tunnelpad-unattended-launch-recovery-stage0-independent-review-20260912.md) | tunnelpad-unattended-launch-recovery | 否 | 已完成 |
+| 阶段 1 实现授权与 Step 0 | 用户已明确授权；[本阶段 Step 0](data-quality/tunnelpad-unattended-launch-recovery-stage1-step0-20260912.md)已建立 | tunnelpad-unattended-launch-recovery | 否 | 已完成 |
+| 阶段 1 独立准入 | [恢复准入通过](data-quality/tunnelpad-unattended-launch-recovery-stage1-independent-review-20260912.md) | tunnelpad-unattended-launch-recovery | 否 | 已完成 |
+| 阶段 1 独立完成复核 | [三项 P1 修复后独立恢复通过](data-quality/tunnelpad-unattended-launch-recovery-stage1-independent-completion-review-20260912.md) | tunnelpad-unattended-launch-recovery | 否 | 已完成 |
+| 阶段 2 真实验收授权与准入 | 真实目标、观测窗口、操作授权、回滚及 Step 0 尚待明确 | tunnelpad-unattended-launch-recovery | 是 | 待确认 |
 | - | - | - | 否 | 已延后 |
 | 日志保留与能耗回归修复阶段 2 真实回归 | [阶段 2 真实验收](data-quality/tunnelpad-log-retention-energy-regression-stage2-implementation-20260905.md)和[阶段 2 独立完成复核](data-quality/tunnelpad-log-retention-energy-regression-stage2-independent-completion-review-20260905.md)已通过；两隧道窗口、日志 2000 LF、CPU/能耗、运行栈和清理均已核对 | tunnelpad-log-retention-energy-regression 阶段 2；曾阻塞能耗计划阶段 2 | 否 | 已完成 |
 | 后台健康监测能耗优化阶段 2 夜间复验未通过 | [真实运行反证](data-quality/tunnelpad-health-monitor-energy-overnight-revalidation-20260905.md)已由日志保留修复计划的真实 Release 回归和[最新独立完成复核](data-quality/tunnelpad-health-monitor-energy-post-log-retention-fix-independent-completion-review-20260905.md)处理 | tunnelpad-health-monitor-energy 阶段 2 | 否 | 已完成 |
@@ -128,6 +137,9 @@
 
 | 计划 | 阶段 | 证据 |
 |---|---|---|
+| tunnelpad-unattended-launch-recovery | 阶段 0 | [可执行基线](data-quality/tunnelpad-unattended-launch-recovery-stage0-step0-20260912.md)；[独立设计复核](data-quality/tunnelpad-unattended-launch-recovery-stage0-independent-review-20260912.md)（Swift 24/24、假云 15/15，设计准入通过；阶段 1 尚未实施） |
+| tunnelpad-unattended-launch-recovery | 阶段 1 完成 | [实施与隔离验证](data-quality/tunnelpad-unattended-launch-recovery-stage1-implementation-20260912.md)；[独立恢复完成复核](data-quality/tunnelpad-unattended-launch-recovery-stage1-independent-completion-review-20260912.md)（Swift 167、Rust 83+2+1、shell 15、native 9、独立 Release 包与签名通过；真实验收归阶段 2） |
+| tunnelpad-launch-autostart | 完成后日志修复 | [后续复核与日志修复](reviews/tunnelpad-launch-autostart-followup-20260912.md)（仅运行态计成功；Swift TunnelManagerTests 10/10；未替换运行中 App） |
 | tunnelpad-v1 | 阶段 0 | [基线快照](data-quality/tunnelpad-v1-stage0-baseline-20260829.md)（样本矩阵四项通过，2026-08-29） |
 | tunnelpad-v1 | 阶段 1 | [接管与验证记录](data-quality/tunnelpad-v1-stage1-takeover-20260829.md)（双隧道接管/杀进程 1s 重连/退出即停双路径/重启恢复，2026-08-29） |
 | tunnelpad-v1 | 阶段 2 | [功能与验收记录](data-quality/tunnelpad-v1-stage2-features-20260829.md)（9 行矩阵全过、app 执行器/探针/日志/打包，.app 交付，2026-08-29） |

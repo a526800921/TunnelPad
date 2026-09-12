@@ -59,6 +59,7 @@ prepare_case() {
   export TUNNELPAD_CONFIG_FILE="$CONFIG_FILE"
   export TUNNELPAD_LOG_FILE="$LOG_FILE"
   export TUNNELPAD_LOCK_DIR="$LOCK_DIR"
+  export TUNNELPAD_PREFLIGHT_STATE_DIR="$CASE_DIR/preflight"
   export CURL_BIN="$FIXTURE_DIR/fake-curl"
   export ALIYUN_BIN="$FIXTURE_DIR/fake-aliyun"
   export UUIDGEN_BIN="$FIXTURE_DIR/fake-uuidgen"
@@ -162,6 +163,16 @@ assert_eq 2 "$("$JQ_BIN" '[.Permissions.Permission[] | select(.Description == "t
 assert_contains "$(cat "$STATE_FILE")" '45.67.89.100/32' '撤销失败应保留旧规则'
 assert_contains "$(cat "$STATE_FILE")" '45.67.89.101/32' '撤销失败应保留新规则'
 printf '%s\n' 'PASS revoke-failure'
+
+# 阶段 0 反证：外部临时撤销故障已解除，旧脚本仍会因双规则拒绝重试。
+# 无人值守实现后应以可信事务恢复的目标断言替换，未知多规则仍 fail-closed。
+unset FAKE_REVOKE_FAIL
+revoke_calls_before_retry=$(count_calls RevokeSecurityGroup)
+run_update
+assert_eq 0 "$RC" '撤销故障解除后应从可信事务收敛'
+assert_eq "$((revoke_calls_before_retry + 1))" "$(count_calls RevokeSecurityGroup)" '只续作原精确撤销'
+assert_eq 1 "$("$JQ_BIN" '[.Permissions.Permission[] | select(.Description == "tunnelpad-dynamic-ssh-managed")] | length' "$STATE_FILE")" '应只保留新规则'
+printf '%s\n' 'PASS retry-after-revoke-failure-converges'
 
 prepare_case revoke-uncertain
 write_state "{\"Permissions\":{\"Permission\":[$old_rule]}}"

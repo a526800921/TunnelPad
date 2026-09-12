@@ -13,7 +13,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-DIST_DIR="$PROJECT_ROOT/dist"
+DIST_DIR="${TUNNELPAD_DIST_DIR:-$PROJECT_ROOT/dist}"
 APP_NAME="TunnelPad"
 EXECUTABLE_NAME="tunnelpad"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
@@ -85,6 +85,8 @@ cp "$ICON_SRC" "$APP_BUNDLE/Contents/Resources/$APP_NAME.icns"
 echo "  ✓ 应用图标"
 cp "$PROJECT_ROOT/scripts/update-ecs-ssh-ip" "$APP_BUNDLE/Contents/Resources/update-ecs-ssh-ip"
 chmod +x "$APP_BUNDLE/Contents/Resources/update-ecs-ssh-ip"
+cp "$PROJECT_ROOT/rust/target/release/tunnelpad-preflight" "$APP_BUNDLE/Contents/Resources/tunnelpad-preflight"
+chmod +x "$APP_BUNDLE/Contents/Resources/tunnelpad-preflight"
 echo "  ✓ ECS SSH 公网 IP 同步脚本"
 
 # Step 7: PkgInfo + ad-hoc 签名 + 校验

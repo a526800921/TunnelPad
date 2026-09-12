@@ -239,174 +239,59 @@ struct ECSPreStartChecker: ECSPreStartChecking, Sendable {
 }
 
 struct SystemECSPreflightProcessRunner: ECSPreflightProcessRunning, Sendable {
-    func run(
-        executablePath: String,
-        arguments: [String],
-        environment: [String: String],
-        timeout: TimeInterval
-    ) throws -> ProcessResult {
-        let process = Process()
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: executablePath)
-        process.arguments = arguments
-        process.environment = environment
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
-        let stdout = DataBox()
-        let stderr = DataBox()
-        let group = DispatchGroup()
-        do {
-            try process.run()
-        } catch {
-            return try handleLaunchFailure(error)
-        }
-
-        group.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            stdout.value = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-            group.leave()
-        }
-        group.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            stderr.value = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-            group.leave()
-        }
-
-        let deadline = Date().addingTimeInterval(max(timeout, 0))
-        while process.isRunning {
-            if Date() >= deadline {
-                process.terminate()
-                stdoutPipe.fileHandleForReading.closeFile()
-                stderrPipe.fileHandleForReading.closeFile()
-                process.waitUntilExit()
-                group.wait()
-                throw ECSPreflightProcessError.timedOut
-            }
-            Thread.sleep(forTimeInterval: 0.01)
-        }
-        group.wait()
-        return makeResult(process: process, stdout: stdout.data, stderr: stderr.data)
+    func run(executablePath: String, arguments: [String], environment: [String: String], timeout: TimeInterval) throws -> ProcessResult {
+        try BoundedPreflightProcess.run(executable: executablePath, arguments: arguments, environment: environment,
+            timeout: timeout, cancellation: PreflightCancellation())
     }
 
-    func runAsync(
-        executablePath: String,
-        arguments: [String],
-        environment: [String: String]
-    ) async throws -> ProcessResult {
-        let process = Process()
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: executablePath)
-        process.arguments = arguments
-        process.environment = environment
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-        let controller = ProcessController()
-
+    func runAsync(executablePath: String, arguments: [String], environment: [String: String]) async throws -> ProcessResult {
+        let cancellation = PreflightCancellation()
         return try await withTaskCancellationHandler(operation: {
-            try await withCheckedThrowingContinuation { continuation in
-                do {
-                    try process.run()
-                    controller.install(process, stdoutPipe: stdoutPipe, stderrPipe: stderrPipe)
-                } catch {
-                    continuation.resume(throwing: ECSPreflightProcessError.launchFailed)
-                    return
-                }
-
-                let stdoutData = DataBox()
-                let stderrData = DataBox()
-                let group = DispatchGroup()
-                group.enter()
-                DispatchQueue.global(qos: .userInitiated).async {
-                    stdoutData.value = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                    group.leave()
-                }
-                group.enter()
-                DispatchQueue.global(qos: .userInitiated).async {
-                    stderrData.value = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-                    group.leave()
-                }
-                DispatchQueue.global(qos: .userInitiated).async {
-                    process.waitUntilExit()
-                    group.wait()
-                    continuation.resume(returning: makeResult(
-                        process: process,
-                        stdout: stdoutData.data,
-                        stderr: stderrData.data
-                    ))
-                }
-            }
-        }, onCancel: {
-            controller.terminate()
-        })
+            try await Task.detached(priority: .utility) {
+                try BoundedPreflightProcess.run(executable: executablePath, arguments: arguments, environment: environment,
+                    timeout: 35, cancellation: cancellation)
+            }.value
+        }, onCancel: { cancellation.cancel() })
     }
 
-    private func handleLaunchFailure(_ error: Error) throws -> ProcessResult {
-        _ = error
-        throw ECSPreflightProcessError.launchFailed
-    }
-
-    private func makeResult(process: Process, stdout: Data, stderr: Data) -> ProcessResult {
-        ProcessResult(
-            exitCode: process.terminationStatus,
-            stdout: String(data: stdout, encoding: .utf8) ?? "",
-            stderr: String(data: stderr, encoding: .utf8) ?? ""
-        )
-    }
 }
 
-private final class DataBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var storedData = Data()
-
-    var data: Data {
-        lock.lock()
-        defer { lock.unlock() }
-        return storedData
-    }
-
-    var value: Data {
-        get { data }
-        set {
-            lock.lock()
-            storedData = newValue
-            lock.unlock()
-        }
-    }
+protocol LaunchPreflightChecking: ECSPreStartChecking {
+    func launchResource() async throws -> String
+    func checkLaunch(tunnel: TunnelConfig, timeout: TimeInterval) async throws -> LaunchPreflightResult
 }
 
-private final class ProcessController: @unchecked Sendable {
-    private let lock = NSLock()
-    private var process: Process?
-    private var stdoutPipe: Pipe?
-    private var stderrPipe: Pipe?
-    private var terminationRequested = false
-
-    func install(_ process: Process, stdoutPipe: Pipe, stderrPipe: Pipe) {
-        lock.lock()
-        self.process = process
-        self.stdoutPipe = stdoutPipe
-        self.stderrPipe = stderrPipe
-        let shouldTerminate = terminationRequested
-        lock.unlock()
-        if shouldTerminate {
-            process.terminate()
-            stdoutPipe.fileHandleForReading.closeFile()
-            stderrPipe.fileHandleForReading.closeFile()
+extension ECSPreStartChecker: LaunchPreflightChecking {
+    func launchResource() async throws -> String {
+        let result = try await launchInvocation(arguments: ["--resource"], timeout: 5)
+        struct Resource: Decodable { let version: Int; let resource: String }
+        guard result.exitCode == 0, let data = result.stdout.data(using: .utf8),
+              let resource = try? JSONDecoder().decode(Resource.self, from: data), resource.version == 1,
+              resource.resource.count == 16, resource.resource.allSatisfy({ $0.isHexDigit }) else {
+            throw ECSPreStartError.commandFailed(exitCode: result.exitCode)
         }
+        return resource.resource
     }
-
-    func terminate() {
-        lock.lock()
-        terminationRequested = true
-        let process = self.process
-        let stdoutPipe = self.stdoutPipe
-        let stderrPipe = self.stderrPipe
-        lock.unlock()
-        process?.terminate()
-        stdoutPipe?.fileHandleForReading.closeFile()
-        stderrPipe?.fileHandleForReading.closeFile()
+    func checkLaunch(tunnel: TunnelConfig, timeout: TimeInterval) async throws -> LaunchPreflightResult {
+        guard SSHCommand.isSSH(tunnel.command) else {
+            return LaunchPreflightResult(version: 1, stage: "complete", category: .success, retryHint: 0, sanitizedCode: "not_required", exitCode: 0)
+        }
+        let result = try await launchInvocation(arguments: ["--result-json"], timeout: min(30, timeout))
+        guard let data = result.stdout.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode(LaunchPreflightResult.self, from: data),
+              decoded.version == 1, decoded.exitCode == Int(result.exitCode) else {
+            return LaunchPreflightResult(version: 1, stage: "result", category: .unknown, retryHint: 300, sanitizedCode: "invalid_result", exitCode: 4)
+        }
+        return decoded
+    }
+    private func launchInvocation(arguments: [String], timeout: TimeInterval) async throws -> ProcessResult {
+        guard let scriptURL, FileManager.default.fileExists(atPath: scriptURL.path) else { throw ECSPreStartError.scriptUnavailable }
+        try Task.checkCancellation()
+        var environment = environment
+        environment["TUNNELPAD_PREFLIGHT_TIMEOUT_MS"] = String(Int(min(30, max(0.001, timeout)) * 1000))
+        // Guardian owns work + cleanup; caller cancellation waits for the runner to finish.
+        let result = try await runner.runAsync(executablePath: Self.bashPath, arguments: [scriptURL.path] + arguments, environment: environment)
+        try Task.checkCancellation()
+        return result
     }
 }

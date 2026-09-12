@@ -50,6 +50,7 @@ pub mod error_code {
     pub const CONFIG_IO: u32 = 11;
     pub const STILL_RUNNING: u32 = 12;
     pub const STALE_OPERATION: u32 = 13;
+    pub const RECOVERY_TIMEOUT: u32 = 14;
 }
 
 /// 跨边界错误：`code` 取 [`error_code`] 常量，`message` 语义对齐 Swift 抛错文案。
@@ -328,8 +329,7 @@ mod tests {
         .unwrap();
         assert!(explicit.auto_start, "显式 true 应保留");
 
-        let bad =
-            r#"{"version":1,"tunnels":[{"id":"a","name":"a","autoStart":"yes","command":["/bin/true"]}]}"#;
+        let bad = r#"{"version":1,"tunnels":[{"id":"a","name":"a","autoStart":"yes","command":["/bin/true"]}]}"#;
         assert_eq!(
             parse_app_config(bad).unwrap_err().code,
             error_code::INVALID_JSON
