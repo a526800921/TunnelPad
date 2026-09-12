@@ -59,12 +59,8 @@ final class TunnelManagerTests: XCTestCase {
 
         let manager = TunnelManager(paths: paths)
         manager.refresh()
-        // 探针异步执行，轮询等待写回。
-        let deadline = Date().addingTimeInterval(5)
-        while manager.probeResults["edit-a"] == nil, Date() < deadline {
-            try await Task.sleep(nanoseconds: 50_000_000)
-        }
-        XCTAssertNotNil(manager.probeResults["edit-a"])
+        await manager.refreshAsync()
+        XCTAssertNil(manager.probeResults["edit-a"], "未加载隧道不执行探针")
 
         var updated = tunnel
         updated.name = "A2"

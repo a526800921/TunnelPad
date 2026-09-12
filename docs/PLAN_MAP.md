@@ -110,7 +110,7 @@
 |---|---|---|---|
 | - | - | - | - |
 
-已记录[停止状态探针与绿色标记误导](reviews/tunnelpad-deferred-runtime-issues-20260912.md)，按用户要求留待统一修复，不阻断当前其它验收。
+[停止状态探针与绿色标记误导](reviews/tunnelpad-deferred-runtime-issues-20260912.md)已按后续授权修复：175 项 Swift 测试、独立发现修复自验、Release 和真实 App 验证完成；健康周期同步复核 PID。历史计划保持已关闭。
 
 ## 当前阻塞项
 

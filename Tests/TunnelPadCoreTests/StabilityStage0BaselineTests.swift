@@ -45,19 +45,14 @@ final class StabilityStage0BaselineTests: XCTestCase {
 
         manager.refresh()
 
-        let deadline = Date().addingTimeInterval(5)
-        while manager.probeResults[tunnel.id] == nil, Date() < deadline {
-            try await Task.sleep(nanoseconds: 50_000_000)
-        }
-
-        guard case .failed? = manager.probeResults[tunnel.id] else {
-            return XCTFail("应观察到探针失败结果，实际为：\(String(describing: manager.probeResults[tunnel.id]))")
-        }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertNil(manager.probeResults[tunnel.id], "未运行隧道不应执行失败端点探针")
 
         let lifecycleCalls = owner.calls().filter {
             ["start", "stop", "restart", "remove", "shutdown"].contains($0)
         }
-        XCTAssertTrue(lifecycleCalls.isEmpty, "当前探针失败不应触发生命周期恢复：\(lifecycleCalls)")
+        XCTAssertTrue(lifecycleCalls.isEmpty, "未运行隧道不应触发生命周期恢复：\(lifecycleCalls)")
+        await manager.shutdownAsync()
     }
 
     func testCorruptConfigCurrentlyArchivesAndReturnsEmptyConfig() throws {

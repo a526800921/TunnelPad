@@ -151,16 +151,22 @@ enum TunnelDisplay {
     }
 
     @ViewBuilder
-    static func probeBadge(_ result: ProbeResult?) -> some View {
-        switch result {
-        case .satisfied(let status):
-            probeText("探针 \(status) ✓", color: .green)
-        case .unexpected(let status):
-            probeText("探针 \(status) !", color: .orange)
-        case .failed:
-            probeText("探针失败", color: .red)
-        case nil:
-            probeText("探针 …", color: .gray)
+    static func probeBadge(_ result: ProbeResult?, status: TunnelStatus?, busy: Bool) -> some View {
+        if busy {
+            probeText("操作中 · 未检测", color: .gray)
+        } else if status?.isRunning != true {
+            probeText(status == nil ? "状态未知 · 未检测" : "未运行 · 未检测", color: .gray)
+        } else {
+            switch result {
+            case .satisfied(let status):
+                probeText("端点探针 \(status) ✓", color: .green)
+            case .unexpected(let status):
+                probeText("端点探针 \(status) !", color: .orange)
+            case .failed:
+                probeText("端点探针失败", color: .red)
+            case nil:
+                probeText("未检测", color: .gray)
+            }
         }
     }
 

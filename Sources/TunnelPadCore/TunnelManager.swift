@@ -482,7 +482,12 @@ public final class TunnelManager: ObservableObject {
             }
         } catch {
             guard isCurrentStateRead(token) else { return }
+            invalidateProbeResults()
+            updateRuntime { state in
+                for id in Array(state.probeResults.keys) { state.setProbeResult(nil, for: id) }
+            }
             lastError = "Rust Core 刷新状态失败：\(error)"
+            return
         }
         runProbes()
     }
@@ -507,7 +512,12 @@ public final class TunnelManager: ObservableObject {
             return
         } catch {
             guard isCurrentStateRead(token) else { return }
+            invalidateProbeResults()
+            updateRuntime { state in
+                for id in Array(state.probeResults.keys) { state.setProbeResult(nil, for: id) }
+            }
             lastError = "Rust Core 刷新状态失败：\(error)"
+            return
         }
     }
 
@@ -528,13 +538,16 @@ public final class TunnelManager: ObservableObject {
 
         config = nextConfig
         let validIDs = Set(nextConfig.tunnels.map(\.id))
-        updateRuntime { $0.prune(to: validIDs) }
+        updateRuntime { state in
+            state.prune(to: validIDs)
+            for id in changedIDs { state.setProbeResult(nil, for: id) }
+        }
     }
 
     /// 异步执行配置了探针的隧道探测，完成后更新展示。
     private func runProbes() {
         let probes = config.tunnels.compactMap { tunnel -> (String, ProbeConfig)? in
-            guard let probe = tunnel.probe else { return nil }
+            guard let probe = tunnel.probe, isProbeEligible(tunnel.id) else { return nil }
             return (tunnel.id, probe)
         }
         invalidateProbeResults()
@@ -560,7 +573,7 @@ public final class TunnelManager: ObservableObject {
 
     private func applyProbeResults(_ results: [String: ProbeResult]) {
         let validProbes = Dictionary(uniqueKeysWithValues: config.tunnels.compactMap { tunnel -> (String, ProbeConfig)? in
-            guard let probe = tunnel.probe else { return nil }
+            guard let probe = tunnel.probe, isProbeEligible(tunnel.id) else { return nil }
             return (tunnel.id, probe)
         })
         updateRuntime { state in
@@ -623,7 +636,7 @@ public final class TunnelManager: ObservableObject {
         }
 
         // 保留启动时的状态发现，兼容无主窗口时的状态展示；只允许一次全量
-        // snapshot。后续健康周期只读取配置并执行已配置的 HTTP 探针。
+        // snapshot。后续只复核配置了探针的目标，不扫描无探针隧道。
         if !didAttemptInitialHealthStatusSnapshot {
             didAttemptInitialHealthStatusSnapshot = true
             do {
@@ -638,51 +651,71 @@ public final class TunnelManager: ObservableObject {
                     syncLogStore()
                 }
             } catch {
-                // 启动状态未知时继续执行探针，但不使用旧状态触发恢复。
+                // 初始快照失败时由下方目标状态复核决定是否允许探针。
             }
         }
 
-        let probes = config.tunnels.compactMap { tunnel -> (String, ProbeConfig)? in
-            guard let probe = tunnel.probe else { return nil }
-            return (tunnel.id, probe)
+        var probes: [(String, ProbeConfig)] = []
+        for tunnel in config.tunnels {
+            guard let probe = tunnel.probe,
+                  !busyIDs.contains(tunnel.id), !launchRecoveryIDs.contains(tunnel.id) else { continue }
+            if let reader = rustCore as? any RustHealthStatusReader {
+                do {
+                    let status = try await Task.detached(priority: .utility) {
+                        try reader.status(id: tunnel.id)
+                    }.value
+                    guard isCurrentStateRead(token), !Task.isCancelled else { return }
+                    updateRuntime { $0.setStatus(status, for: tunnel.id) }
+                } catch {
+                    guard isCurrentStateRead(token), !Task.isCancelled else { return }
+                    invalidateProbeResults()
+                    updateRuntime { $0.setProbeResult(nil, for: tunnel.id) }
+                    // 状态超时仍可推进既有的安全恢复，但不能发送 HTTP 或保留绿色结果。
+                    if reader.isStatusQueryTimeout(error), isRunning(statuses[tunnel.id]) {
+                        recordHealthResult(.failed(reason: "运行状态查询超时"), for: tunnel.id)
+                    }
+                    continue
+                }
+            } else {
+                // 缺少目标状态复核能力时后台监测保持 fail-closed。
+                continue
+            }
+            guard isCurrentStateRead(token), !Task.isCancelled else { return }
+            if isProbeEligible(tunnel.id) {
+                probes.append((tunnel.id, probe))
+            } else if canRetryQuiescedRecovery(
+                for: tunnel.id, tunnel: tunnel, state: healthRecoveryStates[tunnel.id]
+            ) {
+                // 预检失败后 SSH 可能已停止；沿用有界恢复计数，不依赖停机 HTTP 探测。
+                recordHealthResult(.failed(reason: "等待已停止隧道恢复"), for: tunnel.id)
+            }
         }
         guard !probes.isEmpty else {
             await healthProbeCoordinator.cancel()
             return
         }
 
-        let results = await healthProbeCoordinator.run(probes)
-        guard isCurrentStateRead(token), !Task.isCancelled, let results else { return }
-        applyProbeResults(results)
+        let generation = probeGeneration
+        var results: [String: ProbeResult] = [:]
+        for probe in probes {
+            // 每次发送前复核代次，防止串行批次在其他隧道停止后继续发出请求。
+            guard isCurrentStateRead(token), generation == probeGeneration,
+                  !Task.isCancelled, isProbeEligible(probe.0) else { return }
+            guard let result = await healthProbeCoordinator.run([probe]) else { return }
+            results.merge(result) { _, latest in latest }
+        }
+        guard isCurrentStateRead(token), generation == probeGeneration,
+              !Task.isCancelled else { return }
+        applyProbeResults(results, generation: generation)
         for (id, result) in results {
             guard isCurrentStateRead(token), !Task.isCancelled else { return }
-            guard !launchRecoveryIDs.contains(id) else { continue }
-            if case .satisfied = result {
-                recordHealthResult(result, for: id)
-                continue
-            }
-
-            // 只有探针不满足时才查询目标隧道的最新 launchd 状态；健康路径不
-            // 再执行全量 snapshot，也不会扫描没有探针的隧道。
-            guard let statusReader = rustCore as? any RustHealthStatusReader else { return }
-            var status: TunnelStatus
-            do {
-                status = try await Task.detached(priority: .utility) {
-                    try statusReader.status(id: id)
-                }.value
-            } catch {
-                // launchctl print 超时表示当前状态未知；只有已有的运行态
-                // 缓存仍可信时才进入恢复候选，实际 stop 仍会在 Rust 侧
-                // 重新核验完整受管身份。其他错误继续 fail-closed。
-                guard statusReader.isStatusQueryTimeout(error),
-                      let cachedStatus = statuses[id],
-                      isRunning(cachedStatus) else { continue }
-                status = cachedStatus
-            }
-            guard isCurrentStateRead(token), !Task.isCancelled else { return }
-            updateRuntime { $0.setStatus(status, for: id) }
+            guard isProbeEligible(id), rustCore is any RustHealthStatusReader else { continue }
             recordHealthResult(result, for: id)
         }
+    }
+
+    private func isProbeEligible(_ id: String) -> Bool {
+        isRunning(statuses[id]) && !busyIDs.contains(id) && !launchRecoveryIDs.contains(id)
     }
 
     private func recordHealthResult(_ result: ProbeResult, for id: String) {
@@ -1254,6 +1287,15 @@ public final class TunnelManager: ObservableObject {
     private func updateRuntime(_ body: (inout TunnelRuntimeState) -> Void) {
         var next = runtimeState
         body(&next)
+        if next.statuses != runtimeState.statuses || next.busyIDs != runtimeState.busyIDs {
+            invalidateProbeResults()
+        }
+        for id in Array(next.probeResults.keys) {
+            if !isRunning(next.statuses[id]) || next.busyIDs.contains(id)
+                || next.statuses[id] != runtimeState.statuses[id] {
+                next.setProbeResult(nil, for: id)
+            }
+        }
         guard next != runtimeState else { return }
         runtimeState = next
         if statuses != next.statuses { statuses = next.statuses }

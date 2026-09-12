@@ -179,7 +179,12 @@ struct MainPanelView: View {
                     .font(.title2.bold())
                 TunnelDisplay.executorBadge(tunnel.executor)
                 if tunnel.probe != nil {
-                    TunnelDisplay.probeBadge(manager.probeResults[tunnel.id])
+                    TunnelDisplay.probeBadge(
+                        manager.probeResults[tunnel.id],
+                        status: manager.statuses[tunnel.id],
+                        busy: manager.busyIDs.contains(tunnel.id)
+                    )
+                    .help("仅检测配置的 HTTP 端点；响应成功不代表流量经过此隧道。")
                 }
             } else {
                 Text("TunnelPad")

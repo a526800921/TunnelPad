@@ -25,7 +25,8 @@ final class HealthMonitorEnergyTests: XCTestCase {
         await manager.shutdownAsync()
 
         XCTAssertEqual(owner.snapshotCount, 1, "启动状态发现最多执行一次全量 snapshot")
-        XCTAssertTrue(owner.statusIDs.isEmpty, "健康探针满足时不应读取任何 launchd 单条状态")
+        XCTAssertFalse(owner.statusIDs.isEmpty)
+        XCTAssertTrue(owner.statusIDs.allSatisfy { $0 == probed.id }, "仅复核配置了探针的目标")
         XCTAssertGreaterThanOrEqual(owner.loadConfigCount, 5)
     }
 
