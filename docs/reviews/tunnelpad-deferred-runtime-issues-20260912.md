@@ -70,3 +70,18 @@ Release 经项目脚本 `TUNNELPAD_DIST_DIR=dist/probe-fix-validation ./scripts/
 本次修复完成。URL 仍指向原配置端点；其 401 只能说明 HTTP 端点符合预期，不证明该响应经过 SSH。更换探针为实际业务转发路径需明确目标端点，未凭猜测修改。PID 仍存在一个健康采样周期加查询/HTTP 耗时的可见延迟；未作全天能耗结论。
 
 末次实机采样：App 运行 41 秒，motorcycle-local-docker 已出现端点 satisfied/401，admin-tunnel 仍 unknown；这里只验证探针门控和持续运行。提交前 `detect_changes(scope: staged)` 报告 9 文件、28 个索引符号、2 条健康监测流程、MEDIUM；实际 diff 核对范围仅本次状态/探针、UI、测试与记录。旧索引按行偏移额外映射到 recordHealthResult/endOperation/beginRustOperation 等邻接符号，未将这些标记视为实际函数体修改；新增测试尚无旧索引符号。`git diff --check` 与 `plan-governance-cli check .` 均通过。
+
+## 正常运行收尾：移除临时只读护栏
+
+用户补充确认“公网 IP 真正改变后更新云端规则”此前已测试通过；该事实按用户确认记录，不再将本轮未重复该场景表述为从未验证。前述代码修复完成时仍运行于只读验收环境，正常运行收尾当时尚未完成；此处补齐并更正交付边界。
+
+用户在说明“移除临时只读护栏，恢复正常云端 IP 同步能力”后明确要求“那你收尾”，授权恢复默认配置下既有受管安全组同步能力。本次没有改代码、凭据或安全组同步规则范围。
+
+实际操作与验证：
+- 正常 Cmd+Q 退出带护栏的 App PID 14976，确认进程退出、API 9998 关闭、三条受管 label 均未加载。
+- 通过系统应用启动机制启动同一新版 `dist/stage1-validation/TunnelPad.app`，新 App PID 19769；检查进程环境，TUNNELPAD_CONFIG_FILE、CFFIXED_USER_HOME、ALIYUN_BIN、TUNNELPAD_PREFLIGHT_HELPER 均无覆盖，不再引用验收 wrapper。
+- motorcycle-local-docker 自动恢复为 running，API PID 19821 与 fresh launchctl 一致；端点探针 satisfied/401。admin-tunnel、reverse-ssh 仍确证未加载，admin-tunnel 探针 unknown。
+- 正常配置下，同包 `update-ecs-ssh-ip --check --result-json` 返回 category=success、sanitizedCode=synchronized、exitCode=0，确认当前公网 IP 与受管规则同步。此只读复查不代表本轮人为切换了公网 IP，也不据此声称本次启动是否实际发生规则写入。
+- config.json 与默认外部 ecs-ssh-ip.env 的前后 SHA-256 一致；临时 wrapper 留作验收证据但已不被当前进程引用。没有修改系统登录项，沿用现有新版路径。
+
+结论：正常运行收尾完成，后续 IP 变化需要更新受管规则时不再受本次测试 wrapper 阻止；仍遵循既有权限、超时、错误分类与安全事务约束。仅文档及运行环境收尾，复用 e46af8d 的代码测试与复核，不重复构建。脱敏结果保存在前述私有验证目录的 normal-runtime.json、normal-preflight-result.json；记录不包含凭据原文。
