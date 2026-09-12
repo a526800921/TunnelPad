@@ -22,6 +22,7 @@ TunnelPad 是一个 macOS 菜单栏应用，用于统一管理本机与服务器
 - 通过本机 HTTP API 对外提供受控的状态、生命周期和日志调用。
 - 接管旧版 LaunchAgent，提供备份与失败回滚边界。
 - 对识别为 SSH 的命令，在启动/重启前执行 ECS 动态 IP 同步；非 SSH 命令不触发该同步。
+- 支持登录自启动（`SMAppService`）与按隧道的「随 App 启动自动拉起」；启动恢复全过程写入 `~/Library/Logs/TunnelPad/app.log`。
 
 ## 架构边界
 
