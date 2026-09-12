@@ -107,27 +107,27 @@
 |---|---|---|---|---|
 | 阶段 0 | 设计收敛、Step 0 与调度/取消契约 | 用户要求新建计划 | 故障分类、时钟矩阵、所有权与超时审查 | 已完成 |
 | 阶段 1 | 先加固前置/严格入口，再实现限频调度 | 阶段 0 准入完成且用户授权实现 | 超时/锁/事务与错误分类先通过，随后调度/取消/健康交接回归 | 已完成 |
-| 阶段 2 | Release 与真实无人值守验收 | 阶段 1 完成；真实操作授权明确 | 登录离线后联网、长时间离线、退出、能耗 | 设计中 |
+| 阶段 2 | Release 与真实无人值守验收 | 阶段 1 完成；真实操作授权明确 | 登录离线后联网、长时间离线、退出、能耗 | 已完成 |
 
 ## 当前阶段
 
 ### 范围
 
-阶段 2：Release 与真实无人值守验收，当前仅设计中。阶段 1 已完成[实现与隔离回归](../data-quality/tunnelpad-unattended-launch-recovery-stage1-implementation-20260912.md)及[独立恢复复核](../data-quality/tunnelpad-unattended-launch-recovery-stage1-independent-completion-review-20260912.md)；首轮三项 P1 与修复记录保留。阶段 1 用户“那你开始吧”的实现授权已履行，不扩展为真实 ECS、运行 App 替换、发布或重启授权。
+阶段 2：Release 与真实无人值守验收，已完成。阶段 1 已完成[实现与隔离回归](../data-quality/tunnelpad-unattended-launch-recovery-stage1-implementation-20260912.md)及[独立恢复复核](../data-quality/tunnelpad-unattended-launch-recovery-stage1-independent-completion-review-20260912.md)；首轮三项 P1 与修复记录保留。阶段 1 用户“那你开始吧”的实现授权已履行，不扩展为真实 ECS、运行 App 替换、发布或重启授权。
 
-下一动作：明确阶段 2 的真实目标、观测窗口、外部操作授权及回滚，建立本阶段 Step 0 后准入。当前不执行真实环境验收。
+下一动作：无，本计划已完成。2026-09-12用户明确确认重启后没有手动打开App或点击隧道启动；[重启证据与用户验收](../data-quality/tunnelpad-unattended-launch-recovery-stage2-reboot-20260912.md)完成闭环。探针误导按用户要求后续统一修复，不在本轮修改。物理离线登录未作为组合场景实测，前置故障恢复和系统登录链路由不同窗口分别验证，保留该证据边界。
 
 ### 阶段准入摘要
 
 | 字段 | 内容 |
 |---|---|
-| 准入状态 | 设计中 |
+| 准入状态 | 已完成 |
 | 复核策略 | 风险分流 |
-| Step 0 | 尚未建立阶段 2 真实场景基线；阶段 1 隔离证据仅供参考 |
+| Step 0 | [阶段 2 真实基线与矩阵](../data-quality/tunnelpad-unattended-launch-recovery-stage2-step0-20260912.md) |
 | 样本矩阵 | U9 实际负载及真实离线后联网、长期离线、取消退出场景 |
 | 验证方式 | 经授权后记录真实运行、探针及资源开销；适用独立复核与用户接受 |
 | 失败/回滚边界 | 真实操作前明确目标/非目标、恢复手段与停止条件；遵循 migration 的可信事务边界 |
-| 当前阻塞项 | 阶段 2 真实操作授权、Step 0 与准入尚未完成 |
+| 当前阻塞项 | 无 |
 | 最新阶段复核 | [当前复核](#最新阶段复核) |
 
 ### 实施步骤
@@ -193,13 +193,13 @@
 
 | 场景 | 输入/前置 | 操作 | 可观察结果 | 验证证据 |
 |---|---|---|---|---|
-| 登录时离线 | 登录项已获批，A 标记自启，B 未标记 | 登录后恢复网络，不点击 App | A 自动运行并在配置探针时健康通过；B 不启动 | 阶段 2 待记录 |
-| 长期故障 | 故障持续超过快速退避窗口 | 恢复前置条件 | 无人工干预恢复；故障期间无重试风暴 | 阶段 2 待记录 |
-| 用户取消 | A 正在等待重试 | 手动停止或退出 | 后续不再自动启动；退出完成后无受管残留 | 阶段 2 待记录 |
+| 登录链路与前置故障恢复 | 登录项已获批，唯一候选自启 | 用户实际重启不手动启动；前置故障恢复在独立窗口验证 | 目标运行、TCP连接及转发监听成立，非目标未启动；物理离线登录组合未实测，HTTP结果不代替隧道健康 | [重启与用户确认](../data-quality/tunnelpad-unattended-launch-recovery-stage2-reboot-20260912.md)；[前置故障窗口](../data-quality/tunnelpad-unattended-launch-recovery-stage2-implementation-20260912.md) |
+| 长期故障 | 前置网络故障持续约 407 秒 | 解除 curl 故障标记 | 约 20 秒后自动运行，实测 303 秒长退避，无人工 start | [阶段 2 当前会话证据](../data-quality/tunnelpad-unattended-launch-recovery-stage2-implementation-20260912.md) |
+| 用户取消 | 目标两次前置失败后等待 | POST stop，解除故障观察 40 秒；正常 quit | 无迟到前置/启动，退出无 API/label/helper 残留 | [阶段 2 当前会话证据](../data-quality/tunnelpad-unattended-launch-recovery-stage2-implementation-20260912.md) |
 
 ### 测试覆盖率
 
-阶段 0 生产代码未变，新增测试验证现状与虚拟时钟，不声称覆盖尚未实现的队列。阶段 1 覆盖 U1–U8、U10–U12 的分支、次数与取消，阶段 2 记录 U9 的实际负载与观察窗口；不得复用旧计划通过结论代替本次验收。
+阶段 0 新增反证基线；阶段 1 的 Swift 167、Rust 83+2+1、shell 15、native 9 项测试通过，详见[实施与测试证据](../data-quality/tunnelpad-unattended-launch-recovery-stage1-implementation-20260912.md)。这些覆盖 U1–U8、U10–U12 的适用分支、次数与取消；阶段 2 补齐 U9 三种输入状态的实际负载窗口、实际重启及用户确认。未生成行/分支覆盖率百分比报告，不用测试数量冒充覆盖率；本次纯文档关闭复用已验证代码和可访问证据，不重复代码全套。
 
 ### 完成条件
 
@@ -207,6 +207,10 @@
 - 阶段 1：实现与隔离回归通过，完成适用复核，无未解决失败。
 - 阶段 2：真实场景与资源开销证据齐备，用户接受后关闭；技术完成待接受时保持实施中、下一动作设为等待用户验收。
 - 各阶段同步地图与证据，不沿用前一阶段准入。
+
+## 最终用户验收
+
+2026-09-12，用户对“重启后没有手动打开TunnelPad，也没有点击隧道启动”的确认问题回答“是的”。结合已通过的阶段1及阶段2各适用独立复核，阶段2及本计划标记已完成。下方阶段复核表保留独立者当时的结论，用户确认记录不伪装成新的独立复核。
 
 ## 最新阶段复核
 
@@ -217,9 +221,9 @@
 | 方式 | 独立 |
 | 风险 | 高影响 |
 | 风险依据 | 真实启动恢复验证可能改变运行 App、隧道与远端安全组 |
-| 结论 | 尚未进行；阶段 2 未准入 |
-| 证据 | 阶段 2 Step 0 尚未建立 |
-| 复核者 | 尚未安排 |
+| 结论 | 通过；重启技术观察，等待用户验收 |
+| 证据 | [阶段 2 重启验收](../data-quality/tunnelpad-unattended-launch-recovery-stage2-reboot-20260912.md) |
+| 复核者 | reboot_review |
 
 ## 阶段复核记录
 
@@ -234,6 +238,16 @@
 
 | 2026-09-12 | 独立恢复完成复核 | 阶段 1 | 独立 | 高影响 | 通过；原三项 P1 全部关闭 | [阶段 1 独立恢复](../data-quality/tunnelpad-unattended-launch-recovery-stage1-independent-completion-review-20260912.md) | stage1_completion_review |
 
+| 2026-09-12 | 独立准入 | 阶段 2 | 独立 | 高影响 | 未通过；最终运行/回滚移除只读护栏 | [阶段 2 Step 0](../data-quality/tunnelpad-unattended-launch-recovery-stage2-step0-20260912.md) | stage2_review |
+| 2026-09-12 | 独立恢复准入 | 阶段 2 | 独立 | 高影响 | 通过；原护栏缺口关闭 | [阶段 2 Step 0](../data-quality/tunnelpad-unattended-launch-recovery-stage2-step0-20260912.md) | stage2_review |
+
+| 2026-09-12 | 当前会话验证复核 | 阶段 2 | 独立 | 高影响 | 通过；当前会话矩阵，无必须修复项，整体阶段未完成 | [阶段 2 当前会话独立复核](../data-quality/tunnelpad-unattended-launch-recovery-stage2-independent-review-20260912.md) | stage2_review |
+
+| 2026-09-12 | 增量独立准入 | 阶段 2 | 独立 | 高影响 | 通过；空候选隔离与恢复边界明确 | [阶段 2 Step 0](../data-quality/tunnelpad-unattended-launch-recovery-stage2-step0-20260912.md) | stage2_review |
+| 2026-09-12 | 增量完成复核 | 阶段 2 | 独立 | 高影响 | 通过；增量空候选对照，无必须修复项，整体阶段未完成 | [阶段 2 空候选对照](../data-quality/tunnelpad-unattended-launch-recovery-stage2-empty-candidates-20260912.md) | stage2_review |
+
+| 2026-09-12 | 重启技术观察复核 | 阶段 2 | 独立 | 高影响 | 通过；重启技术观察，等待用户验收 | [阶段 2 重启验收](../data-quality/tunnelpad-unattended-launch-recovery-stage2-reboot-20260912.md) | reboot_review |
+
 ## 未决问题
 
 | 问题 | 推荐方案 | 是否阻塞当前阶段 | 状态 |
@@ -244,8 +258,19 @@
 | 阶段 1 实现授权与 Step 0 | 用户已明确授权，能力目标失败基线、接口/打包/migration 已建立 | 否 | 已完成 |
 | 阶段 1 独立准入 | 本阶段恢复准入通过，开始实施 | 否 | 已完成 |
 | 阶段 1 独立完成复核 | 三项修复及同范围独立恢复通过 | 否 | 已完成 |
-| 阶段 2 授权与准入 | 明确真实目标、观测窗口、回滚并建立 Step 0 | 是 | 待确认 |
+| 阶段 2 授权与准入 | 当前登录会话、只读云护栏范围已授权且恢复准入通过 | 否 | 已完成 |
+| 未运行隧道探针误导 | [已记录，按用户要求后续统一修复](../reviews/tunnelpad-deferred-runtime-issues-20260912.md)；HTTP 满足不等于隧道健康 | 否 | 待处理 |
 | 无人值守的系统前提 | 范围为用户登录后且登录项已批准；系统审批与凭据授权仍由用户完成 | 否 | 已明确范围 |
+
+## 最后登录验收原拟议操作（未执行，保留背景）
+
+用户后续选择直接重启，已被告知临时护栏不跨重启；以下默认配置改写方案没有执行。本次实际证据见[重启验收](../data-quality/tunnelpad-unattended-launch-recovery-stage2-reboot-20260912.md)。
+
+系统登录项只读状态已确认 enabled/allowed，指向同版独立验证包。为让真实登录后仍受只读云约束，需在私有持久目录准备护栏与原外部配置备份，临时将默认 ecs-ssh-ip.env 指向该备份并覆盖 curl/aliyun；不修改凭据文件或隧道config.json。仅当前进程的环境变量不会跨注销继承，不能假装现有护栏天然覆盖下一次系统登录。
+
+经用户确认时机后，建立本子场景Step 0和独立准入，确认无journal/在途写。由用户保存工作后注销并重新登录；登录时仅前置curl故障标记保持失败，整机网络不改。记录登录项自动拉起和重试，再解除标记确认无需人工启动即运行。验收结束原样恢复外部配置，核对哈希；恢复配置后的默认云同步及后续正常运行授权需与此次确认一并明确。无法保证恢复或有可信未完成事务则保持只读并报告。
+
+当前尚未更改默认外部配置、触发系统注销或移除云只读护栏；先前只关闭TunnelPad的授权不扩展为任意时刻中断整个桌面会话。
 
 ## 风险和回滚
 
