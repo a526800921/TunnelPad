@@ -40,6 +40,8 @@ public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
     public var throttleInterval: Int
     /// 可选状态探针；缺省不探测。
     public var probe: ProbeConfig?
+    /// 随 App 启动自动拉起；旧配置缺失该字段时为 false，不参与启动恢复。
+    public var autoStart: Bool
 
     public static let idPattern = "^[a-z0-9-]+$"
     public static let launchdLabelPrefix = "com.jafish.tunnelpad."
@@ -52,7 +54,8 @@ public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
         executor: ExecutorKind = .launchd,
         keepAlive: Bool = true,
         throttleInterval: Int = 10,
-        probe: ProbeConfig? = nil
+        probe: ProbeConfig? = nil,
+        autoStart: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -62,6 +65,7 @@ public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
         self.keepAlive = keepAlive
         self.throttleInterval = throttleInterval
         self.probe = probe
+        self.autoStart = autoStart
     }
 
     public var launchdLabel: String { Self.launchdLabelPrefix + id }
@@ -72,10 +76,11 @@ public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, remark, command, executor, keepAlive, throttleInterval, probe
+        case id, name, remark, command, executor, keepAlive, throttleInterval, probe, autoStart
     }
 
-    /// 手写配置允许省略带默认值的字段；缺 `remark` 时为空字符串，缺 `probe` 即不探测。
+    /// 手写配置允许省略带默认值的字段；缺 `remark` 时为空字符串，缺 `probe` 即不探测，
+    /// 缺 `autoStart` 即不参与启动恢复。
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
@@ -86,6 +91,7 @@ public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
         keepAlive = try container.decodeIfPresent(Bool.self, forKey: .keepAlive) ?? true
         throttleInterval = try container.decodeIfPresent(Int.self, forKey: .throttleInterval) ?? 10
         probe = try container.decodeIfPresent(ProbeConfig.self, forKey: .probe)
+        autoStart = try container.decodeIfPresent(Bool.self, forKey: .autoStart) ?? false
 
         guard Self.isValidID(id) else {
             throw DecodingError.dataCorruptedError(

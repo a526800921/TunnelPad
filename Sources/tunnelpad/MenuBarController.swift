@@ -9,6 +9,7 @@ final class MenuBarController: NSObject {
     private nonisolated(unsafe) var statusItem: NSStatusItem?
     private let manager: TunnelManager
     private let onShowPanel: () -> Void
+    private let loginItem = LoginItemController()
 
     // macOS Tahoe 为没有位置记录的 status item 选择外接屏回退位置；只在
     // 当前 app 域没有记录时提供一个主屏默认值，保留用户之后的手工排列。
@@ -75,6 +76,12 @@ final class MenuBarController: NSObject {
         }
 
         menu.addItem(NSMenuItem.separator())
+        loginItem.refresh()
+        let loginTitle = loginItem.state == .requiresApproval ? "登录时自动启动（待系统设置批准）" : "登录时自动启动"
+        let loginItemEntry = NSMenuItem(title: loginTitle, action: #selector(toggleLoginItem), keyEquivalent: "")
+        loginItemEntry.target = self
+        loginItemEntry.state = loginItem.isOn ? .on : .off
+        menu.addItem(loginItemEntry)
         menu.addItem(self.item(title: "打开主面板", action: #selector(showPanel)))
         menu.addItem(self.item(title: "退出 TunnelPad", action: #selector(quitApp)))
     }
@@ -99,6 +106,27 @@ final class MenuBarController: NSObject {
 
     @objc private func showPanel() { onShowPanel() }
     @objc private func quitApp() { NSApp.terminate(nil) }
+
+    @objc private func toggleLoginItem() {
+        let state = loginItem.toggle()
+        if let error = loginItem.registrationError {
+            let alert = NSAlert()
+            alert.messageText = "登录自启设置失败"
+            alert.informativeText = error
+            alert.runModal()
+            return
+        }
+        if state == .requiresApproval {
+            let alert = NSAlert()
+            alert.messageText = "需要在系统设置中批准"
+            alert.informativeText = "已发起登录自启请求；请在系统设置 → 通用 → 登录项及扩展中批准 TunnelPad，批准前不会自动启动。"
+            alert.addButton(withTitle: "打开系统设置")
+            alert.addButton(withTitle: "稍后")
+            if alert.runModal() == .alertFirstButtonReturn {
+                loginItem.openSystemSettings()
+            }
+        }
+    }
 
     // MARK: - 图标
 

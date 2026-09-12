@@ -35,6 +35,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             self?.showMainWindow()
         }
         showMainWindow()
+        // 隧道自动恢复：完成首轮状态发现后按 autoStart 标记拉起；不阻塞面板出现。
+        Task { @MainActor in
+            await manager.restoreAutoStartTunnels()
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

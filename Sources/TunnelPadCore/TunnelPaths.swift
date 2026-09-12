@@ -46,4 +46,9 @@ public struct TunnelPaths: Sendable, Equatable {
     public func logURL(for tunnel: TunnelConfig) -> URL {
         logsDirectory.appendingPathComponent("\(tunnel.id).log")
     }
+
+    /// App 事件日志（启动恢复等 App 侧事件）；隧道进程输出仍走各自的 `logURL(for:)`。
+    public var appEventLogURL: URL {
+        logsDirectory.appendingPathComponent("app.log")
+    }
 }

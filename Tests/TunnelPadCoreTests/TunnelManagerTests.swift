@@ -233,6 +233,67 @@ final class TunnelManagerTests: XCTestCase {
         XCTAssertNotNil(manager.lastError, "未知 id 不得静默失败")
         XCTAssertEqual(manager.config.tunnels.map(\.id), ["edit-a"], "未知 id 不得新增条目")
     }
+
+    // MARK: - restoreAutoStartTunnels
+
+    @MainActor
+    func testRestoreAutoStartTunnelsHonorsGates() async throws {
+        let paths = TunnelPaths(homeDirectory: FileManager.default.temporaryDirectory
+            .appendingPathComponent("tunnelpad-restore-\(UUID().uuidString)", isDirectory: true))
+        let owner = StubLifecycleOwner(config: AppConfig(tunnels: [
+            TunnelConfig(id: "boot-on", name: "恢复", command: ["/bin/true"], autoStart: true),
+            TunnelConfig(id: "boot-running", name: "已运行", command: ["/bin/true"], autoStart: true),
+            TunnelConfig(id: "boot-off", name: "不恢复", command: ["/bin/true"]),
+            TunnelConfig(id: "boot-fail", name: "失败", command: ["/bin/true"], autoStart: true),
+        ]))
+        owner.statusOverrides = ["boot-running": .running(pid: 100)]
+        owner.failStartIDs = ["boot-fail"]
+        let manager = TunnelManager(
+            paths: paths, rustCore: owner, preStartChecker: PassingPreStartChecker(),
+            launchRestoreDiscoveryAttempts: 20, launchRestoreDiscoveryPollNanoseconds: 20_000_000
+        )
+
+        await manager.restoreAutoStartTunnels()
+
+        // R1 已运行跳过、R4 autoStart=false 不参与、R3 失败不阻断；顺序保持配置序。
+        XCTAssertEqual(owner.startedIDs, ["boot-on", "boot-fail"], "只拉起未运行的 autoStart 隧道，失败条也尝试")
+        XCTAssertNotNil(manager.lastError, "启动失败原因应可见")
+        XCTAssertEqual(manager.statuses["boot-on"], .running(pid: nil), "成功启动的隧道状态应为 running")
+        XCTAssertEqual(manager.statuses["boot-off"], .notLoaded, "autoStart=false 仅不启动，状态发现照常覆盖")
+
+        // 全过程写入 App 事件日志（app.log），失败原因可追溯。
+        let appLog = try String(contentsOf: paths.appEventLogURL, encoding: .utf8)
+        XCTAssertTrue(appLog.contains("自动拉起「恢复」成功"), "实际日志：\(appLog)")
+        XCTAssertTrue(appLog.contains("自动拉起「失败」失败：启动「失败」失败：transport(\"模拟启动失败\")"), "实际日志：\(appLog)")
+        XCTAssertTrue(appLog.contains("启动恢复完成：成功 1，失败 1，跳过 0，候选 3"))
+        XCTAssertFalse(appLog.contains("「不恢复」"), "autoStart=false 不应出现在恢复日志")
+
+        // R5：同进程重复触发不得再次启动。
+        await manager.restoreAutoStartTunnels()
+        XCTAssertEqual(owner.startedIDs, ["boot-on", "boot-fail"], "恢复入口每次进程生命周期只执行一次")
+    }
+
+    @MainActor
+    func testRestoreAutoStartSkipsAllWhenDiscoveryFails() async throws {
+        let paths = TunnelPaths(homeDirectory: FileManager.default.temporaryDirectory
+            .appendingPathComponent("tunnelpad-restore-fail-\(UUID().uuidString)", isDirectory: true))
+        let owner = StubLifecycleOwner(config: AppConfig(tunnels: [
+            TunnelConfig(id: "boot-on", name: "恢复", command: ["/bin/true"], autoStart: true)
+        ]))
+        owner.failSnapshot = true
+        let manager = TunnelManager(
+            paths: paths, rustCore: owner, preStartChecker: PassingPreStartChecker(),
+            launchRestoreDiscoveryAttempts: 3, launchRestoreDiscoveryPollNanoseconds: 10_000_000
+        )
+
+        // R6：状态发现失败（恢复自身刷新与健康监测首轮快照均拿不到状态）→
+        // fail-closed 全部跳过，不盲目启动。lastError 依赖哪个读取者幸存，不作断言。
+        await manager.restoreAutoStartTunnels()
+
+        XCTAssertTrue(owner.startedIDs.isEmpty, "状态未知时不得启动")
+        let appLog = try String(contentsOf: paths.appEventLogURL, encoding: .utf8)
+        XCTAssertTrue(appLog.contains("状态发现超时"), "实际日志：\(appLog)")
+    }
 }
 
 /// 可注入失败行为的 Rust 生命周期 owner 桩：saveConfig 记录最新落盘配置，
@@ -241,6 +302,10 @@ private final class StubLifecycleOwner: RustLifecycleOwner, @unchecked Sendable 
     private let lock = NSLock()
     private var current: AppConfig
     var failSaveConfig = false
+    var failSnapshot = false
+    var failStartIDs: Set<String> = []
+    var statusOverrides: [String: TunnelStatus] = [:]
+    private var startedIDsStorage: [String] = []
 
     init(config: AppConfig) {
         self.current = config
@@ -256,6 +321,12 @@ private final class StubLifecycleOwner: RustLifecycleOwner, @unchecked Sendable 
         lock.lock()
         defer { lock.unlock() }
         return saveCountStorage
+    }
+
+    var startedIDs: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return startedIDsStorage
     }
 
     private var saveCountStorage = 0
@@ -276,12 +347,30 @@ private final class StubLifecycleOwner: RustLifecycleOwner, @unchecked Sendable 
     func cancelOperation(id: String, generation: UInt64) throws {}
 
     func snapshot() throws -> RustCoreClient.Snapshot {
-        let config = currentConfig
-        let statuses = Dictionary(uniqueKeysWithValues: config.tunnels.map { ($0.id, TunnelStatus.notLoaded) })
+        lock.lock()
+        let shouldFail = failSnapshot
+        let config = current
+        let overrides = statusOverrides
+        lock.unlock()
+        if shouldFail {
+            throw RustCoreClient.ClientError.transport("模拟状态发现失败")
+        }
+        let statuses = Dictionary(uniqueKeysWithValues: config.tunnels.map { tunnel in
+            (tunnel.id, overrides[tunnel.id] ?? .notLoaded)
+        })
         return RustCoreClient.Snapshot(config: config, statuses: statuses)
     }
 
-    func start(id: String, generation: UInt64?) throws -> TunnelStatus { .running(pid: nil) }
+    func start(id: String, generation: UInt64?) throws -> TunnelStatus {
+        lock.lock()
+        startedIDsStorage.append(id)
+        let shouldFail = failStartIDs.contains(id)
+        lock.unlock()
+        if shouldFail {
+            throw RustCoreClient.ClientError.transport("模拟启动失败")
+        }
+        return .running(pid: nil)
+    }
 
     func stop(id: String, generation: UInt64?) throws -> TunnelStatus { .notRunning }
 

@@ -163,8 +163,6 @@ struct MainPanelView: View {
             } else {
                 emptyDetail
             }
-            Divider()
-            messageBar
         }
         .sheet(item: $settingsTunnel) { tunnel in
             TunnelSettingsSheet(tunnel: tunnel)
@@ -219,22 +217,6 @@ struct MainPanelView: View {
                 .textSelection(.enabled)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    /// 消息栏只承载错误；信息类文案（已保存/已启动等）已按界面优化计划移除，操作结果以状态点与列表变化呈现。
-    @ViewBuilder
-    private var messageBar: some View {
-        if let error = manager.lastError {
-            HStack {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red)
-                    .font(.caption)
-                    .lineLimit(2)
-                Spacer()
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 6)
-        }
     }
 
     private func rescanLegacyAgents() {

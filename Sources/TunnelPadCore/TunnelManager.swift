@@ -48,6 +48,9 @@ public final class TunnelManager: ObservableObject {
     private static let lifecycleStatusSettleDelayNanoseconds: UInt64 = 100_000_000
     private let healthMonitorIntervalNanoseconds: UInt64
     private let healthSleep: @Sendable (UInt64) async throws -> Void
+    private let launchRestoreDiscoveryAttempts: Int
+    private let launchRestoreDiscoveryPollNanoseconds: UInt64
+    private let appEventLog: AppEventLog
 
     private struct HealthMonitorSchedule: Sendable {
         let intervalNanoseconds: UInt64
@@ -83,7 +86,9 @@ public final class TunnelManager: ObservableObject {
         healthMonitorIntervalNanoseconds: UInt64 = HealthRecoveryPolicy.monitorIntervalNanoseconds,
         healthSleep: @escaping @Sendable (UInt64) async throws -> Void = { nanoseconds in
             try await Task.sleep(nanoseconds: nanoseconds)
-        }
+        },
+        launchRestoreDiscoveryAttempts: Int = 50,
+        launchRestoreDiscoveryPollNanoseconds: UInt64 = 100_000_000
     ) {
         self.paths = paths
         self.migrationService = MigrationService(paths: paths, executor: LaunchCtlExecutor())
@@ -94,6 +99,9 @@ public final class TunnelManager: ObservableObject {
         self.preStartChecker = preStartChecker
         self.healthMonitorIntervalNanoseconds = healthMonitorIntervalNanoseconds
         self.healthSleep = healthSleep
+        self.launchRestoreDiscoveryAttempts = launchRestoreDiscoveryAttempts
+        self.launchRestoreDiscoveryPollNanoseconds = launchRestoreDiscoveryPollNanoseconds
+        self.appEventLog = AppEventLog(paths: paths)
         self.shutdownHandle = Shutdown.OwnerHandle {
             (try? rustCore.shutdown()) ?? 0
         }
@@ -216,6 +224,62 @@ public final class TunnelManager: ObservableObject {
         await refreshAsync()
         return true
     }
+
+    // MARK: - 启动恢复
+
+    /// 启动恢复入口：App 启动后调用一次，自动拉起 `autoStart=true` 且未运行的隧道。
+    /// 恢复自身的刷新与健康监测的启动状态发现可能并发互相失效（beginStateRead
+    /// 共享计数），因此刷新后有界等待状态产出，二者必有一个发布成功；超时
+    /// fail-closed 跳过全部。候选只复用 `startAsync`（含 busy 保护与 SSH 的
+    /// ECS 前置同步）；单条失败经 `lastError` 可见且不阻断其他条；
+    /// 每次进程生命周期只执行一次。全过程写入 App 事件日志（app.log）。
+    public func restoreAutoStartTunnels() async {
+        guard !hasCompletedLaunchRestore else { return }
+        hasCompletedLaunchRestore = true
+        appEventLog.write("启动恢复触发")
+        await refreshAsync()
+        var attempts = launchRestoreDiscoveryAttempts
+        while statuses.isEmpty, attempts > 0 {
+            attempts -= 1
+            try? await Task.sleep(nanoseconds: launchRestoreDiscoveryPollNanoseconds)
+        }
+        let candidates = config.tunnels.filter(\.autoStart)
+        guard !statuses.isEmpty else {
+            appEventLog.write("状态发现超时，fail-closed 跳过 \(candidates.count) 条候选")
+            return
+        }
+        var started = 0
+        var failed = 0
+        var skipped = 0
+        for tunnel in candidates {
+            guard let status = statuses[tunnel.id] else {
+                skipped += 1
+                appEventLog.write("「\(tunnel.name)」状态未知，跳过自动拉起")
+                continue
+            }
+            guard status == .notLoaded || status == .notRunning else { continue }
+            let errorBefore = lastError
+            let result = await startAsync(tunnel.id)
+            switch result {
+            case .completed:
+                started += 1
+                appEventLog.write("自动拉起「\(tunnel.name)」成功")
+            case .inProgress:
+                skipped += 1
+                appEventLog.write("「\(tunnel.name)」正忙于其他操作，跳过自动拉起")
+            case .notFound:
+                skipped += 1
+                appEventLog.write("「\(tunnel.name)」已不存在，跳过自动拉起")
+            case .failed:
+                failed += 1
+                let reason = lastError != errorBefore ? (lastError ?? "未知原因") : "未知原因"
+                appEventLog.write("自动拉起「\(tunnel.name)」失败：\(reason)")
+            }
+        }
+        appEventLog.write("启动恢复完成：成功 \(started)，失败 \(failed)，跳过 \(skipped)，候选 \(candidates.count)")
+    }
+
+    private var hasCompletedLaunchRestore = false
 
     /// 删除单条隧道：停止实例 → 清理生成的 plist → 删除日志 → 从配置移除并落盘。
     /// 实例停止与配置写入失败即中断并保留配置；日志清理失败仅告警不中断。操作不可恢复。
@@ -545,9 +609,10 @@ public final class TunnelManager: ObservableObject {
                 attempt: attempt,
                 delayNanoseconds: delayNanoseconds
             )
-        case .cooldown(let delayNanoseconds):
-            let minutes = max(1, delayNanoseconds / 60_000_000_000)
-            lastError = "自动恢复「\(tunnel.name)」进入 \(minutes) 分钟冷却，稍后自动重试"
+        case .cooldown:
+            // 自动恢复的进度与冷却不写 lastError：lastError 只供新增/设置弹窗
+            // 就地展示操作错误，后台写入无处展示，还会污染弹窗的错误判断。
+            break
         }
     }
 
@@ -704,15 +769,10 @@ public final class TunnelManager: ObservableObject {
         } catch {
             guard recoveryGenerations[id] == generation, !Task.isCancelled else { return }
             var state = healthRecoveryStates[id] ?? HealthRecoveryState()
-            let action = state.finishRecovery(success: false)
+            // 失败次数与冷却只在内存推进，不写 lastError：lastError 只供新增/设置弹窗
+            // 就地展示操作错误，后台写入无处展示，还会污染弹窗的错误判断。
+            _ = state.finishRecovery(success: false)
             healthRecoveryStates[id] = state
-            switch action {
-            case .cooldown(let delayNanoseconds):
-                let minutes = max(1, delayNanoseconds / 60_000_000_000)
-                lastError = "自动恢复「\(tunnelName)」第 \(attempt)/\(HealthRecoveryPolicy.maximumRecoveryAttempts) 次失败，进入 \(minutes) 分钟冷却，稍后自动重试"
-            default:
-                lastError = "自动恢复「\(tunnelName)」第 \(attempt)/\(HealthRecoveryPolicy.maximumRecoveryAttempts) 次失败"
-            }
         }
     }
 

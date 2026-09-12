@@ -61,6 +61,25 @@ final class TunnelConfigTests: XCTestCase {
         XCTAssertEqual(tunnels[1]["remark"] as? String, "")
     }
 
+    func testAutoStartDefaultsAndRoundtrip() throws {
+        let missing = #"{"version":1,"tunnels":[{"id":"x","name":"X","command":["/bin/true"]}]}"#
+        let decoded = try JSONDecoder().decode(AppConfig.self, from: Data(missing.utf8))
+        XCTAssertFalse(try XCTUnwrap(decoded.tunnels.first).autoStart, "缺省 autoStart 应为 false")
+
+        let explicit = #"{"version":1,"tunnels":[{"id":"x","name":"X","autoStart":true,"command":["/bin/true"]}]}"#
+        let enabled = try JSONDecoder().decode(AppConfig.self, from: Data(explicit.utf8))
+        XCTAssertTrue(try XCTUnwrap(enabled.tunnels.first).autoStart)
+
+        let badType = #"{"version":1,"tunnels":[{"id":"x","name":"X","autoStart":"yes","command":["/bin/true"]}]}"#
+        XCTAssertThrowsError(try JSONDecoder().decode(AppConfig.self, from: Data(badType.utf8)))
+
+        let original = AppConfig(tunnels: [
+            TunnelConfig(id: "boot", name: "B", command: ["/bin/true"], autoStart: true)
+        ])
+        let roundtrip = try JSONDecoder().decode(AppConfig.self, from: JSONEncoder().encode(original))
+        XCTAssertEqual(roundtrip, original, "autoStart 编解码应往返保留")
+    }
+
     func testRemarkDoesNotChangeLaunchdLabel() {
         let withoutRemark = TunnelConfig(id: "stable", name: "稳定", command: ["/bin/true"])
         let withRemark = TunnelConfig(

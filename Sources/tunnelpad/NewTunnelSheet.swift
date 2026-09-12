@@ -102,6 +102,7 @@ struct NewTunnelSheet: View {
                 )
 
             Toggle("断线自动重连（keepAlive）", isOn: $form.keepAlive)
+            Toggle("随 App 启动自动拉起（登录自启场景使用）", isOn: $form.autoStart)
             HStack(spacing: 8) {
                 Text("重启间隔")
                     .font(.callout)

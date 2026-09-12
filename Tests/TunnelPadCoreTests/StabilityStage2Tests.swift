@@ -292,7 +292,6 @@ final class StabilityStage2Tests: XCTestCase {
         XCTAssertEqual(order.values, ["stop", "preflight"])
         XCTAssertEqual(owner.lifecycleEvents, ["stop"])
         XCTAssertEqual(checker.asyncIDs, [tunnel.id])
-        XCTAssertTrue(manager.lastError?.contains("第 1/10 次失败") == true)
         await manager.shutdownAsync()
     }
 

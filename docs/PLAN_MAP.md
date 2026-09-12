@@ -45,6 +45,7 @@
 
 | 计划 | 状态 | 当前阶段 | 最后更新 | 依赖 | 证据 |
 |---|---|---|---|---|---|
+| [TunnelPad 开机自启与隧道自动恢复](plans/tunnelpad-launch-autostart.md) | 实施中 | 阶段 3 | 2026-09-12 | tunnelpad-stability, tunnelpad-rust-migration, ecs-dynamic-ssh-ip, tunnelpad-health-monitor-energy | [专项计划](plans/tunnelpad-launch-autostart.md)；[阶段 0 基线](data-quality/tunnelpad-launch-autostart-stage0-step0-20260912.md)；[阶段 1–3 实施证据](data-quality/tunnelpad-launch-autostart-stage1-3-implementation-20260912.md)；[阶段 1 独立复核](data-quality/tunnelpad-launch-autostart-stage1-independent-review-20260912.md)；[阶段 3 独立复核](data-quality/tunnelpad-launch-autostart-stage3-independent-review-20260912.md) |
 
 ### 已完成
 
@@ -74,7 +75,7 @@
 
 ## 推荐顺序
 
-当前无待推进阶段；已完成计划作为历史实施与验证基线。新增需求先明确本次差异、相关计划和适用准入，不能沿旧步骤直接继续实施。
+当前唯一待推进计划为[开机自启与隧道自动恢复](plans/tunnelpad-launch-autostart.md)（实施中，阶段 0–3 技术完成，等待用户真实登录/重启验收）；已完成计划作为历史实施与验证基线。新增需求先明确本次差异、相关计划和适用准入，不能沿旧步骤直接继续实施。
 
 1. 核心生命周期或恢复变更先核对 [Rust Core 迁移](plans/tunnelpad-rust-migration.md)、[稳定性](plans/tunnelpad-stability.md)、[Core 风险收敛](plans/tunnelpad-core-hardening.md)和[无人值守 SSH 恢复](plans/tunnelpad-unattended-managed-ssh-recovery.md)的职责边界。
 2. 日志与资源开销变更按[日志事件流](plans/tunnelpad-log-streaming.md)、[保留回归修复](plans/tunnelpad-log-retention-energy-regression.md)、[低写放大](plans/tunnelpad-log-write-amplification.md)的演进关系读取；能耗验收以[后台健康监测](plans/tunnelpad-health-monitor-energy.md)的最新有效证据为入口。
@@ -85,6 +86,7 @@
 
 | 计划 | 依赖 | 原因 |
 |---|---|---|
+| tunnelpad-launch-autostart | tunnelpad-stability, tunnelpad-rust-migration, ecs-dynamic-ssh-ip, tunnelpad-health-monitor-energy | 恢复入口复用已完成的首轮状态发现/busy 保护/CfgR 不变量与 Rust 配置 owner 边界；SSH 隧道恢复沿用 ECS 前置同步 fail-closed；启动期不做重试循环沿用能耗计划的边界；四计划均已完成，阶段 3 实施与共享生命周期文件编辑需保持单一编辑窗口。 |
 | tunnelpad-v1 | - | - |
 | ecs-dynamic-ssh-ip | tunnelpad-rust-migration（仅阶段 2，已完成） | 阶段 0/1 不依赖 Rust 迁移；当前阶段 2 只消费已完成的 Rust Core 唯一 owner、version=1 配置和 launchd 边界，不重新修改迁移 owner。 |
 | tunnelpad-ui-refinements | tunnelpad-v1 | 前置 v1 已完成；本计划不修改 config schema 与隧道启停语义，与 ecs-dynamic-ssh-ip 无依赖。 |

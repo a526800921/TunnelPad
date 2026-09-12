@@ -149,7 +149,13 @@ final class StabilityStage1Tests: XCTestCase {
 
         XCTAssertEqual(owner.restartCount, HealthRecoveryPolicy.maximumRecoveryAttempts)
         XCTAssertEqual(owner.stopCount, 0, "第 10 次恢复失败后不应自动停止隧道")
-        XCTAssertTrue(manager.lastError?.contains("冷却") == true)
+        // 冷却期内不再推进尝试次数：静置后计数应仍停在 10。
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(
+            owner.restartCount,
+            HealthRecoveryPolicy.maximumRecoveryAttempts,
+            "第 10 次失败后应进入冷却，不再立即重试"
+        )
         await manager.shutdownAsync()
     }
 
@@ -179,7 +185,9 @@ final class StabilityStage1Tests: XCTestCase {
         }
         XCTAssertEqual(owner.restartCount, HealthRecoveryPolicy.maximumRecoveryAttempts)
         XCTAssertEqual(owner.stopCount, 0)
-        XCTAssertTrue(manager.lastError?.contains("冷却") == true)
+        // 等第 10 次失败的冷却登记完成并静置确认，再验证人工启动能重置冷却。
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(owner.restartCount, HealthRecoveryPolicy.maximumRecoveryAttempts)
 
         owner.shouldFailRestart = false
         manager.start(tunnel.id)

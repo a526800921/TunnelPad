@@ -989,6 +989,7 @@ mod tests {
                     keep_alive: true,
                     throttle_interval: 10,
                     probe: None,
+                    auto_start: false,
                 })
                 .collect(),
         }
@@ -1011,6 +1012,7 @@ mod tests {
             keep_alive: true,
             throttle_interval: 10,
             probe: None,
+            auto_start: false,
         }
     }
 

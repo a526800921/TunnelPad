@@ -31,6 +31,7 @@ struct TunnelFormState: Equatable {
     var probeEnabled = false
     var probeURL = ""
     var probeStatuses = "200"
+    var autoStart = false
 
     init() {}
 
@@ -45,6 +46,7 @@ struct TunnelFormState: Equatable {
         probeEnabled = tunnel.probe != nil
         probeURL = tunnel.probe?.url ?? ""
         probeStatuses = tunnel.probe.map { $0.expectedStatuses.map(String.init).joined(separator: ", ") } ?? "200"
+        autoStart = tunnel.autoStart
     }
 
     var parsedCommand: [String] {
@@ -81,7 +83,8 @@ struct TunnelFormState: Equatable {
             executor: executor,
             keepAlive: keepAlive,
             throttleInterval: throttleInterval,
-            probe: probe
+            probe: probe,
+            autoStart: autoStart
         )
     }
 

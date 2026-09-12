@@ -6,6 +6,10 @@
     {"name": "empty", "fileContent": "{\"version\":1,\"tunnels\":[]}"},
     {"name": "corrupt-json", "fileContent": "{not json"},
     {"name": "bad-version", "fileContent": "{\"version\":2,\"tunnels\":[]}"},
-    {"name": "bad-id", "fileContent": "{\"version\":1,\"tunnels\":[{\"id\":\"BAD\",\"name\":\"x\",\"command\":[\"/bin/true\"]}]}"}
+    {"name": "bad-id", "fileContent": "{\"version\":1,\"tunnels\":[{\"id\":\"BAD\",\"name\":\"x\",\"command\":[\"/bin/true\"]}]}"},
+    {"name": "auto-start-default", "fileContent": "{\"version\":1,\"tunnels\":[{\"id\":\"web\",\"name\":\"web\",\"command\":[\"/usr/bin/ssh\",\"-N\"]}]}"},
+    {"name": "auto-start-false", "fileContent": "{\"version\":1,\"tunnels\":[{\"id\":\"web\",\"name\":\"web\",\"autoStart\":false,\"command\":[\"/usr/bin/ssh\",\"-N\"]}]}"},
+    {"name": "auto-start-true", "fileContent": "{\"version\":1,\"tunnels\":[{\"id\":\"web\",\"name\":\"web\",\"autoStart\":true,\"command\":[\"/usr/bin/ssh\",\"-N\"]}]}"},
+    {"name": "auto-start-bad-type", "fileContent": "{\"version\":1,\"tunnels\":[{\"id\":\"web\",\"name\":\"web\",\"autoStart\":\"yes\",\"command\":[\"/usr/bin/ssh\",\"-N\"]}]}"}
   ]
 }

@@ -89,7 +89,7 @@ fn default_expected_statuses() -> Vec<i32> {
 
 /// 隧道配置。解码语义对齐 Swift `TunnelConfig.init(from:)`：
 /// 允许省略带默认值的字段；`remark` 缺省为空字符串；`probe` 缺省即不探测；
-/// id/command 非法时拒绝。
+/// `auto_start` 缺省即不参与启动恢复；id/command 非法时拒绝。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TunnelConfig {
@@ -106,6 +106,8 @@ pub struct TunnelConfig {
     pub throttle_interval: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probe: Option<ProbeConfig>,
+    #[serde(default)]
+    pub auto_start: bool,
 }
 
 fn default_true() -> bool {
@@ -269,12 +271,12 @@ mod tests {
 
     /// 规范形状 fixture：按 Swift `CodingKeys` 声明顺序书写。
     /// 跨语言等价性按解码后语义判定（Swift JSONEncoder 无 sortKeys 时键序不确定）。
-    const FULL: &str = r#"{"version":1,"tunnels":[{"id":"admin-tunnel","name":"管理隧道","remark":"用于 🚀 \"内网\"","command":["/usr/bin/ssh","-N","-L","8080:127.0.0.1:80","host"],"executor":"launchd","keepAlive":true,"throttleInterval":10,"probe":{"url":"http://127.0.0.1:8080/health","expectedStatuses":[200,204]}}]}"#;
+    const FULL: &str = r#"{"version":1,"tunnels":[{"id":"admin-tunnel","name":"管理隧道","remark":"用于 🚀 \"内网\"","command":["/usr/bin/ssh","-N","-L","8080:127.0.0.1:80","host"],"executor":"launchd","keepAlive":true,"throttleInterval":10,"probe":{"url":"http://127.0.0.1:8080/health","expectedStatuses":[200,204]},"autoStart":false}]}"#;
 
     /// Swift 手写配置允许省略默认字段；编码时补全为默认值。
     const MINIMAL_INPUT: &str =
         r#"{"version":1,"tunnels":[{"id":"web","name":"web","command":["/usr/bin/ssh","-N"]}]}"#;
-    const MINIMAL_CANONICAL: &str = r#"{"version":1,"tunnels":[{"id":"web","name":"web","remark":"","command":["/usr/bin/ssh","-N"],"executor":"launchd","keepAlive":true,"throttleInterval":10}]}"#;
+    const MINIMAL_CANONICAL: &str = r#"{"version":1,"tunnels":[{"id":"web","name":"web","remark":"","command":["/usr/bin/ssh","-N"],"executor":"launchd","keepAlive":true,"throttleInterval":10,"autoStart":false}]}"#;
 
     fn canon(s: &str) -> serde_json::Value {
         serde_json::from_str(s).expect("fixture 必须是合法 JSON")
@@ -310,6 +312,28 @@ mod tests {
         let encoded = serde_json::to_string(&tunnel).unwrap();
         let decoded: TunnelConfig = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded, tunnel);
+    }
+
+    #[test]
+    fn auto_start_defaults_false_and_rejects_bad_type() {
+        let minimal: TunnelConfig = serde_json::from_value(serde_json::json!({
+            "id": "a", "name": "a", "command": ["/bin/true"]
+        }))
+        .unwrap();
+        assert!(!minimal.auto_start, "缺省 autoStart 应为 false");
+
+        let explicit: TunnelConfig = serde_json::from_value(serde_json::json!({
+            "id": "a", "name": "a", "autoStart": true, "command": ["/bin/true"]
+        }))
+        .unwrap();
+        assert!(explicit.auto_start, "显式 true 应保留");
+
+        let bad =
+            r#"{"version":1,"tunnels":[{"id":"a","name":"a","autoStart":"yes","command":["/bin/true"]}]}"#;
+        assert_eq!(
+            parse_app_config(bad).unwrap_err().code,
+            error_code::INVALID_JSON
+        );
     }
 
     #[test]

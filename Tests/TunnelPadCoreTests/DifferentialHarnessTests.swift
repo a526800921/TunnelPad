@@ -586,6 +586,7 @@ private func runComponent(_ component: String, fixture: [String: Any], home: URL
                 "keepAlive": config.keepAlive,
                 "remark": config.remark,
                 "throttleInterval": NSNumber(value: config.throttleInterval),
+                "autoStart": config.autoStart,
             ] as [String: Any]
         }
         return [["ids": ids, "configs": configs]]
