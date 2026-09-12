@@ -175,34 +175,19 @@ public final class TunnelManager: ObservableObject {
         }
     }
 
-    /// 保存对单条隧道的修改并持久化；运行中的隧道继续沿用旧参数，直到下次重启。
-    public func updateTunnel(_ tunnel: TunnelConfig) {
-        guard !runtimeState.busyIDs.contains(tunnel.id) else { return }
-        guard let index = config.tunnels.firstIndex(where: { $0.id == tunnel.id }) else { return }
-        let old = config.tunnels[index]
-        invalidateStateReads()
-        config.tunnels[index] = tunnel
-        do {
-            try rustCore.saveConfig(config)
-            if tunnel.probe == nil {
-                updateRuntime { $0.setProbeResult(nil, for: tunnel.id) }
-            }
-            cancelRecovery(for: tunnel.id)
-            healthRecoveryStates.removeValue(forKey: tunnel.id)
-            lastMessage = "已保存「\(tunnel.name)」的配置；运行中的隧道在下次重启后使用新参数"
-        } catch {
-            config.tunnels[index] = old
-            lastError = "保存配置失败：\(error)"
+    /// 异步编辑入口：把配置写入放到后台，避免设置窗口被磁盘操作阻塞。
+    /// 返回是否保存成功（内存配置已更新并落盘）；每条失败路径都会把原因写入 `lastError`。
+    @discardableResult
+    public func updateTunnelAsync(_ tunnel: TunnelConfig) async -> Bool {
+        guard let operation = beginOperation(for: tunnel.id) else {
+            lastError = "保存「\(tunnel.name)」失败：隧道正在执行其他操作，请稍后再试"
+            return false
         }
-        refresh()
-    }
-
-    /// 异步编辑入口：把配置写入放到后台，避免设置窗口被磁盘操作阻塞；保存格式、
-    /// 提示语和同步入口保持一致。
-    public func updateTunnelAsync(_ tunnel: TunnelConfig) async {
-        guard let operation = beginOperation(for: tunnel.id) else { return }
         defer { endOperation(for: tunnel.id, generation: operation) }
-        guard let index = config.tunnels.firstIndex(where: { $0.id == tunnel.id }) else { return }
+        guard let index = config.tunnels.firstIndex(where: { $0.id == tunnel.id }) else {
+            lastError = "保存「\(tunnel.name)」失败：隧道不存在或已被删除"
+            return false
+        }
         let old = config.tunnels[index]
         var nextConfig = config
         nextConfig.tunnels[index] = tunnel
@@ -212,7 +197,10 @@ public final class TunnelManager: ObservableObject {
             try await Task.detached(priority: .utility) {
                 try rustCore.saveConfig(configToSave)
             }.value
-            guard isCurrentOperation(tunnel.id, generation: operation), !Task.isCancelled else { return }
+            guard isCurrentOperation(tunnel.id, generation: operation), !Task.isCancelled else {
+                lastError = "保存「\(tunnel.name)」未完成：操作已失效，请重试"
+                return false
+            }
             config = nextConfig
             if old != tunnel {
                 healthRecoveryStates.removeValue(forKey: tunnel.id)
@@ -223,9 +211,10 @@ public final class TunnelManager: ObservableObject {
             lastMessage = "已保存「\(tunnel.name)」的配置；运行中的隧道在下次重启后使用新参数"
         } catch {
             lastError = "保存配置失败：\(error)"
-            return
+            return false
         }
         await refreshAsync()
+        return true
     }
 
     /// 删除单条隧道：停止实例 → 清理生成的 plist → 删除日志 → 从配置移除并落盘。
@@ -283,17 +272,19 @@ public final class TunnelManager: ObservableObject {
     }
 
     /// 新增隧道：校验 id 非空/合法/唯一后追加并落盘；不自动启动。保存失败回滚内存态。
-    public func addTunnel(_ tunnel: TunnelConfig) {
+    /// 返回是否保存成功；失败原因写入 `lastError`。
+    @discardableResult
+    public func addTunnel(_ tunnel: TunnelConfig) -> Bool {
         let validID = !tunnel.id.isEmpty && tunnel.id.allSatisfy { char in
             char.isASCII && (char.isLetter || char.isNumber || char == "-")
         }
         guard validID else {
             lastError = "新增「\(tunnel.name)」失败：id 非法（仅限字母、数字、连字符）"
-            return
+            return false
         }
         guard !config.tunnels.contains(where: { $0.id == tunnel.id }) else {
             lastError = "新增「\(tunnel.name)」失败：id「\(tunnel.id)」已存在"
-            return
+            return false
         }
 
         var nextConfig = config
@@ -304,10 +295,11 @@ public final class TunnelManager: ObservableObject {
             config = nextConfig
         } catch {
             lastError = "新增「\(tunnel.name)」失败：\(error)"
-            return
+            return false
         }
         syncLogStore()
         refresh()
+        return true
     }
 
     // MARK: - 状态

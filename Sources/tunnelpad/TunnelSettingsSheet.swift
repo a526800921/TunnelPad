@@ -135,8 +135,12 @@ struct TunnelSettingsSheet: View {
 
     private func save() async {
         do {
-            await manager.updateTunnelAsync(try form.makeTunnel(id: tunnel.id))
-            dismiss()
+            // 只有确认落盘成功才关闭；每条失败路径都会写入 lastError，可就地展示。
+            if await manager.updateTunnelAsync(try form.makeTunnel(id: tunnel.id)) {
+                dismiss()
+            } else {
+                errorMessage = manager.lastError
+            }
         } catch let error as TunnelFormValidationError {
             errorMessage = error.localizedDescription
         } catch {

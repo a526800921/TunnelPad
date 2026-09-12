@@ -71,7 +71,8 @@ final class TunnelManagerTests: XCTestCase {
         updated.remark = "新的用途说明"
         updated.throttleInterval = 15
         updated.probe = nil
-        manager.updateTunnel(updated)
+        let saved = await manager.updateTunnelAsync(updated)
+        XCTAssertTrue(saved, "编辑保存应返回 true")
 
         XCTAssertEqual(manager.config.tunnels[0].name, "A2")
         XCTAssertEqual(manager.config.tunnels[0].remark, "新的用途说明")
@@ -84,26 +85,6 @@ final class TunnelManagerTests: XCTestCase {
         XCTAssertEqual(reread.tunnels[0].remark, "新的用途说明", "备注修改应持久化到 config.json")
         XCTAssertEqual(reread.tunnels[0].command, ["/usr/bin/ssh", "-N", "a"])
         XCTAssertNil(reread.tunnels[0].probe)
-    }
-
-    @MainActor
-    func testUpdateTunnelIgnoresUnknownID() async throws {
-        let tempHome = FileManager.default.temporaryDirectory
-            .appendingPathComponent("tunnelpad-manager-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: tempHome, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempHome) }
-
-        let paths = TunnelPaths(homeDirectory: tempHome)
-        let store = ConfigStore(paths: paths)
-        try store.save(AppConfig(tunnels: [
-            TunnelConfig(id: "edit-a", name: "A", command: ["/usr/bin/ssh", "-N", "a"])
-        ]))
-
-        let manager = TunnelManager(paths: paths)
-        manager.updateTunnel(TunnelConfig(id: "ghost", name: "G", command: ["/bin/echo"]))
-
-        XCTAssertEqual(manager.config.tunnels.map(\.id), ["edit-a"], "未知 id 不应新增条目")
-        XCTAssertNil(manager.lastMessage, "no-op 不应报成功")
     }
 
     // MARK: - removeTunnel
@@ -173,7 +154,7 @@ final class TunnelManagerTests: XCTestCase {
         ]))
 
         let manager = TunnelManager(paths: paths)
-        manager.addTunnel(TunnelConfig(id: "new-a", name: "A", command: ["/bin/sleep", "30"]))
+        XCTAssertTrue(manager.addTunnel(TunnelConfig(id: "new-a", name: "A", command: ["/bin/sleep", "30"])), "成功新增应返回 true")
 
         XCTAssertEqual(manager.config.tunnels.map(\.id), ["base", "new-a"], "新增应追加到列表末尾")
         XCTAssertEqual(store.load().config.tunnels.map(\.id), ["base", "new-a"], "新增应持久化到 config.json")
@@ -196,14 +177,123 @@ final class TunnelManagerTests: XCTestCase {
         ]))
 
         let manager = TunnelManager(paths: paths)
-        manager.addTunnel(TunnelConfig(id: "dup", name: "Again", command: ["/bin/echo"]))
+        XCTAssertFalse(manager.addTunnel(TunnelConfig(id: "dup", name: "Again", command: ["/bin/echo"])), "重复 id 应返回 false")
         XCTAssertEqual(manager.config.tunnels.count, 1, "重复 id 应被拒绝")
         XCTAssertNotNil(manager.lastError)
 
         manager.lastError = nil
-        manager.addTunnel(TunnelConfig(id: "Bad_ID", name: "Bad", command: ["/bin/echo"]))
+        XCTAssertFalse(manager.addTunnel(TunnelConfig(id: "Bad_ID", name: "Bad", command: ["/bin/echo"])), "非法 id 应返回 false")
         XCTAssertEqual(manager.config.tunnels.count, 1, "非法 id 应被拒绝")
         XCTAssertNotNil(manager.lastError)
         XCTAssertEqual(store.load().config.tunnels.count, 1, "拒绝时不得写入配置")
     }
+
+    // MARK: - updateTunnelAsync
+
+    @MainActor
+    func testUpdateTunnelAsyncReturnsSaveOutcome() async throws {
+        let tempHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tunnelpad-manager-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempHome, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempHome) }
+
+        let paths = TunnelPaths(homeDirectory: tempHome)
+        let owner = StubLifecycleOwner(config: AppConfig(tunnels: [
+            TunnelConfig(id: "edit-a", name: "A", command: ["/usr/bin/ssh", "-N", "a"])
+        ]))
+        let manager = TunnelManager(paths: paths, rustCore: owner, preStartChecker: PassingPreStartChecker())
+
+        // 成功路径：返回 true，内存配置更新并落盘，不写 lastError。
+        var updated = try XCTUnwrap(manager.config.tunnels.first)
+        updated.name = "A2"
+        let savesBefore = owner.saveCount
+        let saved = await manager.updateTunnelAsync(updated)
+        XCTAssertTrue(saved, "成功保存应返回 true")
+        XCTAssertEqual(owner.saveCount, savesBefore + 1, "saveConfig 应恰好被调用一次")
+        XCTAssertEqual(manager.config.tunnels[0].name, "A2", "内存配置应更新")
+        XCTAssertEqual(owner.currentConfig.tunnels[0].name, "A2", "落盘内容应为新配置")
+        XCTAssertNil(manager.lastError)
+
+        // 落盘失败：返回 false，lastError 给出原因，内存配置保持原值。
+        owner.failSaveConfig = true
+        manager.lastError = nil
+        var broken = manager.config.tunnels[0]
+        broken.name = "A3"
+        let savesAfterSuccess = owner.saveCount
+        let failedSave = await manager.updateTunnelAsync(broken)
+        XCTAssertFalse(failedSave, "落盘失败应返回 false")
+        XCTAssertEqual(owner.saveCount, savesAfterSuccess + 1, "失败路径也应尝试落盘")
+        XCTAssertNotNil(manager.lastError, "失败应在 lastError 给出原因")
+        XCTAssertEqual(manager.config.tunnels[0].name, "A2", "失败不得更新内存配置")
+
+        // 未知 id：返回 false 并报错，不得静默 no-op。
+        manager.lastError = nil
+        let ghostSave = await manager.updateTunnelAsync(TunnelConfig(id: "ghost", name: "G", command: ["/bin/echo"]))
+        XCTAssertFalse(ghostSave, "未知 id 应返回 false")
+        XCTAssertNotNil(manager.lastError, "未知 id 不得静默失败")
+        XCTAssertEqual(manager.config.tunnels.map(\.id), ["edit-a"], "未知 id 不得新增条目")
+    }
+}
+
+/// 可注入失败行为的 Rust 生命周期 owner 桩：saveConfig 记录最新落盘配置，
+/// snapshot/loadConfig 均从最新配置读取，模拟 Rust Core 的配置 owner 行为。
+private final class StubLifecycleOwner: RustLifecycleOwner, @unchecked Sendable {
+    private let lock = NSLock()
+    private var current: AppConfig
+    var failSaveConfig = false
+
+    init(config: AppConfig) {
+        self.current = config
+    }
+
+    var currentConfig: AppConfig {
+        lock.lock()
+        defer { lock.unlock() }
+        return current
+    }
+
+    var saveCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return saveCountStorage
+    }
+
+    private var saveCountStorage = 0
+
+    func loadConfig() throws -> AppConfig { currentConfig }
+
+    func saveConfig(_ config: AppConfig) throws {
+        lock.lock()
+        saveCountStorage += 1
+        let shouldFail = failSaveConfig
+        if !shouldFail { current = config }
+        lock.unlock()
+        if shouldFail { throw RustCoreClient.ClientError.unavailable("模拟落盘失败") }
+    }
+
+    func beginOperation(id: String) throws -> UInt64 { 1 }
+
+    func cancelOperation(id: String, generation: UInt64) throws {}
+
+    func snapshot() throws -> RustCoreClient.Snapshot {
+        let config = currentConfig
+        let statuses = Dictionary(uniqueKeysWithValues: config.tunnels.map { ($0.id, TunnelStatus.notLoaded) })
+        return RustCoreClient.Snapshot(config: config, statuses: statuses)
+    }
+
+    func start(id: String, generation: UInt64?) throws -> TunnelStatus { .running(pid: nil) }
+
+    func stop(id: String, generation: UInt64?) throws -> TunnelStatus { .notRunning }
+
+    func restart(id: String, generation: UInt64?) throws -> TunnelStatus { .running(pid: nil) }
+
+    func remove(id: String, generation: UInt64?) throws {}
+
+    func shutdown() throws -> Int { 0 }
+}
+
+private struct PassingPreStartChecker: ECSPreStartChecking {
+    func check(tunnel: TunnelConfig) throws {}
+
+    func checkAsync(tunnel: TunnelConfig) async throws {}
 }

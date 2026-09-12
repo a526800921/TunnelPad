@@ -139,8 +139,12 @@ struct NewTunnelSheet: View {
     private func save() {
         do {
             let id = TunnelID.generate(from: form.name.trimmingCharacters(in: .whitespacesAndNewlines), existing: Set(manager.config.tunnels.map(\.id)))
-            manager.addTunnel(try form.makeTunnel(id: id))
-            if manager.lastError == nil { dismiss() }
+            // 不能用全局 lastError 判断成败：它由多种操作写入且从不清除，历史错误会阻止弹窗关闭。
+            if manager.addTunnel(try form.makeTunnel(id: id)) {
+                dismiss()
+            } else {
+                errorMessage = manager.lastError
+            }
         } catch let error as TunnelFormValidationError {
             errorMessage = error.localizedDescription
         } catch {
