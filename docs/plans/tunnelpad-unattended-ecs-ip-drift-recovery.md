@@ -158,6 +158,7 @@
 | 2026-09-19 | 阶段 1 补充只读核对 | 原复核者确认运行期共享 ECS 协调、配置事务、重复退出和登录项证据均已闭合，未发现新增 P0/P1；该结果不作为第二次独立门禁 | [合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)“补充只读核对（非新增独立门禁）” | 补充证据，不改变正式修复自验边界 | Kierkegaard（只读核对） |
 | 2026-09-19 | 阶段 1 修复自验 | 实施者按首轮独立发现完成运行期共享 ECS 协调、配置事务、重复退出和登录项证据的“发现 → 修复 → 验证”闭环 | [阶段 1 整改证据](../data-quality/tunnelpad-unattended-stage1-review-remediation-20260919.md)；Swift 196、Rust 111、ECS 18、监督 9、Release/隔离包与 GitNexus/diff 门禁 | 通过；阶段 1 合并代码门禁解除，阶段 2 未进入 | Codex（实施者） |
 | 2026-09-19 | 阶段 1 运行期退避修复 | 真实 `18080` 冲突暴露短暂 `running` 使恢复任务结束、监控又按首次故障零延迟调度；统一启动期/运行期为 `0/5/10/30/60/60…` 秒，连续两次健康后才清零，所有恢复等待封顶 60 秒 | [运行期退避修复证据](../data-quality/tunnelpad-unattended-runtime-backoff-remediation-20260919.md)；Swift 全量 197、Rust 111、ECS 18、监督 9 项和 Release 编译 | 通过（自验）；当前 App 尚未替换，阶段 2 真实复验未完成 | Codex（实施者） |
+| 2026-09-19 | 阶段 1 新版部署与启动 | 提交 `8502ecd` 的新 App 启动后先记录一次 `transient`，约 5 秒后确认运行；App、代理、SSH 和本地/远端端口均为预期单实例，持续观察超过 1 分钟无新转发错误 | [运行期退避修复证据](../data-quality/tunnelpad-unattended-runtime-backoff-remediation-20260919.md)“新版部署与启动”；App PID `85781`、代理 PID `86245`、SSH PID `86285` | 通过（运行态自验）；连续故障完整退避与长时验收仍待阶段 2 | Codex（实施者） |
 
 ### 验证方式
 
@@ -233,6 +234,7 @@
 | 2026-09-19 | 补充只读核对 | 原复核者确认四项原发现全部通过且没有新增 P0/P1；结果仅作交叉检查，不登记为第二次独立门禁 | [合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)“补充只读核对（非新增独立门禁）” |
 | 2026-09-19 | 修复自验 | 实施者按首轮独立发现完成全部整改、对抗性回归和受影响全量验证 | [阶段 1 整改证据](../data-quality/tunnelpad-unattended-stage1-review-remediation-20260919.md)；阶段 1 合并代码门禁解除，阶段 2 未进入 |
 | 2026-09-19 | 运行期退避修复 | 现场日志确认每次短暂 `running` 后退出都会被监控当成新首次故障；现已取消调用方 0 秒特判，统一 `0/5/10/30/60/60…` 秒，认证冷却和无效配置复查也由历史 300 秒收敛至 60 秒 | [运行期退避修复证据](../data-quality/tunnelpad-unattended-runtime-backoff-remediation-20260919.md)；本地自验通过，待新 build 真实复验 |
+| 2026-09-19 | 新版部署与启动 | 新 build 原位替换启动；启动恢复一次 `transient` 后约 5 秒成功，App/代理/SSH 单实例稳定，ECS `18080` 仅一个 listener，新版启动后无新增转发错误 | [运行期退避修复证据](../data-quality/tunnelpad-unattended-runtime-backoff-remediation-20260919.md)；阶段 2 连续故障完整退避与长时观察仍待执行 |
 
 ## 独立审核结论（2026-09-19）
 

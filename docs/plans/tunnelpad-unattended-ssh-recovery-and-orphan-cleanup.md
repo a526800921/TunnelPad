@@ -158,6 +158,7 @@
 | 2026-09-19 | 补充只读核对 | 原复核者确认配置事务、重复退出和登录项错误三项发现均已闭合，未发现新增 P0/P1；该结果不作为第二次独立门禁 | [合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)“补充只读核对（非新增独立门禁）” |
 | 2026-09-19 | 修复自验 | 实施者按首轮独立发现完成配置事务、重复退出和登录项错误的“发现 → 修复 → 验证”闭环 | [阶段 1 整改证据](../data-quality/tunnelpad-unattended-stage1-review-remediation-20260919.md)；阶段 1 合并代码门禁通过，阶段 2 未进入 |
 | 2026-09-19 | 运行期退避修复 | 真实端口冲突暴露短暂 `running` 结束恢复任务、监控随后重复按首次故障调度的问题；统一为 `0/5/10/30/60/60…` 秒，并要求连续两次健康采样才清零 | [运行期退避修复证据](../data-quality/tunnelpad-unattended-runtime-backoff-remediation-20260919.md)；本地自验通过，当前 App 尚未替换，待阶段 2 真实复验 |
+| 2026-09-19 | 新版部署与启动 | 提交 `8502ecd` 的新包原位替换并启动；旧 App 优雅退出后代理、SSH、launchd label 均收敛，未保留备份；新版 App/代理/SSH 单实例稳定超过 1 分钟，远端 `18080` 单 listener | [运行期退避修复证据](../data-quality/tunnelpad-unattended-runtime-backoff-remediation-20260919.md)“新版部署与启动”；阶段 2 连续故障完整退避复验仍待执行 |
 
 ## 阶段复核记录
 

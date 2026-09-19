@@ -30,8 +30,17 @@
 - Release 编译：XcodeBuildMCP Swift Package `release` 构建通过。
 - 静态门禁：`git diff --check`、Rust `cargo fmt --check`、脚本 `bash -n` 均通过；生产源码/脚本/Rust helper 已无 300 秒 retry hint、sleep 或纳秒退避常量。
 - 影响与治理：GitNexus `detect-changes --scope all` 报告 45 条受影响流程、总体 `critical`，与共享恢复链预期一致；`plan-governance-cli check . --strict-readiness` 通过。
-- 本次没有打包、替换或重启当前运行 App，没有创建 App 备份，也没有写入真实 ECS。
+- 代码自验阶段没有打包、替换或重启当时运行的 App，没有创建 App 备份，也没有写入真实 ECS；随后按下节记录部署同一提交的新包。
+
+## 新版部署与启动
+
+- 提交：`8502ecd`（`fix: cap unattended recovery backoff`）。
+- 使用项目 `scripts/build_app.sh --skip-tests` 在临时目录构建新包；深度签名、Info.plist、资源脚本一致性和包内 300 秒残留扫描通过。新主程序 SHA-256 为 `901f9cf6572697fc5eb178c5682805918b06984bd1d3158733af01c10f02af37`。
+- 旧 App 先通过 XcodeBuildMCP 优雅停止；App、受管代理、SSH 和 launchd label 均退出后才原位替换 `dist/TunnelPad.app`。旧包随后从临时目录删除，未保留备份 App。
+- 新 App 由 XcodeBuildMCP 启动成功，Bundle ID 为 `com.jafish.tunnelpad.app`；观察时 App PID `85781`、代理 PID `86245`、SSH PID `86285`，launchd 为 `running`、`runs = 1`、`last exit code = (never exited)`。
+- 本地 `127.0.0.1:9998` 和 `127.0.0.1:10080` 均由预期进程监听。Workbench 当前未列出实例，因此按项目回退边界使用目标 SSH 做只读 `ss` 核对；ECS `127.0.0.1:18080` 只有一个 `sshd` listener。
+- `app.log` 在本地 21:32:08 建立 1 条启动恢复候选并记录一次 `transient`，21:32:14 确认运行，符合首次失败后约 5 秒重试；持续观察超过 1 分钟 PID 未变化。隧道日志最后一条旧错误仍为 21:07:44，新版启动后没有新增 `18080` 转发失败。
 
 ## 剩余验收
 
-当前运行实例仍是修改前的 build；代码验证不能替代阶段 2 的真实运行验收。后续需用新 build 复现一次远端端口冲突或等价快速退出，确认日志节奏为首次立即、随后 5/10/30/60 秒封顶，并同时核对单实例 SSH、`18080` listener 和孤儿进程。该真实验收失败时保持计划“实施中”，不得以本证据关闭计划。
+当前运行实例已经替换为新 build，但本次只验证了启动期一次 `transient → 5 秒后成功` 和稳定运行，没有主动制造连续端口冲突。后续仍需受控复现一次远端端口冲突或等价快速退出，确认完整日志节奏为首次立即、随后 5/10/30/60 秒封顶，并同时核对单实例 SSH、`18080` listener 和孤儿进程。该真实验收失败时保持计划“实施中”，不得以本证据关闭计划。
