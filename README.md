@@ -6,6 +6,7 @@ TunnelPad 是一个 macOS 菜单栏应用，用于统一管理本机与服务器
 
 - v1 隧道管理、菜单栏入口、`launchd` 生命周期、配置 v1 和 Rust Core 迁移已完成。
 - ECS 动态 SSH 公网 IP 同步阶段 2 已完成：SSH 隧道执行启动/重启前，App 会调用 `.app/Contents/Resources/update-ecs-ssh-ip`，同步受管安全组规则后再调用 Rust Core。
+- 无人值守 SSH 异常恢复与 ECS IP 漂移恢复已完成：受管 SSH 断线、launchd 状态异常或 PID 变化后立即进入同一条恢复链，先收敛旧实例并校验/同步 ECS `/32`，再按需清理远端排他转发端口并重连；真实 IP 切换验收约 23 秒恢复，无需人工点击。
 - 稳定性与健康恢复、日志事件流、日志保留与低写放大、后台健康监测能耗、无人值守受管 SSH 收敛恢复以及 Rust Core 风险收敛计划均已完成。
 - 当前生产执行器和自动恢复范围固定为 `launchd`；`app` 执行器仍是非目标，未来另立计划。
 - 日志优化已完成：正常追加采用增量采集，持久日志达到约 512 KiB 后才批量压缩，压缩后保留最近 2000 个逻辑行；正常 SSH 默认不带独立 `-v`，详细日志可按需开启。
@@ -17,7 +18,9 @@ TunnelPad 是一个 macOS 菜单栏应用，用于统一管理本机与服务器
 - 菜单栏和主窗口管理多条 `launchd` SSH 隧道。
 - Rust Core 作为配置、生命周期、运行时状态、并发和退出清理的唯一 owner；SwiftUI/AppKit 负责界面和 FFI 适配。
 - HTTP 探针检查并展示隧道健康结果；`launchd` 范围内的后台健康恢复和资源收敛已完成。
-- 对已核验的受管 SSH 进程执行无人值守假死收敛；身份不匹配或状态未知时保持 fail-closed，并进入自动冷却重试。
+- 对 `autoStart + keepAlive` 的 SSH 隧道持续观察 launchd 生命周期；断线、退出或 PID 变化后立即执行“bootout 收敛 → ECS 前置 → 远端端口清理（如启用）→ 启动”恢复链。
+- 自动恢复按 `0、5、10、30、60、60…` 秒退避持续重试，不因历史尝试次数耗尽而永久停止；连续两次健康确认后才清零失败历史，用户手动停止则取消自动恢复。
+- 本机代理和 SSH 按受管身份、进程组与代次收敛；日志代理异常、I/O 失败和信号退出也必须回收子 SSH。逐隧道 `forceRemotePortCleanup` 默认关闭，只有明确声明远端转发端口为排他资源时才启用。
 - 以事件流和增量采集更新日志；面板关闭期间仍保留每条隧道最近 500 条内存日志，持久文件在压缩后保留最近 2000 个逻辑行。
 - 通过本机 HTTP API 对外提供受控的状态、生命周期和日志调用。
 - 接管旧版 LaunchAgent，提供备份与失败回滚边界。
@@ -111,6 +114,22 @@ open dist/TunnelPad.app
 
 独立检查和操作说明见 [`docs/ecs-dynamic-ssh-ip-operations.md`](docs/ecs-dynamic-ssh-ip-operations.md)。Workbench 仅作为 ECS 恢复通道，连接约定见 [`AGENTS.md`](AGENTS.md)。
 
+### 无人值守断线恢复
+
+无人值守恢复只适用于同时开启 `autoStart` 和 `keepAlive` 的 SSH 隧道。App 启动交接时会做一次只读 IP 漂移检查；运行期间不使用固定 5 分钟 IP 轮询，而是观察 launchd 状态和 PID。检测到断线或实例变化后，恢复顺序固定为：
+
+```text
+停止并确认旧 launchd/本机 SSH 收敛
+  → 检查并同步 ECS 受管 SSH /32
+  → 可选清理 ECS 上的排他远端转发端口
+  → 启动新 SSH
+  → 连续健康采样确认恢复
+```
+
+同步、状态查询、远端清理或启动失败时，恢复任务会按 `0、5、10、30、60、60…` 秒继续尝试，最长等待固定为 60 秒，不会因为失败次数达到上限而自行停下。手动停止、关闭 `keepAlive`、删除隧道或 App 退出会取消对应恢复任务。
+
+配置字段 `forceRemotePortCleanup` 默认是 `false`。设为 `true` 表示该 SSH 命令中 `-R` 指定的远端监听端口由该隧道排他占用：每次重连前，TunnelPad 会通过该 SSH 目标强制结束端口上的全部 TCP 监听进程，不按 IP、UID、进程类型或原会话归属筛选，并在确认端口为空后才启动新连接。该选项只应在端口确实专属于当前隧道时使用。
+
 ## 相关文档
 
 - [计划索引与依赖](docs/PLAN_MAP.md)
@@ -121,6 +140,9 @@ open dist/TunnelPad.app
 - [日志低写放大与流式保留计划](docs/plans/tunnelpad-log-write-amplification.md)
 - [后台健康监测能耗优化计划](docs/plans/tunnelpad-health-monitor-energy.md)
 - [无人值守受管 SSH 收敛恢复计划](docs/plans/tunnelpad-unattended-managed-ssh-recovery.md)
+- [无人值守 SSH 异常恢复与孤儿清理计划](docs/plans/tunnelpad-unattended-ssh-recovery-and-orphan-cleanup.md)
+- [无人值守 ECS IP 漂移同步与断线恢复计划](docs/plans/tunnelpad-unattended-ecs-ip-drift-recovery.md)
+- [无人值守恢复最终验收](docs/data-quality/tunnelpad-unattended-final-acceptance-20260919.md)
 - [本机 HTTP API 计划](docs/plans/tunnelpad-local-api.md)
 - [Rust Core 唯一生命周期 owner ADR](docs/adr/0001-rust-core-single-owner.md)
 - [TunnelPad 功能图谱](docs/graph/functional.yaml)
@@ -130,5 +152,5 @@ open dist/TunnelPad.app
 - 不要把阿里云凭证 CSV、CLI 配置文件、AccessKey、Secret、SSH 私钥或真实公网 IP 提交到仓库。
 - 本机 HTTP API 无鉴权，安全边界依赖回环监听；不要通过端口转发、代理或其他方式将 `9998` 暴露到局域网或公网。
 - ECS 同步只维护描述明确的受管 SSH `/32` 规则，其他安全组规则不在操作范围内。
-- 无人值守恢复只处理已核验的 TunnelPad 受管 SSH 进程；身份无法确认、状态未知或 ECS 前置失败时保持 fail-closed，不操作未知进程或远端资源。
+- 本机无人值守恢复只处理已核验的 TunnelPad 受管进程；身份无法确认、状态未知或 ECS 前置失败时保持 fail-closed。显式启用 `forceRemotePortCleanup` 是远端例外：目标端口被视为排他资源，端口上的全部监听进程都会被强制结束。
 - 发现安全组规则、凭证或隧道状态异常时，先停止当前操作，并按计划中的失败与恢复边界处理。

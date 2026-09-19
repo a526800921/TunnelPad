@@ -4,7 +4,7 @@ project:
   name: TunnelPad
 gitnexus:
   repo: TunnelPad
-  indexed_commit: e02fb05
+  indexed_commit: f5c4317
 
 nodes:
   - id: business.tunnelpad
@@ -113,16 +113,33 @@ nodes:
         ref: docs/plans/ecs-dynamic-ssh-ip.md
         locator: "阶段 2 实现冻结"
 
+  - id: function.unattended.ssh.recovery
+    type: function
+    name: 无人值守 SSH 断线恢复与孤儿清理
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "startLaunchdFailureMonitoring/triggerAutomaticRecovery/performAutomaticRecovery"
+      - kind: code
+        ref: Sources/TunnelPadCore/HealthRecovery.swift
+        locator: "HealthRecoveryPolicy/HealthRecoveryState.confirmedFailure"
+      - kind: code
+        ref: Sources/TunnelPadCore/ECSPreStart.swift
+        locator: "remotePortCleanupResource/cleanupRemotePort"
+      - kind: document
+        ref: docs/data-quality/tunnelpad-unattended-final-acceptance-20260919.md
+        locator: "真实操作与时间线、验收结果"
+
   - id: function.log.management
     type: function
     name: 日志写入、尾部读取与日志面板
     evidence:
       - kind: code
-        ref: rust/tunnelpad-core/src/paths.rs
-        locator: "TunnelPaths.log_url"
+        ref: Sources/TunnelPadCore/LogEventStore.swift
+        locator: "LogEventStore.openSession/refresh/clear"
       - kind: code
         ref: Sources/tunnelpad/LogView.swift
-        locator: "LogView.load/LogTextView.updateNSView"
+        locator: "LogView.task 事件订阅/LogTextView.updateNSView"
       - kind: document
         ref: docs/plans/tunnelpad-log-streaming.md
         locator: "目标与面板生命周期"
@@ -335,16 +352,30 @@ nodes:
         ref: Tests/TunnelPadCoreTests/ECSPreStartIntegrationTests.swift
         locator: "前置成功、失败、超时、取消与非 SSH 隔离"
 
-  - id: process.log.refresh
+  - id: process.unattended.ssh.recovery
     type: process
-    name: 日志尾部读取与面板更新
+    name: launchd 异常后的收敛、ECS 同步、远端端口清理与重连
     evidence:
       - kind: code
-        ref: Sources/tunnelpad/LogView.swift
-        locator: "LogView.task 每 2 秒 load"
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "runLaunchdFailureCycle/scheduleRecovery/runCoordinatedRecoveryPreflight"
+      - kind: test
+        ref: Tests/TunnelPadCoreTests/IPDriftRecoveryTests.swift
+        locator: "断线即时恢复、持续退避、共享 ECS 前置与手动停止"
+      - kind: document
+        ref: docs/plans/tunnelpad-unattended-ecs-ip-drift-recovery.md
+        locator: "阶段 2 真实 IP 切换与用户验收"
+
+  - id: process.log.refresh
+    type: process
+    name: 日志文件增量采集、事件发布与面板订阅
+    evidence:
       - kind: code
-        ref: Sources/TunnelPadCore/LogTail.swift
-        locator: "LogTail.lastLines"
+        ref: Sources/TunnelPadCore/LogEventStore.swift
+        locator: "LogFileWatcher/LogEventStore.openSession"
+      - kind: code
+        ref: Sources/tunnelpad/LogView.swift
+        locator: "LogView.task 消费 LogSession.events"
 
   - id: process.legacy.takeover
     type: process
@@ -398,8 +429,8 @@ nodes:
         ref: rust/tunnelpad-core/src/plist_render.rs
         locator: "plist_xml 的 StandardOutPath/StandardErrorPath"
       - kind: code
-        ref: Sources/TunnelPadCore/LogTail.swift
-        locator: "日志尾部读取"
+        ref: Sources/TunnelPadCore/LogEventStore.swift
+        locator: "日志文件增量读取、保留与原位清空"
 
   - id: external.http.endpoint
     type: external_workflow
@@ -436,6 +467,20 @@ nodes:
       - kind: document
         ref: docs/plans/ecs-dynamic-ssh-ip.md
         locator: "不变量与规则收敛契约"
+
+  - id: external.ecs.remote.forward.port
+    type: external_workflow
+    name: ECS 回环地址上的排他远端转发监听端口
+    evidence:
+      - kind: code
+        ref: scripts/tunnelpad-remote-forward-cleanup
+        locator: "SSH 远端清理入口"
+      - kind: code
+        ref: scripts/tunnelpad-remote-forward-helper.py
+        locator: "listener 枚举、pidfd SIGKILL 与释放确认"
+      - kind: document
+        ref: docs/plans/tunnelpad-unattended-ssh-recovery-and-orphan-cleanup.md
+        locator: "远端强杀不变量与阶段 2 验收"
 
   - id: external.ecs.cli.profile
     type: external_workflow
@@ -520,6 +565,13 @@ relations:
       - kind: document
         ref: docs/plans/ecs-dynamic-ssh-ip.md
         locator: "阶段 2 SSH 前置同步"
+  - from: business.tunnelpad
+    to: function.unattended.ssh.recovery
+    type: contains
+    evidence:
+      - kind: document
+        ref: docs/plans/tunnelpad-unattended-ssh-recovery-and-orphan-cleanup.md
+        locator: "目标与不变量"
   - from: business.tunnelpad
     to: function.log.management
     type: contains
@@ -729,13 +781,42 @@ relations:
         ref: scripts/update-ecs-ssh-ip
         locator: "双端点公网 IPv4 探测"
 
+  - from: function.unattended.ssh.recovery
+    to: process.unattended.ssh.recovery
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "triggerAutomaticRecovery/scheduleRecovery"
+  - from: function.unattended.ssh.recovery
+    to: function.tunnel.lifecycle
+    type: depends_on
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "performAutomaticRecovery 的 stop/start"
+  - from: function.unattended.ssh.recovery
+    to: function.ecs.ssh.preflight
+    type: depends_on
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "runCoordinatedRecoveryPreflight"
+  - from: function.unattended.ssh.recovery
+    to: function.launchd.executor
+    type: depends_on
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "runLaunchdFailureCycle"
+
   - from: function.log.management
     to: process.log.refresh
     type: orchestrates
     evidence:
       - kind: code
-        ref: Sources/tunnelpad/LogView.swift
-        locator: "load 与 2 秒任务"
+        ref: Sources/TunnelPadCore/LogEventStore.swift
+        locator: "openSession 与文件 watcher"
   - from: function.local.api
     to: process.api.startup
     type: orchestrates
@@ -776,8 +857,8 @@ relations:
     type: consumes
     evidence:
       - kind: code
-        ref: Sources/TunnelPadCore/LogTail.swift
-        locator: "lastLines"
+        ref: Sources/TunnelPadCore/LogEventStore.swift
+        locator: "refreshState/LogFileRetention"
 
   - from: function.legacy.migration
     to: process.legacy.takeover
@@ -959,6 +1040,13 @@ relations:
       - kind: code
         ref: Sources/TunnelPadCore/ProbeService.swift
         locator: "check"
+  - from: process.health.refresh
+    to: process.unattended.ssh.recovery
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "健康失败触发 scheduleRecovery"
   - from: process.ecs.ssh.preflight
     to: external.ecs.security.group
     type: consumes
@@ -980,13 +1068,34 @@ relations:
       - kind: code
         ref: scripts/update-ecs-ssh-ip
         locator: "公网 IPv4 双端点"
+  - from: process.unattended.ssh.recovery
+    to: external.launchd.service
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "bootout-first 与状态收敛"
+  - from: process.unattended.ssh.recovery
+    to: process.ecs.ssh.preflight
+    type: orchestrates
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/TunnelManager.swift
+        locator: "runCoordinatedRecoveryPreflight"
+  - from: process.unattended.ssh.recovery
+    to: external.ecs.remote.forward.port
+    type: consumes
+    evidence:
+      - kind: code
+        ref: Sources/TunnelPadCore/ECSPreStart.swift
+        locator: "cleanupRemotePort"
   - from: process.log.refresh
     to: external.log.files
     type: consumes
     evidence:
       - kind: code
-        ref: Sources/TunnelPadCore/LogTail.swift
-        locator: "lastLines"
+        ref: Sources/TunnelPadCore/LogEventStore.swift
+        locator: "增量读取、保留与原位清空"
   - from: process.legacy.takeover
     to: external.legacy.launchagents
     type: consumes
