@@ -42,7 +42,7 @@ final class LaunchRecoveryCoordinatorTests: XCTestCase {
         }, handoff: { _, _ in handed += 1 }, report: { _, _, _ in reports += 1 })
         coordinator.start([.init(tunnel: tunnel("a"), resource: nil)])
         try await eventually { calls == 1 && clock.pending == 1 }
-        for (count, delay) in [5.0, 15, 30, 60, 300].enumerated() {
+        for (count, delay) in [5.0, 10, 30, 60, 60].enumerated() {
             clock.advance(delay - 1); await Task.yield(); XCTAssertEqual(calls, count + 1)
             clock.advance(1); try await eventually { calls == count + 2 && clock.pending == 1 }
         }
@@ -80,7 +80,7 @@ final class LaunchRecoveryCoordinatorTests: XCTestCase {
         coordinator.start([.init(tunnel: tunnel("a"), resource: "ecs"), .init(tunnel: tunnel("b"), resource: "ecs"), .init(tunnel: tunnel("c"), resource: nil)])
         try await eventually { calls.count == 2 && clock.pending == 1 }
         XCTAssertEqual(Set(calls), ["a", "c"])
-        clock.advance(300); try await eventually { calls.contains("b") && clock.pending == 1 }
+        clock.advance(60); try await eventually { calls.contains("b") && clock.pending == 1 }
         await coordinator.shutdown(); let count = calls.count
         clock.advance(86_400); await Task.yield(); XCTAssertEqual(calls.count, count)
     }
@@ -118,7 +118,7 @@ final class LaunchRecoveryCoordinatorTests: XCTestCase {
         var calls = await probe.calls
         XCTAssertEqual(calls, 1, "认证冷却期间必须复用脱敏结构化结果")
 
-        clock.advance(299)
+        clock.advance(59)
         _ = try await coordinator.run(resource: "ecs") { await probe.run() }
         calls = await probe.calls
         XCTAssertEqual(calls, 1)
@@ -192,7 +192,7 @@ private actor SharedPreflightAuthenticationProbe {
             version: 1,
             stage: "authenticate",
             category: .auth,
-            retryHint: 300,
+            retryHint: 60,
             sanitizedCode: "authentication_failed",
             exitCode: 3
         )

@@ -7,12 +7,12 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
 fi
 CONFIG_FILE=${TUNNELPAD_CONFIG_FILE:-${HOME:-}/.config/tunnelpad/ecs-ssh-ip.env}
 if [ ! -f "$CONFIG_FILE" ] || [ ! -r "$CONFIG_FILE" ]; then
-  printf '%s\n' '{"version":1,"stage":"local","category":"local","retryHint":300,"sanitizedCode":"configuration_missing","exitCode":2}'
+  printf '%s\n' '{"version":1,"stage":"local","category":"local","retryHint":60,"sanitizedCode":"configuration_missing","exitCode":2}'
   exit 2
 fi
 set -a
 if ! . "$CONFIG_FILE" >/dev/null 2>&1; then
-  printf '%s\n' '{"version":1,"stage":"local","category":"local","retryHint":300,"sanitizedCode":"configuration_invalid","exitCode":2}'
+  printf '%s\n' '{"version":1,"stage":"local","category":"local","retryHint":60,"sanitizedCode":"configuration_invalid","exitCode":2}'
   exit 2
 fi
 set +a
@@ -24,7 +24,7 @@ if [ ! -x "$HELPER" ]; then
   done
 fi
 if [ ! -x "$HELPER" ]; then
-  printf '%s\n' '{"version":1,"stage":"local","category":"local","retryHint":300,"sanitizedCode":"helper_missing","exitCode":2}'
+  printf '%s\n' '{"version":1,"stage":"local","category":"local","retryHint":60,"sanitizedCode":"helper_missing","exitCode":2}'
   exit 2
 fi
 exec "$HELPER" "$@"

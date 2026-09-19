@@ -127,7 +127,7 @@
 | 准入状态 | 实施中 |
 | 复核策略 | 风险分流 |
 | Step 0 | D1–D9 样本矩阵、真实只读故障证据、GitNexus 影响分析已固定 |
-| 样本矩阵 | 本计划 D1–D9；持续恢复补充 D10–D12 已按[阶段 1 整改证据](../data-quality/tunnelpad-unattended-stage1-review-remediation-20260919.md)实现并完成隔离自验，不回写为历史通过证据 |
+| 样本矩阵 | 本计划 D1–D9；持续恢复补充 D10–D12 已按[阶段 1 整改证据](../data-quality/tunnelpad-unattended-stage1-review-remediation-20260919.md)实现并完成隔离自验；现场快速重试反例及 `0/5/10/30/60` 秒契约见[运行期退避修复证据](../data-quality/tunnelpad-unattended-runtime-backoff-remediation-20260919.md) |
 | 验证方式 | Swift/Rust 全量回归、ECS fixture、隔离恢复链测试、GitNexus 变更范围检查、治理检查 |
 | 失败/回滚边界 | 只允许目标 TunnelPad label bootout；同步失败保持 fail-closed；真实运行验证只读复核/受控清理，不主动写入云端规则 |
 | 当前阻塞项 | 无 |
@@ -157,6 +157,7 @@
 | 2026-09-19 | 阶段 1 合并独立复核与整改 | 首轮确认大部分 R1–R15 已闭合，但发现运行期恢复仍未共享 ECS 在途结果；已补为同资源共享结构化结果、不同资源容量 2、认证资源冷却和脱敏失败分类 | [合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)；共享资源、容量、认证冷却与持续重试测试 | 本地门禁通过；待同一复核者增量复验，阶段 2 未进入 | Kierkegaard（复核）/Codex（整改） |
 | 2026-09-19 | 阶段 1 补充只读核对 | 原复核者确认运行期共享 ECS 协调、配置事务、重复退出和登录项证据均已闭合，未发现新增 P0/P1；该结果不作为第二次独立门禁 | [合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)“补充只读核对（非新增独立门禁）” | 补充证据，不改变正式修复自验边界 | Kierkegaard（只读核对） |
 | 2026-09-19 | 阶段 1 修复自验 | 实施者按首轮独立发现完成运行期共享 ECS 协调、配置事务、重复退出和登录项证据的“发现 → 修复 → 验证”闭环 | [阶段 1 整改证据](../data-quality/tunnelpad-unattended-stage1-review-remediation-20260919.md)；Swift 196、Rust 111、ECS 18、监督 9、Release/隔离包与 GitNexus/diff 门禁 | 通过；阶段 1 合并代码门禁解除，阶段 2 未进入 | Codex（实施者） |
+| 2026-09-19 | 阶段 1 运行期退避修复 | 真实 `18080` 冲突暴露短暂 `running` 使恢复任务结束、监控又按首次故障零延迟调度；统一启动期/运行期为 `0/5/10/30/60/60…` 秒，连续两次健康后才清零，所有恢复等待封顶 60 秒 | [运行期退避修复证据](../data-quality/tunnelpad-unattended-runtime-backoff-remediation-20260919.md)；Swift 全量 197、Rust 111、ECS 18、监督 9 项和 Release 编译 | 通过（自验）；当前 App 尚未替换，阶段 2 真实复验未完成 | Codex（实施者） |
 
 ### 验证方式
 
@@ -231,6 +232,7 @@
 | 2026-09-19 | 合并独立复核后整改 | 同资源运行期恢复改为等待并复用结构化 ECS 结果；不同资源并发容量为 2；认证按资源冷却 300 秒；配置事务、重复退出和登录项失败注入一并补齐 | [合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)首轮“不通过”；本地门禁已通过，待同一复核者增量复验 |
 | 2026-09-19 | 补充只读核对 | 原复核者确认四项原发现全部通过且没有新增 P0/P1；结果仅作交叉检查，不登记为第二次独立门禁 | [合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)“补充只读核对（非新增独立门禁）” |
 | 2026-09-19 | 修复自验 | 实施者按首轮独立发现完成全部整改、对抗性回归和受影响全量验证 | [阶段 1 整改证据](../data-quality/tunnelpad-unattended-stage1-review-remediation-20260919.md)；阶段 1 合并代码门禁解除，阶段 2 未进入 |
+| 2026-09-19 | 运行期退避修复 | 现场日志确认每次短暂 `running` 后退出都会被监控当成新首次故障；现已取消调用方 0 秒特判，统一 `0/5/10/30/60/60…` 秒，认证冷却和无效配置复查也由历史 300 秒收敛至 60 秒 | [运行期退避修复证据](../data-quality/tunnelpad-unattended-runtime-backoff-remediation-20260919.md)；本地自验通过，待新 build 真实复验 |
 
 ## 独立审核结论（2026-09-19）
 
@@ -254,8 +256,8 @@
 | 方式 | 自验 |
 | 风险 | 高影响 |
 | 风险依据 | 触及 `TunnelManager` 共享生命周期、ECS 前置检查、Rust 配置 owner 和 App 退出清理；GitNexus 变更范围报告为 critical |
-| 结论 | 通过：已按合并独立复核的运行期共享 ECS 协调、配置事务、重复退出和登录项证据发现完成“发现 → 修复 → 验证”闭环；阶段 1 合并代码门禁解除。阶段 2 真实云端与长时无人值守验收仍未进入。 |
-| 证据 | [合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)首轮发现；[阶段 1 整改证据](../data-quality/tunnelpad-unattended-stage1-review-remediation-20260919.md)；Swift 196、Rust 111、ECS 18、监督 9、Release/隔离包与 GitNexus/diff 门禁；后续只读核对仅作补充证据 |
+| 结论 | 通过：运行期与启动期已统一为 `0/5/10/30/60/60…` 秒，单次瞬时成功不再清空恢复计数，认证/结构化失败等待封顶 60 秒；本次复用既有合并独立复核范围并由实施者完成增量自验。阶段 2 新 build 真实云端与长时无人值守验收仍未完成。 |
+| 证据 | [运行期退避修复证据](../data-quality/tunnelpad-unattended-runtime-backoff-remediation-20260919.md)；Swift 全量 197、Rust 111、ECS 18、监督 9 项和 Release 编译通过；既有[合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)范围保持有效 |
 | 复核者 | Codex（实施者） |
 
 ## 阶段复核记录
@@ -266,6 +268,7 @@
 | 2026-09-19 | 端到端风险复核 | 阶段 1 | 独立 | 高影响 | 不通过：端到端复核 R1–R8 存在 P1；共享资源等待、pending 检查及停止诊断仍需修复。pending/延迟 TERM 的严重性按新反证校正为 P2，不删除旧结论、不据此解除阶段阻断；阶段 2 不具备准入条件 | [端到端风险复核](../reviews/tunnelpad-unattended-end-to-end-review-20260919.md)：当前源码状态机反证、假云事务和隔离 Release 代理；未重新构建、未操作真实 App/云端 | Bacon（独立云端事务）、Banach（独立生命周期）；Codex 主审综合核对 |
 | 2026-09-19 | 合并实现复核 | 阶段 1 | 独立 | 高影响 | 不通过：运行期恢复未共享同一 ECS 资源结果、配置事务未全局线性化、清理期间重复退出可绕过门禁；登录项证据另有 P2。整改已完成自验，但同一复核者增量结论写回前不解除阶段 1 门禁；阶段 2 仍未进入 | [合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)首轮结论与[阶段 1 整改证据](../data-quality/tunnelpad-unattended-stage1-review-remediation-20260919.md) | Kierkegaard（独立只读复核） |
 | 2026-09-19 | 修复自验 | 阶段 1 | 自验 | 高影响 | 通过：已按合并独立复核的运行期共享 ECS 协调、配置事务、重复退出和登录项证据发现完成“发现 → 修复 → 验证”闭环；阶段 1 合并代码门禁解除。阶段 2 真实云端与长时无人值守验收仍未进入。 | [合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)首轮发现；[阶段 1 整改证据](../data-quality/tunnelpad-unattended-stage1-review-remediation-20260919.md)；Swift 196、Rust 111、ECS 18、监督 9、Release/隔离包与 GitNexus/diff 门禁；后续只读核对仅作补充证据 | Codex（实施者） |
+| 2026-09-19 | 增量修复自验 | 阶段 1 | 自验 | 高影响 | 通过：运行期与启动期已统一为 `0/5/10/30/60/60…` 秒，单次瞬时成功不再清空恢复计数，认证/结构化失败等待封顶 60 秒；本次复用既有合并独立复核范围并由实施者完成增量自验。阶段 2 新 build 真实云端与长时无人值守验收仍未完成。 | [运行期退避修复证据](../data-quality/tunnelpad-unattended-runtime-backoff-remediation-20260919.md)；Swift 全量 197、Rust 111、ECS 18、监督 9 项和 Release 编译通过；既有[合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)范围保持有效 | Codex（实施者） |
 
 ## 未决问题
 

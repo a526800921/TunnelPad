@@ -299,7 +299,7 @@ extension ECSPreStartChecker: LaunchPreflightChecking, ECSIPDriftChecking {
         guard let data = result.stdout.data(using: .utf8),
               let decoded = try? JSONDecoder().decode(LaunchPreflightResult.self, from: data),
               decoded.version == 1, decoded.exitCode == Int(result.exitCode) else {
-            return LaunchPreflightResult(version: 1, stage: "result", category: .unknown, retryHint: 300, sanitizedCode: "invalid_result", exitCode: 4)
+            return LaunchPreflightResult(version: 1, stage: "result", category: .unknown, retryHint: 60, sanitizedCode: "invalid_result", exitCode: 4)
         }
         return decoded
     }

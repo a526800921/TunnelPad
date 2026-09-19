@@ -278,7 +278,7 @@ final class StabilityStage1Tests: XCTestCase {
         XCTAssertNil(state.cooldownUntilUptimeNanoseconds)
         XCTAssertEqual(
             HealthRecoveryPolicy.backoffNanoseconds(for: state.recoveryAttempts),
-            300_000_000_000
+            60_000_000_000
         )
     }
 
@@ -294,7 +294,7 @@ final class StabilityStage1Tests: XCTestCase {
         )
 
         XCTAssertEqual(
-            state.confirmedFailure(delayOverrideNanoseconds: 0),
+            state.confirmedFailure(),
             .schedule(attempt: 1, delayNanoseconds: 0),
             "明确 launchd/IP 故障必须只记一次，不能受既有探针计数干扰"
         )
@@ -310,9 +310,35 @@ final class StabilityStage1Tests: XCTestCase {
         XCTAssertNil(state.cooldownUntilUptimeNanoseconds)
         XCTAssertEqual(
             HealthRecoveryPolicy.backoffNanoseconds(for: state.recoveryAttempts),
-            300_000_000_000,
+            60_000_000_000,
             "永久重试允许封顶退避，但不得耗尽后停机"
         )
+    }
+
+    func testRecoveryBackoffAndStableConfirmationContract() {
+        XCTAssertEqual(
+            (1...7).map(HealthRecoveryPolicy.backoffNanoseconds),
+            [0, 5, 10, 30, 60, 60, 60].map { UInt64($0) * 1_000_000_000 }
+        )
+
+        var state = HealthRecoveryState()
+        XCTAssertEqual(state.confirmedFailure(), .schedule(attempt: 1, delayNanoseconds: 0))
+        XCTAssertEqual(
+            state.record(.satisfied(status: 200), status: .running(pid: 7), keepAlive: true),
+            .observe
+        )
+        XCTAssertEqual(state.recoveryAttempts, 1, "单次成功不能清除恢复退避")
+        XCTAssertEqual(state.confirmedFailure(), .schedule(attempt: 2, delayNanoseconds: 5_000_000_000))
+        XCTAssertEqual(
+            state.record(.satisfied(status: 200), status: .running(pid: 8), keepAlive: true),
+            .observe
+        )
+        XCTAssertEqual(state.recoveryAttempts, 2)
+        XCTAssertEqual(
+            state.record(.satisfied(status: 200), status: .running(pid: 8), keepAlive: true),
+            .observe
+        )
+        XCTAssertEqual(state.recoveryAttempts, 0, "连续两次成功才确认恢复并清零")
     }
 
     @MainActor

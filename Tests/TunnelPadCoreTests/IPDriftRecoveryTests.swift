@@ -169,7 +169,7 @@ final class IPDriftRecoveryTests: XCTestCase {
         await manager.shutdownAsync()
     }
 
-    func testLaunchdFailureAfterRestartImmediatelyRunsNextRecovery() async throws {
+    func testLaunchdFailureAfterTransientRestartUsesEscalatingBackoff() async throws {
         let home = FileManager.default.temporaryDirectory
             .appendingPathComponent("tunnelpad-launchd-restart-loop-\(UUID().uuidString)", isDirectory: true)
         let tunnel = TunnelConfig(
@@ -201,14 +201,11 @@ final class IPDriftRecoveryTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(
             owner.events.filter({ $0 == "start" }).count,
             2,
-            "重启后再次断开必须立即进入下一轮恢复"
+            "重启后再次断开必须继续进入下一轮恢复"
         )
         XCTAssertGreaterThanOrEqual(checker.asyncSyncCalls, 2, "每轮断开重连都必须先执行 ECS 同步")
-        XCTAssertGreaterThanOrEqual(
-            delays.values.filter { $0 == 0 }.count,
-            2,
-            "每次新确认的 launchd 断开都必须请求零延迟恢复"
-        )
+        XCTAssertEqual(delays.values.filter { $0 == 0 }.count, 1, "只有第一轮恢复为零延迟")
+        XCTAssertTrue(delays.values.contains(5_000_000_000), "短暂 running 后再次退出必须进入 5 秒退避")
         XCTAssertTrue(manager.lastMessage?.contains("未配置连接探针") == true)
         await manager.shutdownAsync()
     }
@@ -245,11 +242,13 @@ final class IPDriftRecoveryTests: XCTestCase {
 
         XCTAssertEqual(checker.asyncSyncCalls, failures + 1)
         XCTAssertEqual(owner.events.filter({ $0 == "start" }).count, 1)
+        XCTAssertTrue(delays.values.contains(5_000_000_000))
+        XCTAssertTrue(delays.values.contains(10_000_000_000))
         XCTAssertTrue(delays.values.contains(30_000_000_000))
         XCTAssertTrue(delays.values.contains(60_000_000_000))
-        XCTAssertTrue(delays.values.contains(300_000_000_000))
+        XCTAssertFalse(delays.values.contains(300_000_000_000))
         let appLog = try String(contentsOf: TunnelPaths(homeDirectory: home).appEventLogURL, encoding: .utf8)
-        XCTAssertTrue(appLog.contains("300 秒后继续尝试"), "退避应封顶但恢复意图必须保留")
+        XCTAssertTrue(appLog.contains("60 秒后继续尝试"), "退避应在 60 秒封顶但恢复意图必须保留")
         XCTAssertTrue(
             appLog.contains("ecs_transient_fixture_failure"),
             "运行期恢复日志必须保留结构化、脱敏的 ECS 失败分类"
@@ -643,7 +642,7 @@ private final class IPDriftChecker: LaunchPreflightChecking, ECSIPDriftChecking,
                 version: 1,
                 stage: "read",
                 category: .unknown,
-                retryHint: 300,
+                retryHint: 60,
                 sanitizedCode: "ip_drift",
                 exitCode: 4
             )

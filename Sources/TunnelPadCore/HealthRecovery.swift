@@ -3,16 +3,19 @@ import Foundation
 /// 阶段 1 固定的健康恢复策略；不暴露为 config.json 设置项。
 struct HealthRecoveryPolicy: Sendable, Equatable {
     static let failureThreshold = 3
+    static let recoveryConfirmationThreshold = 2
     /// 仅作为历史行为的回归测试刻度；不再是恢复耗尽上限。
     static let maximumRecoveryAttempts = 10
     static let monitorIntervalNanoseconds: UInt64 = 10_000_000_000
+    static let maximumBackoffNanoseconds: UInt64 = 60_000_000_000
 
     static func backoffNanoseconds(for attempt: Int) -> UInt64 {
         switch attempt {
-        case 1: return 10_000_000_000
-        case 2: return 30_000_000_000
-        case 3: return 60_000_000_000
-        default: return 300_000_000_000
+        case ...1: return 0
+        case 2: return 5_000_000_000
+        case 3: return 10_000_000_000
+        case 4: return 30_000_000_000
+        default: return maximumBackoffNanoseconds
         }
     }
 }
@@ -38,6 +41,7 @@ struct HealthRecoveryState: Sendable, Equatable {
 
     private(set) var phase: Phase = .monitoring
     private(set) var consecutiveFailures = 0
+    private(set) var consecutiveRecoveryConfirmations = 0
     private(set) var recoveryAttempts = 0
     private(set) var cooldownUntilUptimeNanoseconds: UInt64?
 
@@ -54,6 +58,7 @@ struct HealthRecoveryState: Sendable, Equatable {
                 if case .satisfied = result {
                     self.cooldownUntilUptimeNanoseconds = nil
                     consecutiveFailures = 0
+                    consecutiveRecoveryConfirmations = 0
                     recoveryAttempts = 0
                 }
                 return .observe
@@ -63,15 +68,24 @@ struct HealthRecoveryState: Sendable, Equatable {
 
         guard keepAlive, Self.isRunning(status) else {
             consecutiveFailures = 0
+            consecutiveRecoveryConfirmations = 0
             return .observe
         }
 
         if case .satisfied = result {
             consecutiveFailures = 0
+            if recoveryAttempts > 0 {
+                consecutiveRecoveryConfirmations += 1
+                guard consecutiveRecoveryConfirmations >= HealthRecoveryPolicy.recoveryConfirmationThreshold else {
+                    return .observe
+                }
+            }
+            consecutiveRecoveryConfirmations = 0
             recoveryAttempts = 0
             return .observe
         }
 
+        consecutiveRecoveryConfirmations = 0
         consecutiveFailures += 1
         guard consecutiveFailures >= HealthRecoveryPolicy.failureThreshold else {
             return .observe
@@ -90,16 +104,18 @@ struct HealthRecoveryState: Sendable, Equatable {
     /// launchd/PID/IP 漂移等已经确认的故障不再伪造三次探针失败。
     /// 该入口始终保留下一次恢复意图，尝试次数只用于计算有上限的退避，
     /// 不会因为达到历史 `maximumRecoveryAttempts` 而进入永久停止状态。
-    mutating func confirmedFailure(delayOverrideNanoseconds: UInt64? = nil) -> Action {
+    mutating func confirmedFailure() -> Action {
         guard phase == .monitoring else { return .observe }
         consecutiveFailures = 0
+        consecutiveRecoveryConfirmations = 0
         cooldownUntilUptimeNanoseconds = nil
         if recoveryAttempts < Int.max {
             recoveryAttempts += 1
         }
-        let delay = delayOverrideNanoseconds
-            ?? HealthRecoveryPolicy.backoffNanoseconds(for: recoveryAttempts)
-        return .schedule(attempt: recoveryAttempts, delayNanoseconds: delay)
+        return .schedule(
+            attempt: recoveryAttempts,
+            delayNanoseconds: HealthRecoveryPolicy.backoffNanoseconds(for: recoveryAttempts)
+        )
     }
 
     mutating func finishRecovery(
@@ -110,6 +126,7 @@ struct HealthRecoveryState: Sendable, Equatable {
         guard success else { return .observe }
 
         consecutiveFailures = 0
+        consecutiveRecoveryConfirmations = 0
         recoveryAttempts = 0
         cooldownUntilUptimeNanoseconds = nil
         return .observe
@@ -118,12 +135,14 @@ struct HealthRecoveryState: Sendable, Equatable {
     mutating func manualStop() {
         phase = .manuallyStopped
         consecutiveFailures = 0
+        consecutiveRecoveryConfirmations = 0
         cooldownUntilUptimeNanoseconds = nil
     }
 
     mutating func manualStart() {
         phase = .monitoring
         consecutiveFailures = 0
+        consecutiveRecoveryConfirmations = 0
         recoveryAttempts = 0
         cooldownUntilUptimeNanoseconds = nil
     }

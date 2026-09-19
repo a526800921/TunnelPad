@@ -58,7 +58,7 @@ final class ECSPreStartIntegrationTests: XCTestCase {
 
         let runner = RecordingPreflightRunner(result: ProcessResult(
             exitCode: 4,
-            stdout: "{\"version\":1,\"stage\":\"read\",\"category\":\"unknown\",\"retryHint\":300,\"sanitizedCode\":\"ip_drift\",\"exitCode\":4}\n"
+            stdout: "{\"version\":1,\"stage\":\"read\",\"category\":\"unknown\",\"retryHint\":60,\"sanitizedCode\":\"ip_drift\",\"exitCode\":4}\n"
         ))
         let checker = ECSPreStartChecker(
             scriptURL: scriptURL,

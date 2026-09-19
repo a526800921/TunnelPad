@@ -20,7 +20,9 @@ with tempfile.TemporaryDirectory(prefix='tunnelpad-supervision-') as temporary:
     with (p/'config').open('a') as f: f.write('echo SECRET-CONFIG\nif then\n')
     helper=p/'helper';helper.write_text('#!/bin/bash\ntouch "'+str(p/'helper-called')+'"\n');helper.chmod(0o700)
     r=run(dict(e,TUNNELPAD_PREFLIGHT_HELPER=str(helper)))
-    assert r.returncode==2 and json.loads(r.stdout)['sanitizedCode']=='configuration_invalid'
+    invalid = json.loads(r.stdout)
+    assert r.returncode==2 and invalid['sanitizedCode']=='configuration_invalid'
+    assert invalid['retryHint']==60
     assert not r.stderr and 'SECRET' not in r.stdout and not (p/'helper-called').exists() and not (p/'calls').read_text()
     print('PASS invalid-config-no-helper-no-leak')
     p,e=setup('new-priority')

@@ -1,4 +1,4 @@
-use super::{process, store, Config, Failure, Result, AUTH_RETRY_SECONDS};
+use super::{process, store, Config, Failure, Result, MAXIMUM_RETRY_SECONDS};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::Read;
@@ -420,7 +420,7 @@ pub(super) fn sync(c: &Config, check: bool, parent: i32, deadline: Instant) -> R
         .as_ref()
         .is_err_and(|e: &Failure| e.category == "auth")
     {
-        store::write(&c.path("auth"), &(epoch() + AUTH_RETRY_SECONDS))?;
+        store::write(&c.path("auth"), &(epoch() + MAXIMUM_RETRY_SECONDS))?;
     }
     result
 }

@@ -115,7 +115,8 @@ actor SharedRecoveryPreflightCoordinator {
 
     private func recordCooldown(_ result: LaunchPreflightResult, for resource: String) {
         if result.category == .auth {
-            cooldowns[resource] = Cooldown(result: result, until: clock.now() + 300)
+            let maximumBackoff = TimeInterval(HealthRecoveryPolicy.maximumBackoffNanoseconds) / 1_000_000_000
+            cooldowns[resource] = Cooldown(result: result, until: clock.now() + maximumBackoff)
         } else if result.category == .success {
             cooldowns.removeValue(forKey: resource)
         }
@@ -291,12 +292,10 @@ final class LaunchRecoveryCoordinator {
     private func finishedRetry(_ id: String, entry initial: Entry, category: LaunchRecoveryCategory) {
         var entry = initial
         entry.failures += 1
-        let delay: TimeInterval
-        switch category {
-        case .auth: delay = 300
-        case .local, .unknown: delay = 300
-        default: delay = [5.0, 15, 30, 60, 300][min(entry.failures - 1, 4)]
-        }
+        // `start` 本身就是第 1 次（0 秒）尝试；第 N 次失败后使用下一档，
+        // 因而完整序列为 0、5、10、30、60、60……，且所有错误分类同上限。
+        let delay = TimeInterval(HealthRecoveryPolicy.backoffNanoseconds(for: entry.failures + 1))
+            / 1_000_000_000
         entry.due = clock.now() + delay
         if category == .auth, let resource = entry.candidate.resource { cooldowns[resource] = entry.due }
         if entry.lastCategory != category || clock.now() - entry.lastLog >= 1800 {

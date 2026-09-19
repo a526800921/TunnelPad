@@ -293,8 +293,9 @@ public final class TunnelManager: ObservableObject {
                 guard !Task.isCancelled, !isShuttingDown else { return }
                 applyEffectiveConfig(loaded); launchConfigurationValid = true; launchInitialConfig = loaded
             } catch {
-                if !reported { appEventLog.write("启动恢复等待有效配置，300 秒后复查"); reported = true }
-                do { try await launchClock.sleep(300) } catch { return }
+                let maximumBackoff = TimeInterval(HealthRecoveryPolicy.maximumBackoffNanoseconds) / 1_000_000_000
+                if !reported { appEventLog.write("启动恢复等待有效配置，60 秒后复查"); reported = true }
+                do { try await launchClock.sleep(maximumBackoff) } catch { return }
             }
         }
         guard !Task.isCancelled, !isShuttingDown else { return }
@@ -753,7 +754,6 @@ public final class TunnelManager: ObservableObject {
         triggerAutomaticRecovery(
             for: tunnel,
             reason: "SSH 连接异常（launchd 状态或 PID 发生变化）",
-            delayOverrideNanoseconds: 0,
             allowNotRunning: true
         )
     }
@@ -793,7 +793,6 @@ public final class TunnelManager: ObservableObject {
                     triggerAutomaticRecovery(
                         for: candidate,
                         reason: "ECS SSH `/32` 漂移",
-                        delayOverrideNanoseconds: 0,
                         allowNotRunning: false
                     )
                 } else if result.exitCode != 0 {
@@ -813,7 +812,6 @@ public final class TunnelManager: ObservableObject {
     private func triggerAutomaticRecovery(
         for tunnel: TunnelConfig,
         reason: String,
-        delayOverrideNanoseconds: UInt64?,
         allowNotRunning: Bool = false
     ) {
         let id = tunnel.id
@@ -822,9 +820,7 @@ public final class TunnelManager: ObservableObject {
         guard allowNotRunning || isRunning(statuses[id]) else { return }
 
         var state = healthRecoveryStates[id] ?? HealthRecoveryState()
-        let action = state.confirmedFailure(
-            delayOverrideNanoseconds: delayOverrideNanoseconds
-        )
+        let action = state.confirmedFailure()
         healthRecoveryStates[id] = state
 
         guard case .schedule(let attempt, let delayNanoseconds) = action else { return }
@@ -964,6 +960,7 @@ public final class TunnelManager: ObservableObject {
         healthRecoveryStates[id] = state
 
         if case .satisfied = result,
+           state.recoveryAttempts == 0,
            recoveryAwaitingConnectivityConfirmation.remove(id) != nil {
             lastMessage = "「\(tunnel.name)」已自动恢复（连接探针已确认）"
             appEventLog.write("「\(tunnel.name)」连接探针已确认恢复，自动恢复计数已清除")
@@ -1017,12 +1014,11 @@ public final class TunnelManager: ObservableObject {
                 case .recovered, .cancelled:
                     self.clearRecoveryTask(for: id, generation: generation)
                     return
-                case .retry(let code, let delayOverrideNanoseconds):
+                case .retry(let code):
                     guard let retry = self.prepareAutomaticRetry(
                         id: id,
                         generation: generation,
-                        failureCode: code,
-                        delayOverrideNanoseconds: delayOverrideNanoseconds
+                        failureCode: code
                     ) else {
                         self.clearRecoveryTask(for: id, generation: generation)
                         return
@@ -1037,7 +1033,7 @@ public final class TunnelManager: ObservableObject {
 
     private enum AutomaticRecoveryOutcome {
         case recovered
-        case retry(code: String, delayOverrideNanoseconds: UInt64? = nil)
+        case retry(code: String)
         case cancelled
     }
 
@@ -1048,8 +1044,7 @@ public final class TunnelManager: ObservableObject {
     private func prepareAutomaticRetry(
         id: String,
         generation: UInt,
-        failureCode: String,
-        delayOverrideNanoseconds: UInt64?
+        failureCode: String
     ) -> (attempt: Int, delayNanoseconds: UInt64)? {
         guard !isShuttingDown,
               recoveryGenerations[id] == generation,
@@ -1057,9 +1052,7 @@ public final class TunnelManager: ObservableObject {
               tunnel.keepAlive else { return nil }
         var state = healthRecoveryStates[id] ?? HealthRecoveryState()
         guard state.phase == .monitoring else { return nil }
-        let action = state.confirmedFailure(
-            delayOverrideNanoseconds: delayOverrideNanoseconds
-        )
+        let action = state.confirmedFailure()
         healthRecoveryStates[id] = state
         guard case .schedule(let attempt, let delayNanoseconds) = action else { return nil }
         let seconds = delayNanoseconds / 1_000_000_000
@@ -1199,11 +1192,7 @@ public final class TunnelManager: ObservableObject {
             return .cancelled
         } catch {
             guard recoveryGenerations[id] == generation, !Task.isCancelled else { return .cancelled }
-            let failure = automaticRecoveryFailure(error)
-            return .retry(
-                code: failure.code,
-                delayOverrideNanoseconds: failure.delayOverrideNanoseconds
-            )
+            return .retry(code: automaticRecoveryFailure(error))
         }
     }
 
@@ -1227,35 +1216,19 @@ public final class TunnelManager: ObservableObject {
         }
     }
 
-    private func automaticRecoveryFailure(
-        _ error: Error
-    ) -> (code: String, delayOverrideNanoseconds: UInt64?) {
+    private func automaticRecoveryFailure(_ error: Error) -> String {
         if let preflight = error as? AutomaticRecoveryPreflightFailure {
             let result = preflight.result
-            let delaySeconds: Int
-            if result.category == .auth {
-                delaySeconds = 300
-            } else if result.retryHint > 0 {
-                delaySeconds = min(result.retryHint, 300)
-            } else {
-                delaySeconds = 0
-            }
-            let delay = delaySeconds > 0
-                ? UInt64(delaySeconds) * 1_000_000_000
-                : nil
-            return (
-                "ecs_\(result.category.rawValue)_\(result.sanitizedCode)",
-                delay
-            )
+            return "ecs_\(result.category.rawValue)_\(result.sanitizedCode)"
         }
-        if error is ECSPreStartError { return ("ecs_preflight_failed", nil) }
-        if error is ECSPreflightProcessError { return ("ecs_preflight_process_failed", nil) }
-        if error is HealthRecoveryError { return ("lifecycle_unavailable", nil) }
+        if error is ECSPreStartError { return "ecs_preflight_failed" }
+        if error is ECSPreflightProcessError { return "ecs_preflight_process_failed" }
+        if error is HealthRecoveryError { return "lifecycle_unavailable" }
         if let clientError = error as? RustCoreClient.ClientError,
            case .remote(let code, _) = clientError {
-            return ("core_\(code)", nil)
+            return "core_\(code)"
         }
-        return ("lifecycle_failed", nil)
+        return "lifecycle_failed"
     }
 
     private func cancelRecovery(for id: String) {

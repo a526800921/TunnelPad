@@ -174,7 +174,7 @@ final class LaunchRecoveryIntegrationTests: XCTestCase {
         let owner = LaunchTestOwner([tunnel()]), checker = LaunchTestPreflight(), clock = LaunchTestClock(); owner.setLoadFailure(true); checker.set(.success)
         let manager = manager(owner, checker, clock)
         let setup = Task { await manager.restoreAutoStartTunnels() }
-        try await eventually { clock.pending == 1 }; owner.setLoadFailure(false); owner.setBusy(true); clock.advance(300)
+        try await eventually { clock.pending == 1 }; owner.setLoadFailure(false); owner.setBusy(true); clock.advance(60)
         await setup.value; try await eventually { clock.pending == 1 && manager.busyIDs.isEmpty }; XCTAssertEqual(checker.calls, 0)
         owner.setBusy(false); clock.advance(5)
         try await eventually { owner.events.contains("strictStart:a") && manager.launchRecoveryIDs.isEmpty }

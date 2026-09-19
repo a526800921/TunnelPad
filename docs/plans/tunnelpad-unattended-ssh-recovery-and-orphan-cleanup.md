@@ -157,6 +157,7 @@
 | 2026-09-19 | 合并独立复核与整改 | 首轮发现配置事务缺少全局线性化、清理中重复退出可绕过门禁，并指出登录项错误证据不准确；已增加完整配置事务锁、重复退出状态门和失败注入测试 | [合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)；本地门禁通过，待同一复核者增量复验 |
 | 2026-09-19 | 补充只读核对 | 原复核者确认配置事务、重复退出和登录项错误三项发现均已闭合，未发现新增 P0/P1；该结果不作为第二次独立门禁 | [合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)“补充只读核对（非新增独立门禁）” |
 | 2026-09-19 | 修复自验 | 实施者按首轮独立发现完成配置事务、重复退出和登录项错误的“发现 → 修复 → 验证”闭环 | [阶段 1 整改证据](../data-quality/tunnelpad-unattended-stage1-review-remediation-20260919.md)；阶段 1 合并代码门禁通过，阶段 2 未进入 |
+| 2026-09-19 | 运行期退避修复 | 真实端口冲突暴露短暂 `running` 结束恢复任务、监控随后重复按首次故障调度的问题；统一为 `0/5/10/30/60/60…` 秒，并要求连续两次健康采样才清零 | [运行期退避修复证据](../data-quality/tunnelpad-unattended-runtime-backoff-remediation-20260919.md)；本地自验通过，当前 App 尚未替换，待阶段 2 真实复验 |
 
 ## 阶段复核记录
 
@@ -166,6 +167,7 @@
 | 2026-09-19 | 实现风险复核 | 阶段 1 | 独立 | 高影响 | 不通过：P1 身份授权放宽、持续输出掩盖子命令退出；停止/安装/诊断 P2 待修复；保持阶段 1 实施中 | [端到端风险复核](../reviews/tunnelpad-unattended-end-to-end-review-20260919.md)，尤其 R3/R7–R10/R13 与测试证据限制；本轮未重新构建、未启停真实 App/隧道 | Banach（独立生命周期审核）；Codex 综合核对 |
 | 2026-09-19 | 合并实现复核 | 阶段 1 | 独立 | 高影响 | 不通过：配置事务线性化、清理中重复退出为 P1；登录项失败证据为 P2。整改已完成自验，但在同一复核者增量结论写回前不解除阶段 1 门禁 | [合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)首轮结论与[阶段 1 整改证据](../data-quality/tunnelpad-unattended-stage1-review-remediation-20260919.md) | Kierkegaard（独立只读复核） |
 | 2026-09-19 | 修复自验 | 阶段 1 | 自验 | 高影响 | 通过：已按合并独立复核的配置事务、重复退出和登录项错误发现完成“发现 → 修复 → 验证”闭环；阶段 1 合并代码门禁解除。计划保持实施中，阶段 2 真实无人值守验收未进入。 | [合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)首轮发现；[阶段 1 整改证据](../data-quality/tunnelpad-unattended-stage1-review-remediation-20260919.md)；Swift 196、Rust 111、ECS 18、监督 9、Release/隔离包与 GitNexus/diff 门禁；后续只读核对仅作补充证据 | Codex（实施者） |
+| 2026-09-19 | 增量修复自验 | 阶段 1 | 自验 | 高影响 | 通过：现场快速重试反例已修复为 `0/5/10/30/60/60…` 秒统一退避，连续两次健康采样后才清零；本次属于既有独立复核范围内的增量修复，按风险分流由实施者自验，不重复发起独立复核。计划保持实施中，阶段 2 新 build 真实无人值守验收未完成。 | [运行期退避修复证据](../data-quality/tunnelpad-unattended-runtime-backoff-remediation-20260919.md)；Swift 全量 197、Rust 111、ECS 18、监督 9 项和 Release 编译通过；既有[合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)范围保持有效 | Codex（实施者） |
 
 ### 最新阶段复核
 
@@ -176,6 +178,6 @@
 | 方式 | 自验 |
 | 风险 | 高影响 |
 | 风险依据 | 共享 launchd/SSH 生命周期、Rust 配置 owner、App 退出清理和登录项系统服务；GitNexus 变更范围为 critical |
-| 结论 | 通过：已按合并独立复核的配置事务、重复退出和登录项错误发现完成“发现 → 修复 → 验证”闭环；阶段 1 合并代码门禁解除。计划保持实施中，阶段 2 真实无人值守验收未进入。 |
-| 证据 | [合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)首轮发现；[阶段 1 整改证据](../data-quality/tunnelpad-unattended-stage1-review-remediation-20260919.md)；Swift 196、Rust 111、ECS 18、监督 9、Release/隔离包与 GitNexus/diff 门禁；后续只读核对仅作补充证据 |
+| 结论 | 通过：现场快速重试反例已修复为 `0/5/10/30/60/60…` 秒统一退避，连续两次健康采样后才清零；本次属于既有独立复核范围内的增量修复，按风险分流由实施者自验，不重复发起独立复核。计划保持实施中，阶段 2 新 build 真实无人值守验收未完成。 |
+| 证据 | [运行期退避修复证据](../data-quality/tunnelpad-unattended-runtime-backoff-remediation-20260919.md)；Swift 全量 197、Rust 111、ECS 18、监督 9 项和 Release 编译通过；既有[合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)范围保持有效 |
 | 复核者 | Codex（实施者） |
