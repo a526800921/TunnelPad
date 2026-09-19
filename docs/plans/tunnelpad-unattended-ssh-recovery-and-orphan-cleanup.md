@@ -1,0 +1,175 @@
+# 计划：TunnelPad 无人值守 SSH 异常恢复与孤儿清理
+
+## 背景
+
+2026-09-15，用户明确要求：无人值守运行期间，连接异常后必须能够自动恢复，并清理孤儿 SSH。该范围是对已完成的[无人值守启动恢复](tunnelpad-unattended-launch-recovery.md)和[受管 SSH 收敛恢复](tunnelpad-unattended-managed-ssh-recovery.md)的新增加固，不重写它们的历史完成证据。
+
+当前版本为 launchd 作业增加了日志时间戳代理，运行关系变为：`launchd → tunnelpad-log-proxy → ssh`。这解决了原始 launchd 日志没有逐行时间的问题，但也新增了一个必须由本计划收敛的监督边界：代理异常退出、日志写入失败、信号升级或 App/Bundle 路径变化时，不能遗留 SSH，也不能让新的重试与旧实例重叠。
+
+## 目标
+
+- 无人值守连接异常时，沿用现有退避、generation、锁和健康恢复 owner 自动重试；恢复前不重复 bootstrap。
+- 每个 TunnelPad launchd 作业只能拥有一个可证明归属的代理及 SSH 进程树；停止、重启、退出、代理异常和日志 I/O 失败后，旧进程在有界时间内退出并被回收。
+- TERM 不响应、管道被孙进程持有、代理被强制终止等故障，均不得留下可继续占用转发端口的孤儿 SSH；无法证明归属时 fail-closed，不杀任意 SSH。
+- launchd 状态中的 PID/可执行文件与 Rust Core 的受管身份核验一致；旧实例未收敛时禁止启动新实例。
+- 日志代理失效、辅助程序缺失或 Bundle 路径不再有效时，输出可定位的本地错误，并在满足前置条件后自动恢复。
+
+## 非目标
+
+- 不修改配置 schema、18080 端口映射、SSH 参数语义或 ECS 远端授权。
+- 不清理用户手工启动、其他 launchd label、其他进程组或无法证明属于 TunnelPad 当前作业的 SSH。
+- 不通过固定 PID、端口占用或日志内容单独推断归属；不以“进程列表为空”替代 launchd 的收敛确认。
+- 不把当前真实隧道的偶发错误日志直接判定为代码修复完成；真实验收必须有隔离故障注入和独立复核证据。
+
+## 现状基线与已知缺口
+
+### 已观察事实
+
+- 当前日志代理给 stdout/stderr 逐行写入本地时间戳，子进程退出码会传递给 launchd，正常信号路径会向 SSH 进程组转发信号。
+- launchd 当前直接管理日志代理，因此状态查询返回的受管 PID 是代理 PID，不再是 `/usr/bin/ssh` PID。
+- 现有代理的日志写入循环在 `write_log_line(...)` 出错时会提前返回；该路径必须先终止并等待 SSH，再允许代理退出，否则 launchd 的 KeepAlive 重试可能与旧 SSH 重叠。
+- 当前 plist 中代理路径来自运行时 App Bundle 的绝对路径。Bundle 移动、替换或资源缺失时，自动恢复必须先识别为本地前置失败，不能盲目 bootstrap。
+- 现有 Rust `stop_managed_cancellable` 按可执行文件核验受管身份；代理接管后需要明确“launchd PID 是代理、代理子进程是 SSH”的身份契约，避免停止 fallback 误判或绕过核验。
+
+### 现有契约复用
+
+- Rust Core 继续作为配置、launchd 生命周期、进程信号和代次校验的唯一 owner。
+- 复用现有 60 秒操作预算、bootout-first、`notLoaded`/收敛门禁、健康恢复退避、generation 取消和资源锁；本计划只补齐代理层进程树及其与 launchd 的交接。日志追加/保留和写放大约束沿用[日志低写放大与流式保留](tunnelpad-log-write-amplification.md)。
+- ECS 前置检查、日志保留/写放大、HTTP API 与 18080 的现行契约不因本计划改变。
+
+## 不变量
+
+- 任何发送给进程的信号，都必须由当前 label 的 fresh 状态、PID、UID、可执行文件和/或受管进程组身份共同证明；证明失败只返回 fail-closed。
+- 代理退出前必须完成：停止读管道、向受管子进程请求退出、限时等待、必要时升级到 SIGKILL、`wait` 回收；任何错误路径都不能跳过该闭环。
+- 同一 label 在旧作业未确证 `notLoaded` 且受管进程未收敛前，禁止写新 plist/bootstrap。
+- `KeepAlive` 只负责在受管监督者退出后重新调度；它不能成为并行启动第二个 SSH 的理由。
+- 代理、SSH 及其必要孙进程的归属边界必须可测试；不对未知进程做全局清理。
+
+## 阶段路线图
+
+| 阶段 | 目标 | 进入条件 | 验证方向 | 状态 |
+|---|---|---|---|---|
+| 阶段 0 | 现状、身份契约、故障样本和回滚边界收敛 | 用户明确需求；已有无人值守计划已完成 | 静态调用图、隔离最小复现、独立设计复核 | 设计中 |
+| 阶段 1 | 实现代理进程树回收、launchd 身份对齐和恢复去重 | 阶段 0 独立准入；用户实现授权已给出 | Rust/Swift 回归、故障注入、隔离 launchd 生命周期 | 实施中 |
+| 阶段 2 | Release 包与真实 TunnelPad 受控验收 | 阶段 1 完成；真实操作停止条件明确 | 真实异常恢复、无孤儿 SSH、端口释放、用户验收 | 待实施 |
+
+## 当前阶段
+
+### 阶段准入摘要
+
+| 字段 | 内容 |
+|---|---|
+| 准入状态 | 实施中 |
+| 复核策略 | 风险分流 |
+| 风险级别 | 高影响：共享生命周期、进程信号、无人值守恢复 |
+| Step 0 | [阶段 0 Step 0](#step-0-证据)：本节“样本矩阵”与“失败/回滚边界” |
+| 样本矩阵 | O1–O7 本地/隔离故障 fixture；O8 当前 `motorcycle-local-docker` 真实验收延期到阶段 2 |
+| 验证方式 | Rust/Swift 全量回归、代理故障注入、隔离 launchd 生命周期、Release 构建和 `detect_changes()`；阶段 2 再做真实隧道验收 |
+| 失败/回滚边界 | 身份、进程组归属、资源路径或清理结果无法证明时 fail-closed；未确认收敛前不 bootstrap；回滚只恢复同版 App/辅助程序/plist，不触碰配置、ECS 或非目标隧道 |
+| 最新阶段复核 | [最新阶段复核](#最新阶段复核)：2026-09-19 独立实现复核不通过；历史准入不等于当前实现完成 |
+| 当前阻塞项 | [端到端风险复核 R7–R10/R13](../reviews/tunnelpad-unattended-end-to-end-review-20260919.md)：身份授权被观测 program 放宽、持续输出掩盖子命令退出、停止路径无界等待、共享代理安装竞态及延迟停止误分类 |
+| 下一动作 | 修复独立发现并补对抗性进程树/身份样本，再独立复核；未通过前不进入阶段 2 完成验收 |
+
+### 样本矩阵
+
+| 样本 | 故障注入/操作 | 必须满足 | 失败判定 |
+|---|---|---|---|
+| O1 | 正常 SSH 退出并由 KeepAlive 重试 | 每次只有一个代理/SSH；退避生效；没有旧 PID | 新旧 SSH 重叠或端口被旧实例占用 |
+| O2 | 单行日志写入失败/日志目录不可写 | 代理记录失败原因；先清理受管子进程，再退出；后续可恢复 | 代理已退出但 SSH 仍存活 |
+| O3 | 代理收到 TERM/INT/HUP/QUIT | 信号转发、限时等待、必要时升级并回收；launchd 可再次加载 | 未回收、晚写日志或下次启动冲突 |
+| O4 | SSH 忽略 TERM、SIGSTOP 或持有输出管道的孙进程 | 只对当前受管身份/进程组处理；在总预算内结束 | 无限等待、杀到未知进程或遗留端口监听 |
+| O5 | 代理被 SIGKILL、App 退出、launchd bootout | 再次查询为 `notLoaded` 或已确证收敛；不重复 bootstrap | 新代理启动时旧 SSH 仍活跃 |
+| O6 | stale PID、同 label 外部替换、状态查询超时 | 身份不确定时 fail-closed，不发危险信号；保持可诊断 | 仅凭 PID/端口/日志清理其他进程 |
+| O7 | Bundle 移动、代理资源缺失或版本不匹配 | 标记 local prerequisite，暂停启动；资源恢复后重新验证并恢复 | 自动循环报错、启动不存在的路径或永久卡死 |
+| O8 | 当前 `motorcycle-local-docker` 受控重启/异常恢复（阶段 2） | 日志有逐行时间；运行状态 fresh；18080 转发恢复；同一时刻最多一条 SSH | 只看 HTTP 200 但 SSH/端口仍有孤儿，或需要人工点击 |
+
+## Step 0 证据
+
+阶段 0 Step 0 已登记本计划的现状事实、影响边界、O1–O8 故障样本、清理不变量和回滚停止条件。实现前还需将隔离命令、进程组观测字段和错误注入点固化为可复现证据，并完成独立设计复核；本节不把设计登记误认为实现通过。
+
+当前阶段只执行 O1–O7 的本地/隔离基线，不启动、停止或故障注入真实 TunnelPad 隧道；O8 延后阶段 2，并需要单独的真实操作授权和停止条件。
+
+### 可执行验证入口
+
+以下命令和观测字段是阶段 1 实现门禁的固定入口；阶段 0 先记录现状输出，阶段 1 再把对应入口变成通过/失败的自动 fixture：
+
+| 样本 | 可执行入口 | 必须记录的字段 |
+|---|---|---|
+| O1 | `cargo test --manifest-path rust/Cargo.toml --test log_proxy prefixes_stdout_and_stderr_lines_with_local_timestamps`；隔离 launchd 作业的 `launchctl print` | label、state、active count、代理 PID、SSH PID、代理/SSH PGID、重试间隔 |
+| O2 | `cargo test --manifest-path rust/Cargo.toml --test log_proxy log_write_failure_cleans_child`（阶段 1 新增） | 注入点、代理退出码、SSH/孙进程 PID/PGID、`wait` 结果、日志最后写入时间 |
+| O3 | `cargo test --manifest-path rust/Cargo.toml --test log_proxy forwards_and_escalates_signals`（阶段 1 新增） | 信号顺序、每次等待耗时、kill 返回值、最终 child status |
+| O4 | `cargo test --manifest-path rust/Cargo.toml --test log_proxy closes_descendant_pipe_and_reaps_group`（阶段 1 新增） | 父子关系、PGID、管道持有者、清理 deadline、剩余进程 |
+| O5 | `cargo test --manifest-path rust/Cargo.toml --test log_proxy launchd_kill_does_not_leave_child`（阶段 1 新增）及隔离 launchd bootout | proxy/SSH 的 PID、PGID、bootout 后状态、端口/监听句柄、孤儿扫描 |
+| O6 | `cargo test --manifest-path rust/Cargo.toml launchctl::tests::managed_stop_refuses_signal_when_launchd_pid_changes` 及新增身份票据 fixture | fresh status、PID、UID、启动时间、可执行路径、PGID、发出的信号列表 |
+| O7 | `cargo test --manifest-path rust/Cargo.toml --test log_proxy missing_proxy_is_local_prerequisite`（阶段 1 新增）及 App 资源移动隔离样本 | plist 代理路径、文件存在/可执行性、错误分类、是否发生 bootstrap、恢复后的重写路径 |
+
+### 验证方式（阶段 0/1）
+
+- 对现有 Rust owner、launchd executor、代理和打包路径做源码/调用链核对；所有影响结论以源码证据和 GitNexus 结果交叉确认。
+- 为 O1–O7 建立不依赖真实 ECS 的本地隔离样本，记录代理 PID、SSH PID/进程组、label 状态、端口释放和日志最后写入时间；测试输出脱敏。
+- O8 仅做受控当前隧道观察，不以一次 HTTP 成功替代 SSH 进程树收敛；真实异常注入需在阶段 2 明确授权和停止条件后执行。
+- O8 在阶段 0 不执行；阶段 2 才观察当前 `motorcycle-local-docker`，并同时核对 launchd 状态、代理/SSH 进程树、18080 监听和日志时间序列。
+- 阶段 0 使用 `plan-governance-cli check .`；进入阶段 1 前必须由独立复核确认 `--strict-readiness`、风险边界和实现前置完整；阶段 1 收尾继续执行严格检查。
+
+### 设计决策待收敛
+
+1. 进程树所有权：确认 launchd 是否负责代理及其子进程组的最终清理；代理自身必须覆盖 I/O 错误、取消、信号和 wait 失败路径。
+2. 身份契约：将 launchd 受管身份定义为代理可执行文件，并为代理子 SSH 保存受管 PID/进程组票据；停止操作不能继续把 `/usr/bin/ssh` 当作 launchd 顶层 PID。
+3. 辅助程序部署：选择稳定的同版资源路径或显式 fail-closed 的安装前置；禁止 plist 永久引用已不存在的旧 Bundle。
+4. 端口与清理：只把端口占用作为验收信号，不把它作为清理授权；清理目标必须来自当前 launchd/代理票据。
+
+### 失败与回滚边界
+
+- 状态查询超时、身份票据不一致、进程组无法证明归属或代理资源缺失时，停止新增 bootstrap，保留脱敏错误并等待下一次受限恢复；不杀未知 SSH。
+- 任何一次清理未确认完成，均不得释放该 Tunnel 的启动资格，不得并行重试。
+- 回滚前必须先停止自动恢复、bootout 当前 label，并确认代理、SSH、受管孙进程、端口监听和在途 launchd 操作均已收敛；若无法确认，保留 fail-closed 状态并请求人工处理。
+- 回滚只恢复同一版本的 App/辅助程序和 plist 形状，不回滚用户配置，不清理非 TunnelPad 资源。
+
+## 阶段 1 实施边界
+
+预计涉及：
+
+- `rust/tunnelpad-core/src/bin/tunnelpad-log-proxy.rs`：统一正常、信号、I/O 错误、读管道错误和 wait 错误的子进程清理；补充测试注入点。
+- `rust/tunnelpad-core/src/plist_render.rs`、`rust/tunnelpad-core/src/owner.rs`、`rust/tunnelpad-core/src/launchctl.rs`：对齐 launchd 顶层代理身份与受管 SSH 子进程的停止/重启契约，保持 bootout-first 和 fail-closed。
+- `Sources/TunnelPadCore/LaunchdPlistRenderer.swift`、打包脚本及必要的安装资源定位：仅在阶段 0 证明需要时修改，不能绕过 Rust owner。
+- `rust/tunnelpad-core/tests/`、`Tests/TunnelPadCoreTests/`：覆盖 O1–O7 适用分支，并为阶段 2 的 O8 保留隔离 launchd 进程树检查入口。
+
+所有既有函数、方法或结构体的编辑前必须先执行 GitNexus upstream impact；若结果为 HIGH/CRITICAL，先向用户报告 blast radius 并暂停实现，直至风险边界收敛。
+
+## 验证与完成条件
+
+- 阶段 0：Step 0、O1–O7、身份/所有权/超时/回滚契约写实；独立复核通过；`plan-governance-cli check . --strict-readiness` 达到阶段 1 准入要求。
+- 阶段 1：Rust/Swift 全量测试、代理故障注入、隔离 launchd 生命周期、`git diff --check`、构建与打包通过；`detect_changes()` 只显示预期符号和流程。
+- 阶段 2：受控 Release App 验证异常恢复、端口释放、无孤儿 SSH、非目标进程隔离及长时间无人值守；用户接受后才关闭计划。
+- 技术测试通过不等于真实无人值守验收通过；在用户验收前计划保持“实施中”，下一动作记录为等待验收。
+
+## 最近记录
+
+| 日期 | 类型 | 记录 | 状态 |
+|---|---|---|---|
+| 2026-09-15 | 需求 | 用户要求无人值守异常自动恢复并清理孤儿 SSH | 已登记 |
+| 2026-09-15 | 基线 | 发现日志代理 I/O 错误路径未显式回收子 SSH；launchd 顶层 PID 已由 SSH 变为代理；Bundle 路径需验证稳定性 | 待独立复核 |
+| 2026-09-15 | 隔离复现 | 使用临时非 TunnelPad 作业对当前 Release 代理发送 SIGKILL：代理 PGID 与 SSH PGID 不同，代理退出后 SSH 仍存活并被 1 号进程接管；已立即按 PID 清理测试进程 | 已确认 O5 缺口 |
+| 2026-09-15 | 独立复核 | 首轮未准入；补齐 O2–O7 可执行入口、隔离输出和 O8 阶段边界 | 已闭合 |
+| 2026-09-16 | 独立复核 | 修订后的 Step 0、O1–O7 基线和 O8 后移边界通过；阶段 1 准入，实施必须守住进程树回收、身份 fail-closed、资源缺失不回退三条边界 | 通过 |
+| 2026-09-16 | 阶段 1 实施 | 日志代理统一清理 I/O/reader/信号路径；SSH 继承 launchd 作业组；加入代理/子 SSH 身份与 PGID 核验、稳定辅助程序路径和资源缺失 fail-closed；Rust 85 项、代理隔离 4 项、Swift 176 项通过，Release 构建通过；新包已平滑接管运行态 | [阶段 1 实施证据](../data-quality/tunnelpad-unattended-ssh-recovery-stage1-implementation-20260916.md)；实施中，待隔离 launchd 与真实验收 |
+
+## 阶段复核记录
+
+| 日期 | 类型 | 阶段 | 方式 | 风险 | 结论 | 证据 | 复核者 |
+|---|---|---|---|---|---|---|---|
+| 2026-09-16 | 准入复核 | 阶段 1 | 独立 | 高影响 | 通过：阶段 1 准入边界通过，进入实现 | [阶段 0 Step 0](../data-quality/tunnelpad-unattended-ssh-recovery-stage0-step0-20260915.md)；独立复核确认进程树回收、身份 fail-closed、资源缺失不回退 | 独立只读复核轮次 |
+| 2026-09-19 | 实现风险复核 | 阶段 1 | 独立 | 高影响 | 不通过：P1 身份授权放宽、持续输出掩盖子命令退出；停止/安装/诊断 P2 待修复；保持阶段 1 实施中 | [端到端风险复核](../reviews/tunnelpad-unattended-end-to-end-review-20260919.md)，尤其 R3/R7–R10/R13 与测试证据限制；本轮未重新构建、未启停真实 App/隧道 | Banach（独立生命周期审核）；Codex 综合核对 |
+
+### 最新阶段复核
+
+| 字段 | 内容 |
+|---|---|
+| 日期 | 2026-09-19 |
+| 阶段 | 阶段 1 |
+| 方式 | 独立 |
+| 风险 | 高影响 |
+| 风险依据 | 共享 launchd/SSH 生命周期、进程组信号和身份授权；本轮持续输出、先关管道、延迟 TERM 与代理假稳定反证否定了部分原自验覆盖 |
+| 结论 | 不通过：P1 身份授权放宽、持续输出掩盖子命令退出；停止/安装/诊断 P2 待修复；保持阶段 1 实施中 |
+| 证据 | [端到端风险复核](../reviews/tunnelpad-unattended-end-to-end-review-20260919.md)，尤其 R3/R7–R10/R13 与测试证据限制；本轮未重新构建、未启停真实 App/隧道 |
+| 复核者 | Banach（独立生命周期审核）；Codex 综合核对 |

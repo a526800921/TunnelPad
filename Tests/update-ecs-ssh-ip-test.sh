@@ -220,13 +220,23 @@ assert_eq 2 "$RC" '缺少 profile 配置应返回 2'
 assert_eq 0 "$(wc -l <"$CALL_LOG" | tr -d ' ')" '配置错误不得调用外部命令'
 printf '%s\n' 'PASS missing-profile-config'
 
+prepare_case check-current
+write_state "{\"Permissions\":{\"Permission\":[$current_rule]}}"
+run_update --check
+assert_eq 0 "$RC" '--check 当前规则应只读成功'
+assert_eq 1 "$(count_calls DescribeSecurityGroupAttribute)" '--check 当前规则应只读取一次'
+assert_eq 0 "$(count_calls AuthorizeSecurityGroup)" '--check 当前规则不应新增'
+assert_eq 0 "$(count_calls RevokeSecurityGroup)" '--check 当前规则不应撤销'
+printf '%s\n' 'PASS check-only-current'
+
 prepare_case check-only
 write_state "{\"Permissions\":{\"Permission\":[$old_rule]}}"
 run_update --check
-assert_eq 0 "$RC" '--check 应只读成功'
+assert_eq 4 "$RC" '--check 发现旧规则应报告公网 IP 漂移'
 assert_eq 1 "$(count_calls DescribeSecurityGroupAttribute)" '--check 应只读取一次'
 assert_eq 0 "$(count_calls AuthorizeSecurityGroup)" '--check 不应新增'
 assert_eq 0 "$(count_calls RevokeSecurityGroup)" '--check 不应撤销'
-printf '%s\n' 'PASS check-only'
+assert_contains "$OUTPUT" 'ip_drift' '--check 应返回稳定的漂移错误码'
+printf '%s\n' 'PASS check-only-drift'
 
 printf '%s\n' '全部 update-ecs-ssh-ip fixture 测试通过。'

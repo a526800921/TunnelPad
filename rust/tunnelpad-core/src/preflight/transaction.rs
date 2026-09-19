@@ -242,6 +242,18 @@ fn validate(j: &Journal, c: &Config, rules: &[Value]) -> Result<Option<Value>> {
     }
     Ok(new)
 }
+fn check_current_rule(rules: &[Value], desired: &str) -> Result<()> {
+    if rules.len() > 1 {
+        return Err(unsafe_rules());
+    }
+    if rules
+        .first()
+        .is_some_and(|rule| field(rule, "SourceCidrIp") == desired)
+    {
+        return Ok(());
+    }
+    Err(Failure::new(4, "unknown", "ip_drift"))
+}
 fn resume(
     c: &Config,
     j: &mut Journal,
@@ -370,8 +382,8 @@ pub(super) fn sync(c: &Config, check: bool, parent: i32, deadline: Instant) -> R
         if check {
             if let Some(j) = pending {
                 validate(&j, c, &rules)?;
-            } else if rules.len() > 1 {
-                return Err(unsafe_rules());
+            } else {
+                check_current_rule(&rules, &desired)?;
             }
             return Ok(());
         }
@@ -427,5 +439,29 @@ mod tests {
         let f = classify(b"{\"Code\":\"Forbidden.RAM\",\"Message\":\"SECRET\"}", 4);
         assert_eq!(f.category, "auth");
         assert!(!serde_json::to_string(&f).unwrap().contains("SECRET"));
+    }
+    #[test]
+    fn check_current_rule_rejects_ip_drift_without_writing() {
+        let stale = serde_json::json!({
+            "Description": DESCRIPTION,
+            "Direction": "ingress",
+            "IpProtocol": "TCP",
+            "PortRange": "22/22",
+            "Policy": "Accept",
+            "NicType": "intranet",
+            "SourceCidrIp": "45.67.89.100/32",
+            "SecurityGroupRuleId": "sgr-stale"
+        });
+        let error = check_current_rule(&[stale], "45.67.89.101/32").unwrap_err();
+        assert_eq!(error.exit_code, 4);
+        assert_eq!(error.sanitized_code, "ip_drift");
+    }
+
+    #[test]
+    fn check_current_rule_accepts_current_rule_and_rejects_missing_rule() {
+        let current = serde_json::json!({"SourceCidrIp": "45.67.89.101/32"});
+        assert!(check_current_rule(&[current], "45.67.89.101/32").is_ok());
+        let error = check_current_rule(&[], "45.67.89.101/32").unwrap_err();
+        assert_eq!(error.sanitized_code, "ip_drift");
     }
 }

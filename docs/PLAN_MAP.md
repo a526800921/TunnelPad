@@ -45,6 +45,8 @@
 
 | 计划 | 状态 | 当前阶段 | 最后更新 | 依赖 | 证据 |
 |---|---|---|---|---|---|
+| [TunnelPad 无人值守 SSH 异常恢复与孤儿清理](plans/tunnelpad-unattended-ssh-recovery-and-orphan-cleanup.md) | 实施中 | 阶段 1 | 2026-09-19 | tunnelpad-unattended-launch-recovery, tunnelpad-unattended-managed-ssh-recovery, tunnelpad-log-write-amplification | [专项计划](plans/tunnelpad-unattended-ssh-recovery-and-orphan-cleanup.md)；[阶段 0 Step 0](data-quality/tunnelpad-unattended-ssh-recovery-stage0-step0-20260915.md)；[阶段 1 历史实施证据](data-quality/tunnelpad-unattended-ssh-recovery-stage1-implementation-20260916.md)；[端到端复核不通过](reviews/tunnelpad-unattended-end-to-end-review-20260919.md)，身份与代理回收缺陷待修复 |
+| [TunnelPad 无人值守 ECS 公网 IP 漂移同步与断线恢复](plans/tunnelpad-unattended-ecs-ip-drift-recovery.md) | 实施中 | 阶段 1 | 2026-09-19 | ecs-dynamic-ssh-ip, tunnelpad-launch-autostart, tunnelpad-unattended-ssh-recovery-and-orphan-cleanup | [专项计划](plans/tunnelpad-unattended-ecs-ip-drift-recovery.md)；[端到端复核不通过](reviews/tunnelpad-unattended-end-to-end-review-20260919.md)；新增[持续恢复硬性契约](plans/tunnelpad-unattended-ecs-ip-drift-recovery.md#持续恢复硬性契约)及 D10–D12：失败不得自行停止，条件恢复自动续跑；修复复核和阶段 2 长时验收仍待完成 |
 
 ### 已完成
 
@@ -82,11 +84,13 @@
 2. 日志与资源开销变更按[日志事件流](plans/tunnelpad-log-streaming.md)、[保留回归修复](plans/tunnelpad-log-retention-energy-regression.md)、[低写放大](plans/tunnelpad-log-write-amplification.md)的演进关系读取；能耗验收以[后台健康监测](plans/tunnelpad-health-monitor-energy.md)的最新有效证据为入口。
 3. 云端前置与本机 API 分别归属 [ECS 动态 SSH IP](plans/ecs-dynamic-ssh-ip.md)和[本机 HTTP API](plans/tunnelpad-local-api.md)；后续能力按各自非目标、授权与外部边界判断。
 4. 界面和配置展示复用 [v1](plans/tunnelpad-v1.md)、[界面优化](plans/tunnelpad-ui-refinements.md)、[代码质量重构](plans/tunnelpad-code-quality-refactor.md)和[隧道备注](plans/tunnelpad-tunnel-remarks.md)。共享模块编辑仍须串行；具体影响、字段与验证从专项计划读取。
+5. 无人值守 SSH 进程树、launchd 身份和孤儿清理按[异常恢复与孤儿清理](plans/tunnelpad-unattended-ssh-recovery-and-orphan-cleanup.md)执行；在阶段 0 独立准入前不修改共享生命周期代码。
 
 ## 依赖关系
 
 | 计划 | 依赖 | 原因 |
 |---|---|---|
+| tunnelpad-unattended-ssh-recovery-and-orphan-cleanup | tunnelpad-unattended-launch-recovery, tunnelpad-unattended-managed-ssh-recovery, tunnelpad-log-write-amplification | 在已完成的无人值守退避、受管 SSH 收敛和日志写入边界上，补齐日志代理引入的两级进程树所有权、I/O 失败清理、launchd 身份对齐和重复启动防护；共享生命周期文件必须串行编辑。 |
 | tunnelpad-unattended-launch-recovery | tunnelpad-launch-autostart, tunnelpad-unattended-managed-ssh-recovery, ecs-dynamic-ssh-ip, tunnelpad-health-monitor-energy, tunnelpad-rust-migration | 承接首次启动失败的持续限频恢复，复用 autoStart、既有健康恢复所有权、ECS fail-closed 和能耗边界；追加严格自动启动命令及同版打包前置监督，不重开历史完成阶段。 |
 | tunnelpad-launch-autostart | tunnelpad-stability, tunnelpad-rust-migration, ecs-dynamic-ssh-ip, tunnelpad-health-monitor-energy | 恢复入口复用已完成的首轮状态发现/busy 保护/CfgR 不变量与 Rust 配置 owner 边界；SSH 隧道恢复沿用 ECS 前置同步 fail-closed；启动期不做重试循环沿用能耗计划的边界；四计划均已完成，阶段 3 实施与共享生命周期文件编辑需保持单一编辑窗口。 |
 | tunnelpad-v1 | - | - |
@@ -116,6 +120,9 @@
 
 | 问题 | 推荐方案 | 影响范围 | 是否阻塞当前阶段 | 状态 |
 |---|---|---|---|---|
+| 端到端恢复与云端同步 P1 | 按[最新评审](reviews/tunnelpad-unattended-end-to-end-review-20260919.md)修复恢复所有权、事件丢失、假稳定、启动观察死路及云端探测/完整规则属性，再独立复核 | [TunnelPad 无人值守 ECS 公网 IP 漂移同步与断线恢复](plans/tunnelpad-unattended-ecs-ip-drift-recovery.md) | 是 | 未解决 |
+| 受管身份和代理进程回收 P1 | 修复[最新评审 R7/R8](reviews/tunnelpad-unattended-end-to-end-review-20260919.md)，补先关管道、持续输出、外部替换 label 和共享部署反证 | [TunnelPad 无人值守 SSH 异常恢复与孤儿清理](plans/tunnelpad-unattended-ssh-recovery-and-orphan-cleanup.md) | 是 | 未解决 |
+| 阶段 2 真实无人值守证据 | 补充多隧道共享 ECS、pending journal、错误规则属性、延迟/忽略 `SIGTERM`、真实 `18080` 冲突和长时漂移样本 | [TunnelPad 无人值守 ECS 公网 IP 漂移同步与断线恢复](plans/tunnelpad-unattended-ecs-ip-drift-recovery.md) | 是 | 未解决 |
 | 可执行基线与错误分类 | [阶段 0 基线](data-quality/tunnelpad-unattended-launch-recovery-stage0-step0-20260912.md)已通过，分类契约已收敛 | tunnelpad-unattended-launch-recovery | 否 | 已完成 |
 | 退避与全局并发初值 | [新计划](plans/tunnelpad-unattended-launch-recovery.md)已冻结初值，运行性能由后续阶段验收 | tunnelpad-unattended-launch-recovery | 否 | 已完成 |
 | 阶段 0 独立设计准入 | [独立复核已通过](data-quality/tunnelpad-unattended-launch-recovery-stage0-independent-review-20260912.md) | tunnelpad-unattended-launch-recovery | 否 | 已完成 |

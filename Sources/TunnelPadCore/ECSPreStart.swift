@@ -261,7 +261,14 @@ protocol LaunchPreflightChecking: ECSPreStartChecking {
     func checkLaunch(tunnel: TunnelConfig, timeout: TimeInterval) async throws -> LaunchPreflightResult
 }
 
-extension ECSPreStartChecker: LaunchPreflightChecking {
+/// 只读检查 ECS 受管 SSH `/32` 是否仍与当前公网 IP 一致。
+/// 与启动前的同步能力分离，避免后台漂移检查误走写入路径；只有确认漂移后，
+/// TunnelManager 才会进入已有的 bootout → 同步 → start 恢复链。
+protocol ECSIPDriftChecking: Sendable {
+    func checkCurrentState(tunnel: TunnelConfig, timeout: TimeInterval) async throws -> LaunchPreflightResult
+}
+
+extension ECSPreStartChecker: LaunchPreflightChecking, ECSIPDriftChecking {
     func launchResource() async throws -> String {
         let result = try await launchInvocation(arguments: ["--resource"], timeout: 5)
         struct Resource: Decodable { let version: Int; let resource: String }
@@ -277,6 +284,18 @@ extension ECSPreStartChecker: LaunchPreflightChecking {
             return LaunchPreflightResult(version: 1, stage: "complete", category: .success, retryHint: 0, sanitizedCode: "not_required", exitCode: 0)
         }
         let result = try await launchInvocation(arguments: ["--result-json"], timeout: min(30, timeout))
+        return decodeLaunchResult(result)
+    }
+
+    func checkCurrentState(tunnel: TunnelConfig, timeout: TimeInterval) async throws -> LaunchPreflightResult {
+        guard SSHCommand.isSSH(tunnel.command) else {
+            return LaunchPreflightResult(version: 1, stage: "complete", category: .success, retryHint: 0, sanitizedCode: "not_required", exitCode: 0)
+        }
+        let result = try await launchInvocation(arguments: ["--check", "--result-json"], timeout: min(30, timeout))
+        return decodeLaunchResult(result)
+    }
+
+    private func decodeLaunchResult(_ result: ProcessResult) -> LaunchPreflightResult {
         guard let data = result.stdout.data(using: .utf8),
               let decoded = try? JSONDecoder().decode(LaunchPreflightResult.self, from: data),
               decoded.version == 1, decoded.exitCode == Int(result.exitCode) else {

@@ -51,6 +51,39 @@ final class ECSPreStartIntegrationTests: XCTestCase {
         XCTAssertNil(manager.lastError)
     }
 
+    func testReadOnlyIPDriftCheckUsesCheckMode() async throws {
+        let scriptURL = temporaryScriptURL()
+        defer { try? FileManager.default.removeItem(at: scriptURL) }
+        try Data("#!/bin/bash\nexit 0\n".utf8).write(to: scriptURL)
+
+        let runner = RecordingPreflightRunner(result: ProcessResult(
+            exitCode: 4,
+            stdout: "{\"version\":1,\"stage\":\"read\",\"category\":\"unknown\",\"retryHint\":300,\"sanitizedCode\":\"ip_drift\",\"exitCode\":4}\n"
+        ))
+        let checker = ECSPreStartChecker(
+            scriptURL: scriptURL,
+            runner: runner,
+            environment: [:],
+            timeout: 1
+        )
+        let tunnel = TunnelConfig(
+            id: "drift-check",
+            name: "Drift check",
+            command: ["/usr/bin/ssh", "-N", "example"]
+        )
+
+        let result = try await checker.checkCurrentState(tunnel: tunnel, timeout: 1)
+
+        XCTAssertEqual(result.sanitizedCode, "ip_drift")
+        XCTAssertEqual(result.exitCode, 4)
+        XCTAssertEqual(runner.asyncCalls.count, 1)
+        XCTAssertEqual(
+            runner.asyncCalls[0].arguments,
+            [scriptURL.path, "--check", "--result-json"],
+            "后台漂移检查必须走只读 --check，不得误走同步写入路径"
+        )
+    }
+
     @MainActor
     func testSSHStartFailureDoesNotCreateRustOperation() {
         let order = OrderLog()

@@ -23,6 +23,7 @@ public final class TunnelManager: ObservableObject {
     private var runtimeState = TunnelRuntimeState()
     private var probeTask: Task<Void, Never>?
     private var healthMonitorTask: Task<Void, Never>?
+    private var launchdFailureMonitorTask: Task<Void, Never>?
     private var probeGeneration: UInt = 0
     /// 所有异步状态快照共享请求代次；较旧的后台/手动读取不能覆盖较新的读取。
     private var stateReadGeneration: UInt = 0
@@ -46,8 +47,20 @@ public final class TunnelManager: ObservableObject {
     /// 等过渡态；不恢复全局定时 snapshot。
     private static let lifecycleStatusSettleAttempts = 30
     private static let lifecycleStatusSettleDelayNanoseconds: UInt64 = 100_000_000
+    private static let defaultLaunchdFailureMonitorIntervalNanoseconds: UInt64 = 1_000_000_000
+    private static let launchdRecoveryStableSampleCount = 3
     private let healthMonitorIntervalNanoseconds: UInt64
+    private let launchdFailureMonitorIntervalNanoseconds: UInt64
     private let healthSleep: @Sendable (UInt64) async throws -> Void
+    private struct LaunchdFailureObservation: Sendable {
+        var isHealthy: Bool
+        var pid: Int32?
+        var healthySampleCount: Int
+    }
+    private var launchdFailureObservations: [String: LaunchdFailureObservation] = [:]
+    /// launchd 报告 running 不能证明 SSH 已建立；直接故障恢复后必须观察到
+    /// 连续稳定的 PID，才清除本轮恢复计数。
+    private var launchdRecoveryAwaitingStability: Set<String> = []
     private let launchRestoreDiscoveryAttempts: Int
     private let launchRestoreDiscoveryPollNanoseconds: UInt64
     private let appEventLog: AppEventLog
@@ -93,6 +106,7 @@ public final class TunnelManager: ObservableObject {
         preStartChecker: any ECSPreStartChecking,
         probeService: ProbeService = ProbeService(),
         healthMonitorIntervalNanoseconds: UInt64 = HealthRecoveryPolicy.monitorIntervalNanoseconds,
+        launchdFailureMonitorIntervalNanoseconds: UInt64 = TunnelManager.defaultLaunchdFailureMonitorIntervalNanoseconds,
         healthSleep: @escaping @Sendable (UInt64) async throws -> Void = { nanoseconds in
             try await Task.sleep(nanoseconds: nanoseconds)
         },
@@ -108,6 +122,7 @@ public final class TunnelManager: ObservableObject {
         self.rustCore = rustCore
         self.preStartChecker = preStartChecker
         self.healthMonitorIntervalNanoseconds = healthMonitorIntervalNanoseconds
+        self.launchdFailureMonitorIntervalNanoseconds = launchdFailureMonitorIntervalNanoseconds
         self.healthSleep = healthSleep
         self.launchRestoreDiscoveryAttempts = launchRestoreDiscoveryAttempts
         self.launchRestoreDiscoveryPollNanoseconds = launchRestoreDiscoveryPollNanoseconds
@@ -130,11 +145,13 @@ public final class TunnelManager: ObservableObject {
             await logStore.sync(tunnelIDs: initialIDs)
         }
         startHealthMonitoring()
+        startLaunchdFailureMonitoring()
     }
 
     deinit {
         probeTask?.cancel()
         healthMonitorTask?.cancel()
+        launchdFailureMonitorTask?.cancel()
         recoveryTasks.values.forEach { $0.cancel() }
     }
 
@@ -227,6 +244,8 @@ public final class TunnelManager: ObservableObject {
             }
             config = nextConfig
             if old != tunnel {
+                launchdFailureObservations.removeValue(forKey: tunnel.id)
+                launchdRecoveryAwaitingStability.remove(tunnel.id)
                 healthRecoveryStates.removeValue(forKey: tunnel.id)
             }
             if tunnel.probe == nil {
@@ -290,6 +309,11 @@ public final class TunnelManager: ObservableObject {
             self.updateRuntime { $0.setStatus(status, for: tunnel.id) }
             self.resetHealthRecovery(for: tunnel.id, phase: .monitoring)
             self.appEventLog.write("自动拉起「\(tunnel.name)」已确认运行；交接健康监测")
+            // 已经处于 running 的 launchd 实例会在启动恢复中早退；交接后补做一次
+            // 只读 ECS 复核，避免已有实例绕过连接建立前的公网 IP 前置。
+            Task { [weak self] in
+                await self?.runInitialIPDriftCheck()
+            }
         }, report: { [weak self] tunnel, category, count in
             self?.appEventLog.write("自动拉起「\(tunnel.name)」等待重试：\(category.rawValue)，累计 \(count) 次")
         })
@@ -530,6 +554,7 @@ public final class TunnelManager: ObservableObject {
         for id in changedIDs {
             if let old = oldByID[id], nextByID[id].map({ old.matchesLaunchRuntime($0) }) != true { cancelLaunchRecovery(id) }
             cancelRecovery(for: id)
+            launchdFailureObservations.removeValue(forKey: id)
             healthRecoveryStates.removeValue(forKey: id)
         }
         if !changedIDs.isEmpty {
@@ -608,6 +633,212 @@ public final class TunnelManager: ObservableObject {
         HealthMonitorSchedule(
             intervalNanoseconds: healthMonitorIntervalNanoseconds,
             sleep: healthSleep
+        )
+    }
+
+    /// 观察受管 SSH 的 launchd 生命周期。连接断开、实例退出或 PID 变化都
+    /// 立即进入同一条 bootout-first → ECS 前置 → start 恢复链；不让 KeepAlive
+    /// 先用旧规则反复重连，再等待另一个低频任务发现漂移。
+    private func startLaunchdFailureMonitoring() {
+        guard preStartChecker is any ECSIPDriftChecking,
+              rustCore is any RustHealthStatusReader else { return }
+        launchdFailureMonitorTask?.cancel()
+        launchdFailureMonitorTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                do {
+                    try await self.healthSleep(self.launchdFailureMonitorIntervalNanoseconds)
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else { return }
+                await self.runLaunchdFailureCycle()
+            }
+        }
+    }
+
+    private func runLaunchdFailureCycle() async {
+        guard !Task.isCancelled, !isShuttingDown,
+              let reader = rustCore as? any RustHealthStatusReader else { return }
+        let candidates = config.tunnels.filter {
+            $0.autoStart && $0.keepAlive && SSHCommand.isSSH($0.command)
+        }
+        for candidate in candidates {
+            let id = candidate.id
+            guard !Task.isCancelled, !isShuttingDown,
+                  !busyIDs.contains(id), !launchRecoveryIDs.contains(id),
+                  recoveryTasks[id] == nil else { continue }
+            let status: TunnelStatus
+            do {
+                status = try await Task.detached(priority: .utility) {
+                    try reader.status(id: id)
+                }.value
+            } catch {
+                // 状态不确定时不推断抖动，也不执行 bootout 或同步。
+                continue
+            }
+            guard !Task.isCancelled, !isShuttingDown,
+                  self.tunnel(id: id)?.matchesLaunchRuntime(candidate) == true else { return }
+            updateRuntime { $0.setStatus(status, for: id) }
+            observeLaunchdFailure(for: candidate, status: status)
+        }
+    }
+
+    private func observeLaunchdFailure(for tunnel: TunnelConfig, status: TunnelStatus) {
+        guard healthRecoveryStates[tunnel.id]?.phase != .manuallyStopped else {
+            launchdFailureObservations.removeValue(forKey: tunnel.id)
+            launchdRecoveryAwaitingStability.remove(tunnel.id)
+            return
+        }
+        let id = tunnel.id
+        let currentPID: Int32?
+        let isHealthy: Bool
+        if case .running(let pid?) = status, pid > 0 {
+            currentPID = pid
+            isHealthy = true
+        } else {
+            currentPID = nil
+            isHealthy = false
+        }
+
+        if let previous = launchdFailureObservations[id] {
+            let didChange = previous.isHealthy != isHealthy || previous.pid != currentPID
+            let sameHealthyPID = previous.isHealthy && isHealthy && previous.pid == currentPID
+            let healthySampleCount = sameHealthyPID ? previous.healthySampleCount + 1 : (isHealthy ? 1 : 0)
+            launchdFailureObservations[id] = LaunchdFailureObservation(
+                isHealthy: isHealthy,
+                pid: currentPID,
+                healthySampleCount: healthySampleCount
+            )
+
+            if isHealthy,
+               launchdRecoveryAwaitingStability.contains(id),
+               healthySampleCount >= Self.launchdRecoveryStableSampleCount {
+                launchdRecoveryAwaitingStability.remove(id)
+                var state = healthRecoveryStates[id] ?? HealthRecoveryState()
+                _ = state.finishRecovery(success: true)
+                healthRecoveryStates[id] = state
+                appEventLog.write("「\(tunnel.name)」SSH 已稳定，自动恢复计数已清除")
+            }
+
+            // 从非健康回到 running 是恢复观察，不是新的故障；只有再次退出或
+            // PID 再次变化，才启动下一轮 bootout-first 恢复。
+            guard didChange, (!isHealthy || (previous.isHealthy && isHealthy)) else { return }
+        } else {
+            launchdFailureObservations[id] = LaunchdFailureObservation(
+                isHealthy: isHealthy,
+                pid: currentPID,
+                healthySampleCount: isHealthy ? 1 : 0
+            )
+            // 第一次观察到非健康状态也必须恢复：启动后如果 KeepAlive 已经在
+            // 抖动，不能要求先积累三次 PID 变化。
+            guard !isHealthy else { return }
+        }
+
+        launchdFailureObservations.removeValue(forKey: id)
+        triggerAutomaticRecovery(
+            for: tunnel,
+            reason: "SSH 连接异常（launchd 状态或 PID 发生变化）",
+            delayOverrideNanoseconds: 0,
+            allowNotRunning: true
+        )
+    }
+
+    /// 启动交接时只做一次只读 ECS 复核；运行期间的主触发来自 launchd
+    /// 生命周期异常，恢复链中的 `checkAsync` 会在重新启动前完成同步。
+    private func runInitialIPDriftCheck() async {
+        guard !Task.isCancelled, !isShuttingDown,
+              let checker = preStartChecker as? any ECSIPDriftChecking,
+              let reader = rustCore as? any RustHealthStatusReader else { return }
+
+        let candidates = config.tunnels.filter {
+            $0.autoStart && $0.keepAlive && SSHCommand.isSSH($0.command)
+        }
+        for candidate in candidates {
+            let id = candidate.id
+            guard !Task.isCancelled, !isShuttingDown,
+                  !busyIDs.contains(id), !launchRecoveryIDs.contains(id),
+                  recoveryTasks[id] == nil else { continue }
+            let status: TunnelStatus
+            do {
+                status = try await Task.detached(priority: .utility) {
+                    try reader.status(id: id)
+                }.value
+            } catch {
+                // 无法确认当前是否运行时 fail-closed，不执行 ECS 写入或重启。
+                continue
+            }
+            guard !Task.isCancelled, !isShuttingDown,
+                  self.tunnel(id: id)?.matchesLaunchRuntime(candidate) == true else { return }
+            updateRuntime { $0.setStatus(status, for: id) }
+            guard isRunning(status), !busyIDs.contains(id), !launchRecoveryIDs.contains(id) else { continue }
+
+            do {
+                let result = try await checker.checkCurrentState(tunnel: candidate, timeout: 30)
+                guard !Task.isCancelled, !isShuttingDown,
+                      self.tunnel(id: id)?.matchesLaunchRuntime(candidate) == true else { return }
+                if result.sanitizedCode == "ip_drift" {
+                    triggerAutomaticRecovery(
+                        for: candidate,
+                        reason: "ECS SSH `/32` 漂移",
+                        delayOverrideNanoseconds: 0,
+                        allowNotRunning: false
+                    )
+                } else if result.exitCode != 0 {
+                    appEventLog.write("自动复核「\(candidate.name)」失败：\(result.sanitizedCode)")
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                appEventLog.write("自动复核「\(candidate.name)」异常：\(error)")
+            }
+        }
+    }
+
+    /// 把单次明确的无人值守故障映射为现有健康恢复状态机的阈值事件。
+    /// 已确认的 IP 漂移立即执行；launchd 故障的首次恢复立即执行，后续失败
+    /// 使用状态机退避，避免远端转发冲突等持久故障形成快速循环。
+    private func triggerAutomaticRecovery(
+        for tunnel: TunnelConfig,
+        reason: String,
+        delayOverrideNanoseconds: UInt64?,
+        allowNotRunning: Bool = false
+    ) {
+        let id = tunnel.id
+        guard recoveryTasks[id] == nil, !busyIDs.contains(id), !launchRecoveryIDs.contains(id),
+              self.tunnel(id: id)?.matchesLaunchRuntime(tunnel) == true else { return }
+        guard allowNotRunning || isRunning(statuses[id]) else { return }
+
+        var state = healthRecoveryStates[id] ?? HealthRecoveryState()
+        var action: HealthRecoveryState.Action = .observe
+        let statusForRecord = allowNotRunning && !isRunning(statuses[id])
+            ? TunnelStatus.running(pid: nil)
+            : statuses[id]
+        for _ in 0..<HealthRecoveryPolicy.failureThreshold {
+            action = state.record(
+                .failed(reason: reason),
+                status: statusForRecord,
+                keepAlive: tunnel.keepAlive
+            )
+        }
+        healthRecoveryStates[id] = state
+
+        guard case .schedule(let attempt, let delayNanoseconds) = action else { return }
+        if allowNotRunning {
+            launchdRecoveryAwaitingStability.insert(id)
+        }
+        let effectiveDelay: UInt64
+        if allowNotRunning, attempt > 1 {
+            effectiveDelay = delayNanoseconds
+        } else {
+            effectiveDelay = delayOverrideNanoseconds ?? delayNanoseconds
+        }
+        appEventLog.write("检测到「\(tunnel.name)」\(reason)，开始 bootout→同步→重启")
+        scheduleRecovery(
+            for: id,
+            tunnelName: tunnel.name,
+            attempt: attempt,
+            delayNanoseconds: effectiveDelay
         )
     }
 
@@ -897,10 +1128,14 @@ public final class TunnelManager: ObservableObject {
                 throw HealthRecoveryError.restartDidNotRun
             }
             updateRuntime { $0.setStatus(status, for: id) }
-            var state = healthRecoveryStates[id] ?? HealthRecoveryState()
-            _ = state.finishRecovery(success: true)
-            healthRecoveryStates[id] = state
-            lastMessage = "「\(tunnelName)」已自动恢复"
+            if launchdRecoveryAwaitingStability.contains(id) {
+                lastMessage = "「\(tunnelName)」已启动，等待 SSH 稳定"
+            } else {
+                var state = healthRecoveryStates[id] ?? HealthRecoveryState()
+                _ = state.finishRecovery(success: true)
+                healthRecoveryStates[id] = state
+                lastMessage = "「\(tunnelName)」已自动恢复"
+            }
         } catch is CancellationError {
             return
         } catch {
@@ -917,6 +1152,8 @@ public final class TunnelManager: ObservableObject {
         recoveryGenerations[id] = (recoveryGenerations[id] ?? 0) &+ 1
         recoveryTasks[id]?.cancel()
         recoveryTasks[id] = nil
+        launchdFailureObservations.removeValue(forKey: id)
+        launchdRecoveryAwaitingStability.remove(id)
     }
 
     private func beginStateRead() -> StateReadToken {
@@ -945,6 +1182,7 @@ public final class TunnelManager: ObservableObject {
 
     private func resetHealthRecovery(for id: String, phase: HealthRecoveryState.Phase) {
         cancelRecovery(for: id)
+        launchdFailureObservations.removeValue(forKey: id)
         var state = healthRecoveryStates[id] ?? HealthRecoveryState()
         switch phase {
         case .monitoring:
@@ -1216,12 +1454,15 @@ public final class TunnelManager: ObservableObject {
         invalidateStateReads()
         probeTask?.cancel()
         healthMonitorTask?.cancel()
+        launchdFailureMonitorTask?.cancel()
         let monitorTask = healthMonitorTask
+        let launchdFailureTask = launchdFailureMonitorTask
         let pendingRecoveryTasks = Array(recoveryTasks.values)
         pendingRecoveryTasks.forEach { $0.cancel() }
         recoveryTasks.removeAll()
         await healthProbeCoordinator.cancel()
         await monitorTask?.value
+        await launchdFailureTask?.value
         for task in pendingRecoveryTasks {
             await task.value
         }

@@ -54,6 +54,7 @@ pub enum ExecutorError {
 pub struct ProcessIdentity {
     pub pid: i32,
     pub uid: u32,
+    pub process_group_id: i32,
     pub start_time_micros: u128,
     pub executable_path: PathBuf,
 }
@@ -83,6 +84,12 @@ pub enum ProcessSignalError {
 /// 向已完成身份核验的 PID 发信号；测试用 fake 注入。
 pub trait ProcessSignaling: Send + Sync {
     fn send(&self, pid: i32, signal: i32) -> Result<(), ProcessSignalError>;
+
+    /// 向已核验的受管进程组发信号。默认实现只供旧 fake 兼容；真实
+    /// macOS 实现必须用负 PGID，避免把组清理误降级为单 PID 清理。
+    fn send_group(&self, process_group_id: i32, signal: i32) -> Result<(), ProcessSignalError> {
+        self.send(process_group_id, signal)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -203,6 +210,7 @@ impl ProcessIdentityReading for SystemProcessIdentityReader {
             return Ok(ProcessIdentity {
                 pid: info.pbi_pid as i32,
                 uid: info.pbi_uid,
+                process_group_id: info.pbi_pgid as i32,
                 start_time_micros: (info.pbi_start_tvsec as u128)
                     .saturating_mul(1_000_000)
                     .saturating_add(info.pbi_start_tvusec as u128),
@@ -226,6 +234,23 @@ impl ProcessSignaling for SystemProcessSignaler {
         // # Safety: libc::kill is called with a validated positive process id
         // and one of the private signal constants used by the state machine.
         let result = unsafe { libc::kill(pid, signal) };
+        if result == 0 {
+            return Ok(());
+        }
+        match std::io::Error::last_os_error().raw_os_error() {
+            Some(code) if code == libc::ESRCH => Err(ProcessSignalError::NotFound),
+            Some(code) if code == libc::EPERM || code == libc::EACCES => {
+                Err(ProcessSignalError::PermissionDenied)
+            }
+            _ => Err(ProcessSignalError::Unavailable),
+        }
+    }
+
+    fn send_group(&self, process_group_id: i32, signal: i32) -> Result<(), ProcessSignalError> {
+        if process_group_id <= 1 {
+            return Err(ProcessSignalError::Unavailable);
+        }
+        let result = unsafe { libc::kill(-process_group_id, signal) };
         if result == 0 {
             return Ok(());
         }
@@ -556,10 +581,14 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
             timeout.min(Duration::from_secs(2)),
         )?;
         let details = if result.exit_code != 0 {
-            (TunnelStatus::NotLoaded, None)
+            LaunchdStatusDetails {
+                status: TunnelStatus::NotLoaded,
+                pid: None,
+                program: None,
+            }
         } else {
             let details = parse_status_details(&result.stdout);
-            if details.0 == TunnelStatus::NotLoaded {
+            if details.status == TunnelStatus::NotLoaded {
                 return Err(ExecutorError::CommandFailed {
                     operation: "status".into(),
                     exit_code: 0,
@@ -568,8 +597,8 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
             }
             details
         };
-        self.remember_status(label, details.clone());
-        Ok(details.0)
+        self.remember_status(label, (details.status.clone(), details.pid));
+        Ok(details.status)
     }
 
     pub fn domain(&self) -> String {
@@ -659,7 +688,7 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
     /// 查询状态；供旧的非 checked 内部调用保持历史 fallback 语义。
     pub fn status(&self, label: &str) -> TunnelStatus {
         match self.status_details_checked(label) {
-            Ok((status, _)) => status,
+            Ok(details) => details.status,
             Err(error) if is_status_query_timeout(&error) => self
                 .cached_status(label)
                 .map(|(status, _)| status)
@@ -673,7 +702,8 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
     /// 查询状态并保留错误边界。健康恢复必须使用这个 checked 路径，不能
     /// 把 launchctl 超时折叠为普通状态。
     pub(crate) fn status_checked(&self, label: &str) -> Result<TunnelStatus, ExecutorError> {
-        self.status_details_checked(label).map(|(status, _)| status)
+        self.status_details_checked(label)
+            .map(|details| details.status)
     }
 
     /// 启动后的稳定状态读取。真实 launchd 允许短暂的 notLoaded/other
@@ -691,10 +721,7 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
         status
     }
 
-    fn status_details_checked(
-        &self,
-        label: &str,
-    ) -> Result<(TunnelStatus, Option<i32>), ExecutorError> {
+    fn status_details_checked(&self, label: &str) -> Result<LaunchdStatusDetails, ExecutorError> {
         match self.runner.run_with_timeout(
             Self::LAUNCHCTL_PATH,
             &["print".into(), format!("{}/{}", self.domain(), label)],
@@ -702,19 +729,23 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
         ) {
             Ok(result) if result.exit_code == 0 => {
                 let details = parse_status_details(&result.stdout);
-                if details.0 == TunnelStatus::NotLoaded {
+                if details.status == TunnelStatus::NotLoaded {
                     return Err(ExecutorError::CommandFailed {
                         operation: "status".into(),
                         exit_code: 0,
                         stderr: "无法解析 launchctl 状态".into(),
                     });
                 }
-                self.remember_status(label, details.clone());
+                self.remember_status(label, (details.status.clone(), details.pid));
                 Ok(details)
             }
             Ok(result) if is_not_found_message(&result.stderr, &result.stdout) => {
-                let details = (TunnelStatus::NotLoaded, None);
-                self.remember_status(label, details.clone());
+                let details = LaunchdStatusDetails {
+                    status: TunnelStatus::NotLoaded,
+                    pid: None,
+                    program: None,
+                };
+                self.remember_status(label, (details.status.clone(), details.pid));
                 Ok(details)
             }
             Ok(result) => Err(ExecutorError::CommandFailed {
@@ -753,16 +784,18 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
         if cancellation.is_cancelled() {
             return Err(ExecutorError::Cancelled);
         }
-        let (initial_status, pid) = match self.status_details_checked(label) {
-            Ok(details) => details,
+        let (initial_status, pid, program) = match self.status_details_checked(label) {
+            Ok(details) => (details.status, details.pid, details.program),
             Err(error) if is_status_query_timeout(&error) => {
-                self.cached_status(label).ok_or(error)?
+                let (status, pid) = self.cached_status(label).ok_or(error)?;
+                (status, pid, None)
             }
             Err(error) => return Err(error),
         };
         if initial_status == TunnelStatus::NotLoaded {
             return Ok(false);
         }
+        let executable_path = program.as_deref().unwrap_or(executable_path);
         let expected = match pid {
             Some(pid) => Some(self.capture_identity(pid, executable_path)?),
             None => None,
@@ -786,13 +819,18 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
             });
         };
 
-        for (signal, wait_ms) in [
-            (SIGCONT_SIGNAL, MANAGED_STOP_CONT_WAIT_MS),
-            (SIGTERM_SIGNAL, MANAGED_STOP_TERM_WAIT_MS),
-            (SIGKILL_SIGNAL, MANAGED_STOP_KILL_WAIT_MS),
+        for (signal, wait_ms, group_signal) in [
+            (SIGCONT_SIGNAL, MANAGED_STOP_CONT_WAIT_MS, false),
+            (SIGTERM_SIGNAL, MANAGED_STOP_TERM_WAIT_MS, false),
+            (SIGKILL_SIGNAL, MANAGED_STOP_KILL_WAIT_MS, true),
         ] {
             self.verify_identity(label, expected, executable_path, cancellation)?;
-            match self.signaler.send(expected.pid, signal) {
+            let result = if group_signal {
+                self.signaler.send_group(expected.process_group_id, signal)
+            } else {
+                self.signaler.send(expected.pid, signal)
+            };
+            match result {
                 Ok(()) | Err(ProcessSignalError::NotFound) => {}
                 Err(ProcessSignalError::PermissionDenied | ProcessSignalError::Unavailable) => {
                     return Err(ExecutorError::ManagedProcessSignalFailed {
@@ -852,6 +890,7 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
         })?;
         if identity.pid != pid
             || identity.uid != self.uid
+            || identity.process_group_id != identity.pid
             || identity.executable_path != executable_path
         {
             return Err(ExecutorError::ManagedProcessIdentityUnknown {
@@ -872,8 +911,10 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
             return Err(ExecutorError::Cancelled);
         }
         match self.status_details_checked(label) {
-            Ok((status, pid)) => {
-                if matches!(status, TunnelStatus::NotLoaded) || pid != Some(expected.pid) {
+            Ok(details) => {
+                if matches!(details.status, TunnelStatus::NotLoaded)
+                    || details.pid != Some(expected.pid)
+                {
                     return Err(ExecutorError::ManagedProcessIdentityUnknown {
                         stage: "信号前 launchd 身份变化".into(),
                     });
@@ -914,8 +955,8 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
                 return Err(ExecutorError::Cancelled);
             }
             match self.status_details_checked(label) {
-                Ok((status, pid)) => {
-                    if status == TunnelStatus::NotLoaded {
+                Ok(details) => {
+                    if details.status == TunnelStatus::NotLoaded {
                         let Some(expected) = expected else {
                             return Ok(true);
                         };
@@ -933,7 +974,7 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
                             }
                         }
                     } else if let Some(expected) = expected {
-                        if pid != Some(expected.pid) {
+                        if details.pid != Some(expected.pid) {
                             return Err(ExecutorError::ManagedProcessIdentityUnknown {
                                 stage: "等待收敛时 launchd PID 变化".into(),
                             });
@@ -1000,12 +1041,20 @@ fn path_display(path: &Path) -> String {
 
 /// 解析 `launchctl print` 输出。只看顶层字段（单制表符缩进），忽略嵌套块。
 pub fn parse_status(stdout: &str) -> TunnelStatus {
-    parse_status_details(stdout).0
+    parse_status_details(stdout).status
 }
 
-fn parse_status_details(stdout: &str) -> (TunnelStatus, Option<i32>) {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LaunchdStatusDetails {
+    status: TunnelStatus,
+    pid: Option<i32>,
+    program: Option<PathBuf>,
+}
+
+fn parse_status_details(stdout: &str) -> LaunchdStatusDetails {
     let mut state: Option<String> = None;
     let mut pid: Option<i32> = None;
+    let mut program: Option<PathBuf> = None;
 
     for line in stdout.split('\n').filter(|l| !l.is_empty()) {
         if leading_tab_count(line) != 1 {
@@ -1025,6 +1074,11 @@ fn parse_status_details(stdout: &str) -> (TunnelStatus, Option<i32>) {
                 }
             }
         }
+        if program.is_none() {
+            if let Some(value) = top_level_value("program", trimmed) {
+                program = Some(PathBuf::from(value));
+            }
+        }
     }
 
     let status = match state.as_deref() {
@@ -1035,7 +1089,11 @@ fn parse_status_details(stdout: &str) -> (TunnelStatus, Option<i32>) {
         },
         None => TunnelStatus::NotLoaded,
     };
-    (status, pid)
+    LaunchdStatusDetails {
+        status,
+        pid,
+        program,
+    }
 }
 
 fn signal_name(signal: i32) -> &'static str {
@@ -1144,11 +1202,20 @@ mod tests {
     #[derive(Clone, Default)]
     struct Signaler {
         signals: Arc<Mutex<Vec<(i32, i32)>>>,
+        group_signals: Arc<Mutex<Vec<(i32, i32)>>>,
     }
 
     impl ProcessSignaling for Signaler {
         fn send(&self, pid: i32, signal: i32) -> Result<(), ProcessSignalError> {
             self.signals.lock().unwrap().push((pid, signal));
+            Ok(())
+        }
+
+        fn send_group(&self, process_group_id: i32, signal: i32) -> Result<(), ProcessSignalError> {
+            self.group_signals
+                .lock()
+                .unwrap()
+                .push((process_group_id, signal));
             Ok(())
         }
     }
@@ -1177,9 +1244,23 @@ mod tests {
         ProcessIdentity {
             pid,
             uid: 501,
+            process_group_id: pid,
             start_time_micros: 123,
             executable_path: PathBuf::from("/usr/bin/ssh"),
         }
+    }
+
+    #[test]
+    fn parse_status_captures_top_level_program_for_managed_identity() {
+        let details = parse_status_details(
+            "\tstate = running\n\tpid = 7\n\tprogram = /tmp/tunnelpad-log-proxy\n\t\tstate = nested\n",
+        );
+        assert_eq!(details.status, TunnelStatus::Running { pid: Some(7) });
+        assert_eq!(details.pid, Some(7));
+        assert_eq!(
+            details.program,
+            Some(PathBuf::from("/tmp/tunnelpad-log-proxy"))
+        );
     }
 
     #[test]
@@ -1531,11 +1612,11 @@ mod tests {
         assert!(stopped);
         assert_eq!(
             signaler.signals.lock().unwrap().as_slice(),
-            &[
-                (7, SIGCONT_SIGNAL),
-                (7, SIGTERM_SIGNAL),
-                (7, SIGKILL_SIGNAL),
-            ]
+            &[(7, SIGCONT_SIGNAL), (7, SIGTERM_SIGNAL)]
+        );
+        assert_eq!(
+            signaler.group_signals.lock().unwrap().as_slice(),
+            &[(7, SIGKILL_SIGNAL)]
         );
     }
 

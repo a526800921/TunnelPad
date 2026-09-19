@@ -71,6 +71,11 @@ mkdir -p "$APP_BUNDLE/Contents/Frameworks"
 
 # Step 5: 复制二进制与 Rust 动态库
 BINARY_SRC="$PROJECT_ROOT/.build/$BUILD_TRIPLE/release/$EXECUTABLE_NAME"
+if [ ! -f "$BINARY_SRC" ]; then
+    # 新版 SwiftPM/Xcode 把产品放在 .build/out/Products/Release。
+    BINARY_SRC="$PROJECT_ROOT/.build/out/Products/Release/$EXECUTABLE_NAME"
+fi
+test -f "$BINARY_SRC"
 cp "$BINARY_SRC" "$APP_BUNDLE/Contents/MacOS/"
 chmod +x "$APP_BUNDLE/Contents/MacOS/$EXECUTABLE_NAME"
 echo "  ✓ 二进制: $BINARY_SRC → Contents/MacOS/"
@@ -87,7 +92,9 @@ cp "$PROJECT_ROOT/scripts/update-ecs-ssh-ip" "$APP_BUNDLE/Contents/Resources/upd
 chmod +x "$APP_BUNDLE/Contents/Resources/update-ecs-ssh-ip"
 cp "$PROJECT_ROOT/rust/target/release/tunnelpad-preflight" "$APP_BUNDLE/Contents/Resources/tunnelpad-preflight"
 chmod +x "$APP_BUNDLE/Contents/Resources/tunnelpad-preflight"
-echo "  ✓ ECS SSH 公网 IP 同步脚本"
+cp "$PROJECT_ROOT/rust/target/release/tunnelpad-log-proxy" "$APP_BUNDLE/Contents/Resources/tunnelpad-log-proxy"
+chmod +x "$APP_BUNDLE/Contents/Resources/tunnelpad-log-proxy"
+echo "  ✓ ECS SSH 公网 IP 同步脚本与隧道日志时间戳代理"
 
 # Step 7: PkgInfo + ad-hoc 签名 + 校验
 echo -n "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"

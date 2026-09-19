@@ -28,6 +28,27 @@ final class LaunchdPlistRendererTests: XCTestCase {
         XCTAssertEqual(dict["StandardErrorPath"] as? String, logURL.path)
     }
 
+    func testXMLRoundtripAddsProxyWithoutChangingOriginalCommand() throws {
+        let logURL = URL(fileURLWithPath: "/Users/test/Library/Logs/TunnelPad/admin-tunnel.log")
+        let proxyURL = URL(fileURLWithPath: "/Applications/TunnelPad.app/Contents/Resources/tunnelpad-log-proxy")
+        let data = try LaunchdPlistRenderer.plistXMLData(
+            for: tunnel,
+            logURL: logURL,
+            logProxyURL: proxyURL
+        )
+        let raw = try PropertyListSerialization.propertyList(from: data, options: [], format: nil)
+        let dict = try XCTUnwrap(raw as? [String: Any])
+
+        let arguments = try XCTUnwrap(dict["ProgramArguments"] as? [String])
+        XCTAssertEqual(
+            arguments,
+            [proxyURL.path, "--log", logURL.path, "--"] + tunnel.command
+        )
+        XCTAssertEqual(dict["StandardOutPath"] as? String, "/dev/null")
+        XCTAssertEqual(dict["StandardErrorPath"] as? String, "/dev/null")
+        XCTAssertEqual(dict["AbandonProcessGroup"] as? Bool, false)
+    }
+
     func testWritePlistLandsInLaunchdDirectory() throws {
         let tempHome = FileManager.default.temporaryDirectory
             .appendingPathComponent("tunnelpad-render-\(UUID().uuidString)", isDirectory: true)

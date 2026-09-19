@@ -673,9 +673,24 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
         let tunnel = self.tunnel(id)?;
         // 未加载由 executor 明确归类为可继续；其他 bootout 失败必须
         // fail-closed，不能在旧实例未收敛时继续写 plist/bootstrap。
-        self.launchd
-            .bootout_cancellable(&tunnel.launchd_label(), &cancellation)
-            .map_err(|error| executor_error("重启前停止", error))?;
+        let label = tunnel.launchd_label();
+        if is_ssh(&tunnel.command) {
+            // SSH 的 launchd 顶层进程是日志代理；直接 bootout 只确认 job
+            // 卸载，不保证代理/SSH 进程组已经退出，远端 -R 端口可能短暂仍被
+            // 旧 sshd 占用。复用受管停止的身份核验和有界收敛，避免新连接
+            // 在旧远端转发释放前抢占同一个 18080。
+            self.launchd
+                .stop_managed_cancellable(
+                    &label,
+                    Path::new(&tunnel.command[0]),
+                    &cancellation,
+                )
+                .map_err(|error| executor_error("重启前停止", error))?;
+        } else {
+            self.launchd
+                .bootout_cancellable(&label, &cancellation)
+                .map_err(|error| executor_error("重启前停止", error))?;
+        }
         self.ensure_generation(id, generation)?;
         let plist = write_plist(&tunnel, &self.paths).map_err(|error| {
             TpError::new(
