@@ -25,7 +25,7 @@ with tempfile.TemporaryDirectory(prefix='tunnelpad-supervision-') as temporary:
     print('PASS invalid-config-no-helper-no-leak')
     p,e=setup('new-priority')
     r=run(dict(e,FAKE_NEW_PRIORITY='2'))
-    assert r.returncode==4 and 'RevokeSecurityGroup' not in (p/'calls').read_text()
+    assert r.returncode==5 and json.loads(r.stdout)['sanitizedCode']=='managed_ambiguous' and 'RevokeSecurityGroup' not in (p/'calls').read_text()
     assert len(json.loads((p/'state.json').read_text())['Permissions']['Permission'])==2
     assert run(e).returncode==4 and 'RevokeSecurityGroup' not in (p/'calls').read_text()
     print('PASS unexpected-new-priority-no-revoke-or-adoption')
@@ -40,7 +40,7 @@ with tempfile.TemporaryDirectory(prefix='tunnelpad-supervision-') as temporary:
     calls=(p/'calls').read_text();assert run(e).returncode==4;assert (p/'calls').read_text().count('RevokeSecurityGroup')==calls.count('RevokeSecurityGroup')
     print('PASS pending-attribute-change-no-write')
     p,e=setup('readonly-pending');assert run(dict(e,FAKE_REVOKE_FAIL='1')).returncode==6
-    journal=next((p/'private').glob('*.journal'));before=journal.read_bytes();calls=(p/'calls').read_text();assert run(e,'--check').returncode==0
+    journal=next((p/'private').glob('*.journal'));before=journal.read_bytes();calls=(p/'calls').read_text();check=run(e,'--check');assert check.returncode==4 and json.loads(check.stdout)['sanitizedCode']=='transaction_pending'
     assert journal.read_bytes()==before;assert (p/'calls').read_text().count('RevokeSecurityGroup')==calls.count('RevokeSecurityGroup')
     journal.unlink();journal.symlink_to(p/'credentials');assert run(e).returncode==2
     print('PASS readonly-journal-and-symlink-refusal')
@@ -53,7 +53,8 @@ with tempfile.TemporaryDirectory(prefix='tunnelpad-supervision-') as temporary:
     p,e=setup('auth');denied=p/'denied';denied.write_text('#!/bin/bash\nprintf \'%s\\n\' \'{"Code":"Forbidden.RAM","Message":"SECRET"}\'\n');denied.chmod(0o700)
     r=run(dict(e,ALIYUN_BIN=str(denied)));assert r.returncode==4 and json.loads(r.stdout)['category']=='auth' and 'SECRET' not in r.stdout
     assert json.loads(run(e).stdout)['sanitizedCode']=='auth_cooldown';assert not (p/'calls').read_text()
-    auth=next((p/'private').glob('*.auth'));auth.write_text('0');assert run(e).returncode==0
+    auth=next((p/'private').glob('*.auth'));expiry=int(auth.read_text());now=int(time.time());assert now < expiry <= now+300
+    auth.write_text('0');assert run(e).returncode==0
     print('PASS auth-cooldown-and-readonly-revalidation')
     # TERM-resistant descendant holds inherited pipes and lock; supervisor must kill its group.
     p,e=setup('deadline');hung=p/'hung';hung.write_text('#!/bin/bash\ntrap "" TERM INT\necho $$ > "$PID_FILE"\n/bin/sleep 120 &\nwait\n');hung.chmod(0o700)

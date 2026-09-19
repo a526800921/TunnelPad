@@ -135,20 +135,29 @@ final class LaunchRecoveryIntegrationTests: XCTestCase {
         let manager = manager(owner, checker, clock); await manager.restoreAutoStartTunnels(); try await eventually { checker.waiting }
         let shutdown = Task { await manager.shutdownAsync() }
         try await eventually { owner.events.contains("cancel:a") }; XCTAssertFalse(owner.events.contains("shutdown"))
-        checker.release(); await shutdown.value
+        checker.release(); _ = await shutdown.value
         XCTAssertTrue(owner.events.contains("shutdown")); XCTAssertFalse(owner.events.contains("strictStart:a"))
         await manager.restoreAutoStartTunnels(); XCTAssertEqual(checker.calls, 1)
         try? FileManager.default.removeItem(at: manager.paths.homeDirectory)
     }
-    func testLoadedKeepAliveObservesAndNonKeepAliveStopsBeforePreflight() async throws {
+    func testLoadedNotRunningAlwaysStopsBeforePreflightAndStart() async throws {
         let owner = LaunchTestOwner([tunnel(), tunnel("b", keepAlive: false)]), checker = LaunchTestPreflight(), clock = LaunchTestClock(); checker.set(.success)
         owner.setStatus(.notRunning, id: "a"); owner.setStatus(.notRunning, id: "b")
         let manager = manager(owner, checker, clock); await manager.restoreAutoStartTunnels()
-        try await eventually { owner.events.contains("strictStart:b") && manager.busyIDs.isEmpty }
-        XCTAssertFalse(owner.events.contains("strictStop:a")); XCTAssertFalse(owner.events.contains("strictStart:a")); XCTAssertEqual(checker.calls, 1)
+        try await eventually { owner.events.contains("strictStart:a") && owner.events.contains("strictStart:b") && manager.busyIDs.isEmpty }
+        XCTAssertTrue(owner.events.contains("strictStop:a")); XCTAssertEqual(checker.calls, 2)
+        XCTAssertLessThan(try XCTUnwrap(owner.events.firstIndex(of: "strictStop:a")), try XCTUnwrap(owner.events.firstIndex(of: "strictStart:a")))
         XCTAssertLessThan(try XCTUnwrap(owner.events.firstIndex(of: "strictStop:b")), try XCTUnwrap(owner.events.firstIndex(of: "strictStart:b")))
-        owner.setStatus(.running(pid: 456), id: "a"); try await eventually { clock.pending > 0 }; clock.advance(5)
-        try await eventually { manager.launchRecoveryIDs.isEmpty }; XCTAssertEqual(checker.calls, 1)
+        XCTAssertTrue(manager.launchRecoveryIDs.isEmpty)
+        await cleanup(manager)
+    }
+    func testRunningUnattendedSSHIsQuiescedToInstallSingleRecoveryOwner() async throws {
+        let owner = LaunchTestOwner([tunnel()]), checker = LaunchTestPreflight(), clock = LaunchTestClock(); checker.set(.success)
+        owner.setStatus(.running(pid: 456), id: "a")
+        let manager = manager(owner, checker, clock); await manager.restoreAutoStartTunnels()
+        try await eventually { owner.events.contains("strictStart:a") && manager.launchRecoveryIDs.isEmpty }
+        XCTAssertLessThan(try XCTUnwrap(owner.events.firstIndex(of: "strictStop:a")), try XCTUnwrap(owner.events.firstIndex(of: "strictStart:a")))
+        XCTAssertEqual(checker.calls, 1)
         await cleanup(manager)
     }
     func testUnknownStatusAndOldCoreNeverRunPreflight() async throws {

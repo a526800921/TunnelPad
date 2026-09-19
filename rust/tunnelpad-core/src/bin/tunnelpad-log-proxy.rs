@@ -14,9 +14,11 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const CHILD_CLEANUP_TERM_WAIT: Duration = Duration::from_secs(2);
+const CHILD_CLEANUP_CONT_WAIT: Duration = Duration::from_millis(250);
 const CHILD_CLEANUP_KILL_WAIT: Duration = Duration::from_secs(1);
 const CHILD_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const OUTPUT_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const OUTPUT_DRAIN_AFTER_CHILD_EXIT: Duration = Duration::from_millis(100);
 
 struct OutputLine {
     stream: &'static str,
@@ -151,12 +153,24 @@ fn run(log_path: &Path, command: &[String]) -> io::Result<std::process::ExitStat
 
     let mut child_status = None;
     let mut failure = None;
+    let mut graceful_shutdown = false;
     loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                child_status = Some(status);
+                if let Err(error) = drain_output_after_child_exit(&receiver, &mut log) {
+                    failure = Some(error);
+                }
+                break;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                failure = Some(error);
+                break;
+            }
+        }
         if shutdown_signal.load(Ordering::Relaxed) != 0 {
-            failure = Some(io::Error::new(
-                io::ErrorKind::Interrupted,
-                "日志代理收到停止信号",
-            ));
+            graceful_shutdown = true;
             break;
         }
 
@@ -174,25 +188,21 @@ fn run(log_path: &Path, command: &[String]) -> io::Result<std::process::ExitStat
                 ));
                 break;
             }
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                if let Some(status) = child.try_wait()? {
-                    child_status = Some(status);
-                    break;
-                }
-            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 if shutdown_signal.load(Ordering::Relaxed) != 0 {
-                    // 信号驱动的正常停止可能先关闭 reader，再回到循环顶部。
-                    // 这时由下方的 child.wait() 等待已转发的停止信号，不应误报代理失败。
+                    graceful_shutdown = true;
                     break;
                 }
-                if let Some(status) = child.try_wait()? {
-                    child_status = Some(status);
-                } else {
-                    failure = Some(io::Error::new(
-                        io::ErrorKind::BrokenPipe,
-                        "日志输出 reader 已断开",
-                    ));
+                match child.try_wait() {
+                    Ok(Some(status)) => child_status = Some(status),
+                    Ok(None) => {
+                        failure = Some(io::Error::new(
+                            io::ErrorKind::BrokenPipe,
+                            "日志输出 reader 已断开",
+                        ));
+                    }
+                    Err(error) => failure = Some(error),
                 }
                 break;
             }
@@ -200,11 +210,15 @@ fn run(log_path: &Path, command: &[String]) -> io::Result<std::process::ExitStat
     }
 
     signal_thread_stop.store(true, Ordering::Relaxed);
+    let child_result = match child_status {
+        Some(status) => Ok(status),
+        None => cleanup_child(&mut child, &child_pid, graceful_shutdown),
+    };
+    child_pid.store(0, Ordering::Relaxed);
+    let group_cleanup = cleanup_owned_process_group();
+
     if let Some(error) = failure {
-        let cleanup = cleanup_child(&mut child, &child_pid);
-        let group_cleanup = cleanup_owned_process_group();
-        child_pid.store(0, Ordering::Relaxed);
-        if let Err(cleanup_error) = cleanup {
+        if let Err(cleanup_error) = child_result {
             return Err(io::Error::new(
                 cleanup_error.kind(),
                 format!("{error}；清理隧道进程失败：{cleanup_error}"),
@@ -219,13 +233,33 @@ fn run(log_path: &Path, command: &[String]) -> io::Result<std::process::ExitStat
         return Err(error);
     }
 
-    let status = match child_status {
-        Some(status) => status,
-        None => child.wait()?,
-    };
-    child_pid.store(0, Ordering::Relaxed);
-    cleanup_owned_process_group()?;
+    let status = child_result?;
+    group_cleanup?;
     Ok(status)
+}
+
+fn drain_output_after_child_exit(
+    receiver: &mpsc::Receiver<OutputEvent>,
+    log: &mut File,
+) -> io::Result<()> {
+    let deadline = Instant::now() + OUTPUT_DRAIN_AFTER_CHILD_EXIT;
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            return Ok(());
+        }
+        match receiver.recv_timeout((deadline - now).min(Duration::from_millis(10))) {
+            Ok(OutputEvent::Line(line)) => write_log_line(log, line.stream, &line.bytes)?,
+            Ok(OutputEvent::ReaderError { stream, message }) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    format!("读取 {stream} 输出失败：{message}"),
+                ));
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
+    }
 }
 
 fn spawn_reader<R>(reader: R, stream: &'static str, sender: mpsc::Sender<OutputEvent>)
@@ -258,22 +292,41 @@ where
     });
 }
 
-fn cleanup_child(child: &mut std::process::Child, child_pid: &AtomicI32) -> io::Result<()> {
+fn cleanup_child(
+    child: &mut std::process::Child,
+    child_pid: &AtomicI32,
+    graceful_shutdown: bool,
+) -> io::Result<std::process::ExitStatus> {
+    if let Some(status) = child.try_wait()? {
+        return Ok(status);
+    }
     let pid = child_pid.load(Ordering::Relaxed);
     if pid <= 1 {
-        return Ok(());
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "隧道进程 PID 不可用于有界清理",
+        ));
     }
 
-    for signal in [libc::SIGCONT, libc::SIGTERM] {
+    if graceful_shutdown {
+        if let Some(status) = wait_for_child(child, CHILD_CLEANUP_TERM_WAIT)? {
+            return Ok(status);
+        }
+    }
+
+    for (signal, timeout) in [
+        (libc::SIGCONT, CHILD_CLEANUP_CONT_WAIT),
+        (libc::SIGTERM, CHILD_CLEANUP_TERM_WAIT),
+    ] {
         send_signal(pid, signal)?;
-        if wait_for_child(child, CHILD_CLEANUP_TERM_WAIT)? {
-            return Ok(());
+        if let Some(status) = wait_for_child(child, timeout)? {
+            return Ok(status);
         }
     }
 
     send_signal(pid, libc::SIGKILL)?;
-    if wait_for_child(child, CHILD_CLEANUP_KILL_WAIT)? {
-        return Ok(());
+    if let Some(status) = wait_for_child(child, CHILD_CLEANUP_KILL_WAIT)? {
+        return Ok(status);
     }
 
     Err(io::Error::new(
@@ -282,14 +335,17 @@ fn cleanup_child(child: &mut std::process::Child, child_pid: &AtomicI32) -> io::
     ))
 }
 
-fn wait_for_child(child: &mut std::process::Child, timeout: Duration) -> io::Result<bool> {
+fn wait_for_child(
+    child: &mut std::process::Child,
+    timeout: Duration,
+) -> io::Result<Option<std::process::ExitStatus>> {
     let deadline = Instant::now() + timeout;
     loop {
-        if child.try_wait()?.is_some() {
-            return Ok(true);
+        if let Some(status) = child.try_wait()? {
+            return Ok(Some(status));
         }
         if Instant::now() >= deadline {
-            return Ok(false);
+            return Ok(None);
         }
         thread::sleep(CHILD_POLL_INTERVAL);
     }
@@ -316,22 +372,21 @@ fn cleanup_owned_process_group() -> io::Result<()> {
         return Ok(());
     }
 
-    let members = process_group_members(process_group_id)?;
-    let members: Vec<i32> = members
-        .into_iter()
-        .filter(|pid| *pid > 1 && *pid != own_pid)
-        .collect();
-    if members.is_empty() {
+    if owned_process_group_members(process_group_id, own_pid)?.is_empty() {
         return Ok(());
     }
 
-    for signal in [libc::SIGCONT, libc::SIGTERM, libc::SIGKILL] {
-        for pid in &members {
-            if unsafe { libc::getpgid(*pid) } == process_group_id {
-                let _ = send_signal(*pid, signal);
-            }
+    for (signal, timeout) in [
+        (libc::SIGCONT, CHILD_CLEANUP_CONT_WAIT),
+        (libc::SIGTERM, CHILD_CLEANUP_TERM_WAIT),
+        (libc::SIGKILL, CHILD_CLEANUP_KILL_WAIT),
+    ] {
+        // 每轮都重新枚举；上一批成员可能在 TERM trap 中派生同 PGID 的
+        // 新后代，固定快照会把它误判为已经收敛并留下孤儿 SSH。
+        for pid in owned_process_group_members(process_group_id, own_pid)? {
+            let _ = send_signal(pid, signal);
         }
-        if wait_for_group_members(process_group_id, &members, CHILD_CLEANUP_TERM_WAIT)? {
+        if wait_for_group_members(process_group_id, own_pid, timeout)? {
             return Ok(());
         }
     }
@@ -344,15 +399,12 @@ fn cleanup_owned_process_group() -> io::Result<()> {
 
 fn wait_for_group_members(
     process_group_id: i32,
-    members: &[i32],
+    own_pid: i32,
     timeout: Duration,
 ) -> io::Result<bool> {
     let deadline = Instant::now() + timeout;
     loop {
-        let has_live_member = members
-            .iter()
-            .any(|pid| *pid > 1 && unsafe { libc::getpgid(*pid) } == process_group_id);
-        if !has_live_member {
+        if owned_process_group_members(process_group_id, own_pid)?.is_empty() {
             return Ok(true);
         }
         if Instant::now() >= deadline {
@@ -360,6 +412,15 @@ fn wait_for_group_members(
         }
         thread::sleep(CHILD_POLL_INTERVAL);
     }
+}
+
+fn owned_process_group_members(process_group_id: i32, own_pid: i32) -> io::Result<Vec<i32>> {
+    Ok(process_group_members(process_group_id)?
+        .into_iter()
+        .filter(|pid| {
+            *pid > 1 && *pid != own_pid && unsafe { libc::getpgid(*pid) } == process_group_id
+        })
+        .collect())
 }
 
 #[cfg(target_os = "macos")]

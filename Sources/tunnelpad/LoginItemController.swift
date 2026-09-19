@@ -1,6 +1,14 @@
 import ServiceManagement
 import TunnelPadCore
 
+protocol LoginItemServicing: AnyObject {
+    var status: SMAppService.Status { get }
+    func register() throws
+    func unregister() throws
+}
+
+extension SMAppService: LoginItemServicing {}
+
 /// 登录项状态；`SMAppService.Status` 的可测试映射。
 enum LoginItemState: Equatable {
     /// 已注册且获批，下次登录自动启动。
@@ -15,18 +23,18 @@ enum LoginItemState: Equatable {
 /// 注册状态由系统持久化，不写入 config.json；App 侧只读写系统状态。
 @MainActor
 final class LoginItemController: ObservableObject {
-    private let service: SMAppService
+    private let service: any LoginItemServicing
     private(set) var state: LoginItemState
     private(set) var registrationError: String?
 
-    init(service: SMAppService = .mainApp) {
+    init(service: any LoginItemServicing = SMAppService.mainApp) {
         self.service = service
         self.state = Self.map(service.status)
     }
 
     /// 测试与预览用：直接以给定状态构造，不触达系统服务。
     init(state: LoginItemState) {
-        self.service = .mainApp
+        self.service = SMAppService.mainApp
         self.state = state
     }
 
@@ -42,6 +50,7 @@ final class LoginItemController: ObservableObject {
     /// `registrationError` 并保持原状态，由调用方决定如何提示。
     func toggle() -> LoginItemState {
         registrationError = nil
+        var toggleError: String?
         do {
             switch state {
             case .enabled, .requiresApproval:
@@ -50,9 +59,10 @@ final class LoginItemController: ObservableObject {
                 try service.register()
             }
         } catch {
-            registrationError = error.localizedDescription
+            toggleError = error.localizedDescription
         }
-        refresh()
+        state = Self.map(service.status)
+        registrationError = toggleError
         return state
     }
 

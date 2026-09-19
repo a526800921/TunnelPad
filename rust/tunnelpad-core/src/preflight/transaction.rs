@@ -1,4 +1,4 @@
-use super::{process, store, Config, Failure, Result};
+use super::{process, store, Config, Failure, Result, AUTH_RETRY_SECONDS};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::Read;
@@ -29,31 +29,28 @@ fn safe_rule(r: &Value) -> bool {
         && field(r, "PortRange") == "22/22"
         && field(r, "Policy").eq_ignore_ascii_case("accept")
         && field(r, "NicType").eq_ignore_ascii_case("intranet")
+        && (field(r, "Priority") == "1" || r["Priority"].as_u64() == Some(1))
+        && field(r, "SourcePortRange").is_empty()
         && !field(r, "SecurityGroupRuleId").is_empty()
         && cidr(field(r, "SourceCidrIp"))
         && [
             "SourceGroupId",
             "SourceGroupOwnerAccount",
+            "SourceGroupOwnerId",
+            "SourcePrefixListId",
             "Ipv6SourceCidrIp",
+            "DestCidrIp",
+            "Ipv6DestCidrIp",
+            "DestGroupId",
+            "DestPrefixListId",
+            "PortRangeListId",
         ]
         .iter()
         .all(|k| field(r, k).is_empty())
 }
 // An unconfirmed rule can only be adopted if it matches the complete request.
 fn requested_rule(r: &Value, desired: &str) -> bool {
-    safe_rule(r)
-        && field(r, "SourceCidrIp") == desired
-        && (field(r, "Priority") == "1" || r["Priority"].as_u64() == Some(1))
-        && [
-            "SourcePrefixListId",
-            "SourceGroupOwnerId",
-            "DestCidrIp",
-            "Ipv6DestCidrIp",
-            "DestGroupId",
-            "DestPrefixListId",
-        ]
-        .iter()
-        .all(|key| field(r, key).is_empty())
+    safe_rule(r) && field(r, "SourceCidrIp") == desired
 }
 fn public(ip: &str) -> bool {
     let Ok(ip) = ip.parse::<std::net::Ipv4Addr>() else {
@@ -248,7 +245,7 @@ fn check_current_rule(rules: &[Value], desired: &str) -> Result<()> {
     }
     if rules
         .first()
-        .is_some_and(|rule| field(rule, "SourceCidrIp") == desired)
+        .is_some_and(|rule| requested_rule(rule, desired))
     {
         return Ok(());
     }
@@ -356,7 +353,12 @@ pub(super) fn sync(c: &Config, check: bool, parent: i32, deadline: Instant) -> R
             let (ok, body) = process::run(
                 &c.curl,
                 &[
+                    "-q".into(),
                     "-4fsS".into(),
+                    "--noproxy".into(),
+                    "*".into(),
+                    "--proxy".into(),
+                    "".into(),
                     "--max-time".into(),
                     "10".into(),
                     endpoint.clone(),
@@ -382,6 +384,7 @@ pub(super) fn sync(c: &Config, check: bool, parent: i32, deadline: Instant) -> R
         if check {
             if let Some(j) = pending {
                 validate(&j, c, &rules)?;
+                return Err(Failure::new(4, "transient", "transaction_pending"));
             } else {
                 check_current_rule(&rules, &desired)?;
             }
@@ -417,7 +420,7 @@ pub(super) fn sync(c: &Config, check: bool, parent: i32, deadline: Instant) -> R
         .as_ref()
         .is_err_and(|e: &Failure| e.category == "auth")
     {
-        store::write(&c.path("auth"), &(epoch() + 1800))?;
+        store::write(&c.path("auth"), &(epoch() + AUTH_RETRY_SECONDS))?;
     }
     result
 }
@@ -448,7 +451,9 @@ mod tests {
             "IpProtocol": "TCP",
             "PortRange": "22/22",
             "Policy": "Accept",
+            "Priority": "1",
             "NicType": "intranet",
+            "SourcePortRange": "",
             "SourceCidrIp": "45.67.89.100/32",
             "SecurityGroupRuleId": "sgr-stale"
         });
@@ -459,9 +464,37 @@ mod tests {
 
     #[test]
     fn check_current_rule_accepts_current_rule_and_rejects_missing_rule() {
-        let current = serde_json::json!({"SourceCidrIp": "45.67.89.101/32"});
+        let current = serde_json::json!({
+            "Description": DESCRIPTION,
+            "Direction": "ingress",
+            "IpProtocol": "TCP",
+            "PortRange": "22/22",
+            "Policy": "Accept",
+            "Priority": "1",
+            "NicType": "intranet",
+            "SourcePortRange": "",
+            "SourceCidrIp": "45.67.89.101/32",
+            "SecurityGroupRuleId": "sgr-current"
+        });
         assert!(check_current_rule(&[current], "45.67.89.101/32").is_ok());
         let error = check_current_rule(&[], "45.67.89.101/32").unwrap_err();
         assert_eq!(error.sanitized_code, "ip_drift");
+    }
+
+    #[test]
+    fn rejects_managed_rule_with_restricted_source_port() {
+        let restricted = serde_json::json!({
+            "Description": DESCRIPTION,
+            "Direction": "ingress",
+            "IpProtocol": "TCP",
+            "PortRange": "22/22",
+            "Policy": "Accept",
+            "Priority": "1",
+            "NicType": "intranet",
+            "SourcePortRange": "22/22",
+            "SourceCidrIp": "45.67.89.101/32",
+            "SecurityGroupRuleId": "sgr-restricted"
+        });
+        assert!(!safe_rule(&restricted));
     }
 }

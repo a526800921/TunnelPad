@@ -80,11 +80,53 @@ final class LaunchRecoveryCoordinatorTests: XCTestCase {
         coordinator.start([.init(tunnel: tunnel("a"), resource: "ecs"), .init(tunnel: tunnel("b"), resource: "ecs"), .init(tunnel: tunnel("c"), resource: nil)])
         try await eventually { calls.count == 2 && clock.pending == 1 }
         XCTAssertEqual(Set(calls), ["a", "c"])
-        clock.advance(300); try await eventually { calls.count == 3 && clock.pending == 1 }
-        XCTAssertFalse(calls.contains("b"))
-        clock.advance(1500); try await eventually { calls.contains("b") }
+        clock.advance(300); try await eventually { calls.contains("b") && clock.pending == 1 }
         await coordinator.shutdown(); let count = calls.count
         clock.advance(86_400); await Task.yield(); XCTAssertEqual(calls.count, count)
+    }
+    func testRuntimePreflightCoordinatorCapsDifferentResources() async throws {
+        let coordinator = SharedRecoveryPreflightCoordinator(maximumConcurrentResources: 2)
+        let probe = SharedPreflightCapacityProbe()
+
+        async let first = coordinator.run(resource: "a") { await probe.run("a") }
+        async let second = coordinator.run(resource: "b") { await probe.run("b") }
+        async let third = coordinator.run(resource: "c") { await probe.run("c") }
+
+        var snapshot = await probe.snapshot()
+        for _ in 0..<2_000 where snapshot.calls.count < 2 {
+            try await Task.sleep(nanoseconds: 1_000_000)
+            snapshot = await probe.snapshot()
+        }
+        XCTAssertEqual(snapshot.calls.count, 2)
+        XCTAssertEqual(snapshot.maximumActive, 2)
+
+        await probe.releaseAndStopBlocking()
+        _ = try await (first, second, third)
+        snapshot = await probe.snapshot()
+        XCTAssertEqual(Set(snapshot.calls), ["a", "b", "c"])
+        XCTAssertEqual(snapshot.maximumActive, 2)
+    }
+    func testRuntimePreflightCoordinatorCachesAuthenticationFailureByResource() async throws {
+        let clock = LaunchTestClock()
+        let coordinator = SharedRecoveryPreflightCoordinator(clock: clock.clock)
+        let probe = SharedPreflightAuthenticationProbe()
+
+        let first = try await coordinator.run(resource: "ecs") { await probe.run() }
+        let second = try await coordinator.run(resource: "ecs") { await probe.run() }
+        XCTAssertEqual(first.category, .auth)
+        XCTAssertEqual(second.sanitizedCode, "authentication_failed")
+        var calls = await probe.calls
+        XCTAssertEqual(calls, 1, "认证冷却期间必须复用脱敏结构化结果")
+
+        clock.advance(299)
+        _ = try await coordinator.run(resource: "ecs") { await probe.run() }
+        calls = await probe.calls
+        XCTAssertEqual(calls, 1)
+
+        clock.advance(1)
+        _ = try await coordinator.run(resource: "ecs") { await probe.run() }
+        calls = await probe.calls
+        XCTAssertEqual(calls, 2, "冷却到期后才允许新的安全复核")
     }
     func testRunningWithoutPIDDoesNotHandoff() async throws {
         let clock = LaunchTestClock(); var calls = 0; var handed = false
@@ -98,3 +140,61 @@ final class LaunchRecoveryCoordinatorTests: XCTestCase {
 
 @MainActor
 private final class LaunchTestAvailability { var online = false }
+
+private actor SharedPreflightCapacityProbe {
+    struct Snapshot: Sendable {
+        let calls: [String]
+        let maximumActive: Int
+    }
+
+    private var calls: [String] = []
+    private var active = 0
+    private var maximumActive = 0
+    private var blocking = true
+    private var continuations: [CheckedContinuation<Void, Never>] = []
+
+    func run(_ resource: String) async -> LaunchPreflightResult {
+        calls.append(resource)
+        active += 1
+        maximumActive = max(maximumActive, active)
+        if blocking {
+            await withCheckedContinuation { continuations.append($0) }
+        }
+        active -= 1
+        return LaunchPreflightResult(
+            version: 1,
+            stage: "complete",
+            category: .success,
+            retryHint: 0,
+            sanitizedCode: "synchronized",
+            exitCode: 0
+        )
+    }
+
+    func snapshot() -> Snapshot {
+        Snapshot(calls: calls, maximumActive: maximumActive)
+    }
+
+    func releaseAndStopBlocking() {
+        blocking = false
+        let pending = continuations
+        continuations.removeAll()
+        pending.forEach { $0.resume() }
+    }
+}
+
+private actor SharedPreflightAuthenticationProbe {
+    private(set) var calls = 0
+
+    func run() -> LaunchPreflightResult {
+        calls += 1
+        return LaunchPreflightResult(
+            version: 1,
+            stage: "authenticate",
+            category: .auth,
+            retryHint: 300,
+            sanitizedCode: "authentication_failed",
+            exitCode: 3
+        )
+    }
+}

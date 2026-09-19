@@ -3,9 +3,9 @@ import Foundation
 /// 阶段 1 固定的健康恢复策略；不暴露为 config.json 设置项。
 struct HealthRecoveryPolicy: Sendable, Equatable {
     static let failureThreshold = 3
+    /// 仅作为历史行为的回归测试刻度；不再是恢复耗尽上限。
     static let maximumRecoveryAttempts = 10
     static let monitorIntervalNanoseconds: UInt64 = 10_000_000_000
-    static let automaticCooldownNanoseconds: UInt64 = 1_800_000_000_000
 
     static func backoffNanoseconds(for attempt: Int) -> UInt64 {
         switch attempt {
@@ -78,18 +78,28 @@ struct HealthRecoveryState: Sendable, Equatable {
         }
         consecutiveFailures = 0
 
-        guard recoveryAttempts < HealthRecoveryPolicy.maximumRecoveryAttempts else {
-            let delay = HealthRecoveryPolicy.automaticCooldownNanoseconds
-            recoveryAttempts = 0
-            cooldownUntilUptimeNanoseconds = nowUptimeNanoseconds &+ delay
-            return .cooldown(delayNanoseconds: delay)
+        if recoveryAttempts < Int.max {
+            recoveryAttempts += 1
         }
-
-        recoveryAttempts += 1
         return .schedule(
             attempt: recoveryAttempts,
             delayNanoseconds: HealthRecoveryPolicy.backoffNanoseconds(for: recoveryAttempts)
         )
+    }
+
+    /// launchd/PID/IP 漂移等已经确认的故障不再伪造三次探针失败。
+    /// 该入口始终保留下一次恢复意图，尝试次数只用于计算有上限的退避，
+    /// 不会因为达到历史 `maximumRecoveryAttempts` 而进入永久停止状态。
+    mutating func confirmedFailure(delayOverrideNanoseconds: UInt64? = nil) -> Action {
+        guard phase == .monitoring else { return .observe }
+        consecutiveFailures = 0
+        cooldownUntilUptimeNanoseconds = nil
+        if recoveryAttempts < Int.max {
+            recoveryAttempts += 1
+        }
+        let delay = delayOverrideNanoseconds
+            ?? HealthRecoveryPolicy.backoffNanoseconds(for: recoveryAttempts)
+        return .schedule(attempt: recoveryAttempts, delayNanoseconds: delay)
     }
 
     mutating func finishRecovery(
@@ -97,16 +107,7 @@ struct HealthRecoveryState: Sendable, Equatable {
         nowUptimeNanoseconds: UInt64 = DispatchTime.now().uptimeNanoseconds
     ) -> Action {
         guard phase == .monitoring else { return .observe }
-        guard success else {
-            if recoveryAttempts >= HealthRecoveryPolicy.maximumRecoveryAttempts {
-                consecutiveFailures = 0
-                recoveryAttempts = 0
-                let delay = HealthRecoveryPolicy.automaticCooldownNanoseconds
-                cooldownUntilUptimeNanoseconds = nowUptimeNanoseconds &+ delay
-                return .cooldown(delayNanoseconds: delay)
-            }
-            return .observe
-        }
+        guard success else { return .observe }
 
         consecutiveFailures = 0
         recoveryAttempts = 0

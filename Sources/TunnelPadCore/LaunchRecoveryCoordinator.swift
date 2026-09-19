@@ -33,6 +33,143 @@ enum LaunchRecoveryOutcome: Sendable {
     case cancelled
 }
 
+/// 运行期恢复的 ECS 前置按资源合并。第一条隧道执行同步，其他相同资源的
+/// 隧道等待并复用同一结果；单个等待者取消不能中断仍被其他隧道使用的同步。
+actor SharedRecoveryPreflightCoordinator {
+    private struct Entry {
+        let token: UUID
+        let task: Task<LaunchPreflightResult, Error>
+        var waiters: Set<UUID>
+    }
+
+    private struct Cooldown {
+        let result: LaunchPreflightResult
+        let until: TimeInterval
+    }
+
+    private var entries: [String: Entry] = [:]
+    private var cooldowns: [String: Cooldown] = [:]
+    private var activeResources = 0
+    private var capacityWaiters: [CheckedContinuation<Void, Never>] = []
+    private let maximumConcurrentResources: Int
+    private let clock: LaunchRecoveryClock
+
+    init(
+        maximumConcurrentResources: Int = 2,
+        clock: LaunchRecoveryClock = .continuous
+    ) {
+        self.maximumConcurrentResources = max(1, maximumConcurrentResources)
+        self.clock = clock
+    }
+
+    func run(
+        resource: String,
+        operation: @escaping @Sendable () async throws -> LaunchPreflightResult
+    ) async throws -> LaunchPreflightResult {
+        let waiter = UUID()
+        let entryToken: UUID
+        let task: Task<LaunchPreflightResult, Error>
+        if var entry = entries[resource] {
+            entry.waiters.insert(waiter)
+            entries[resource] = entry
+            entryToken = entry.token
+            task = entry.task
+        } else if let cooldown = validCooldown(for: resource) {
+            return cooldown.result
+        } else {
+            let token = UUID()
+            let created = Task {
+                try await self.executeWithCapacity(operation: operation)
+            }
+            entries[resource] = Entry(token: token, task: created, waiters: [waiter])
+            entryToken = token
+            task = created
+        }
+
+        defer { finishWaiter(resource: resource, entryToken: entryToken, waiter: waiter) }
+        let result = try await withTaskCancellationHandler {
+            let result = try await task.value
+            try Task.checkCancellation()
+            return result
+        } onCancel: {
+            Task {
+                await self.cancelWaiter(
+                    resource: resource,
+                    entryToken: entryToken,
+                    waiter: waiter
+                )
+            }
+        }
+        recordCooldown(result, for: resource)
+        return result
+    }
+
+    private func validCooldown(for resource: String) -> Cooldown? {
+        guard let cooldown = cooldowns[resource] else { return nil }
+        guard cooldown.until > clock.now() else {
+            cooldowns.removeValue(forKey: resource)
+            return nil
+        }
+        return cooldown
+    }
+
+    private func recordCooldown(_ result: LaunchPreflightResult, for resource: String) {
+        if result.category == .auth {
+            cooldowns[resource] = Cooldown(result: result, until: clock.now() + 300)
+        } else if result.category == .success {
+            cooldowns.removeValue(forKey: resource)
+        }
+    }
+
+    private func executeWithCapacity(
+        operation: @escaping @Sendable () async throws -> LaunchPreflightResult
+    ) async throws -> LaunchPreflightResult {
+        await acquireCapacity()
+        defer { releaseCapacity() }
+        try Task.checkCancellation()
+        return try await operation()
+    }
+
+    private func acquireCapacity() async {
+        if activeResources < maximumConcurrentResources {
+            activeResources += 1
+            return
+        }
+        await withCheckedContinuation { continuation in
+            capacityWaiters.append(continuation)
+        }
+    }
+
+    private func releaseCapacity() {
+        if capacityWaiters.isEmpty {
+            activeResources -= 1
+        } else {
+            capacityWaiters.removeFirst().resume()
+        }
+    }
+
+    private func finishWaiter(resource: String, entryToken: UUID, waiter: UUID) {
+        guard var entry = entries[resource], entry.token == entryToken else { return }
+        entry.waiters.remove(waiter)
+        if entry.waiters.isEmpty {
+            entries.removeValue(forKey: resource)
+        } else {
+            entries[resource] = entry
+        }
+    }
+
+    private func cancelWaiter(resource: String, entryToken: UUID, waiter: UUID) {
+        guard var entry = entries[resource], entry.token == entryToken else { return }
+        entry.waiters.remove(waiter)
+        if entry.waiters.isEmpty {
+            entries.removeValue(forKey: resource)
+            entry.task.cancel()
+        } else {
+            entries[resource] = entry
+        }
+    }
+}
+
 /// 容量与所有权集中在 MainActor。取消后 active 项保留到后端清理实际完成。
 @MainActor
 final class LaunchRecoveryCoordinator {
@@ -156,7 +293,7 @@ final class LaunchRecoveryCoordinator {
         entry.failures += 1
         let delay: TimeInterval
         switch category {
-        case .auth: delay = 1800
+        case .auth: delay = 300
         case .local, .unknown: delay = 300
         default: delay = [5.0, 15, 30, 60, 300][min(entry.failures - 1, 4)]
         }

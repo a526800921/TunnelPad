@@ -12,11 +12,15 @@ public enum LaunchdPlistRenderer {
             [proxyURL.path, "--log", logURL.path, "--"] + tunnel.command
         } ?? tunnel.command
         let outputPath = logProxyURL == nil ? logURL.path : "/dev/null"
+        // 无人值守 SSH 由 TunnelManager 统一执行“停止→ECS 同步→启动”。
+        // 禁止 launchd 在 ECS 预检之前自行 KeepAlive 重启，避免双重所有者。
+        let launchdKeepAlive = tunnel.keepAlive
+            && !(tunnel.autoStart && SSHCommand.isSSH(tunnel.command))
         var dictionary: [String: Any] = [
             "Label": tunnel.launchdLabel,
             "ProgramArguments": command,
             "RunAtLoad": true,
-            "KeepAlive": tunnel.keepAlive,
+            "KeepAlive": launchdKeepAlive,
             "ProcessType": "Background",
             "ThrottleInterval": tunnel.throttleInterval,
             "StandardOutPath": outputPath,

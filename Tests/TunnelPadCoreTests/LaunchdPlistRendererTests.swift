@@ -49,6 +49,20 @@ final class LaunchdPlistRendererTests: XCTestCase {
         XCTAssertEqual(dict["AbandonProcessGroup"] as? Bool, false)
     }
 
+    func testUnattendedSSHDisablesLaunchdKeepAliveForSingleRecoveryOwner() throws {
+        var unattended = tunnel
+        unattended.autoStart = true
+        let data = try LaunchdPlistRenderer.plistXMLData(
+            for: unattended,
+            logURL: URL(fileURLWithPath: "/tmp/unattended.log")
+        )
+        let raw = try PropertyListSerialization.propertyList(from: data, options: [], format: nil)
+        let dict = try XCTUnwrap(raw as? [String: Any])
+
+        XCTAssertEqual(dict["KeepAlive"] as? Bool, false)
+        XCTAssertTrue(unattended.keepAlive, "配置语义仍由 TunnelManager 用于无人值守恢复")
+    }
+
     func testWritePlistLandsInLaunchdDirectory() throws {
         let tempHome = FileManager.default.temporaryDirectory
             .appendingPathComponent("tunnelpad-render-\(UUID().uuidString)", isDirectory: true)

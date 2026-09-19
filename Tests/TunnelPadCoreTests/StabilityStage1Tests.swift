@@ -124,7 +124,7 @@ final class StabilityStage1Tests: XCTestCase {
     }
 
     @MainActor
-    func testTenthFailedRecoveryEntersAutomaticCooldownWithoutStopping() async throws {
+    func testFailedRecoveryKeepsRetryingPastHistoricalLimitWithoutStopping() async throws {
         let tunnel = TunnelConfig(
             id: "stage1-circuit-breaker",
             name: "Circuit Breaker",
@@ -143,24 +143,20 @@ final class StabilityStage1Tests: XCTestCase {
         )
 
         let deadline = Date().addingTimeInterval(3)
-        while owner.restartCount < HealthRecoveryPolicy.maximumRecoveryAttempts, Date() < deadline {
+        while owner.restartCount < HealthRecoveryPolicy.maximumRecoveryAttempts + 1, Date() < deadline {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
 
-        XCTAssertEqual(owner.restartCount, HealthRecoveryPolicy.maximumRecoveryAttempts)
-        XCTAssertEqual(owner.stopCount, 0, "第 10 次恢复失败后不应自动停止隧道")
-        // 冷却期内不再推进尝试次数：静置后计数应仍停在 10。
-        try await Task.sleep(nanoseconds: 100_000_000)
-        XCTAssertEqual(
-            owner.restartCount,
-            HealthRecoveryPolicy.maximumRecoveryAttempts,
-            "第 10 次失败后应进入冷却，不再立即重试"
-        )
+        let observed = owner.restartCount
+        XCTAssertGreaterThan(observed, HealthRecoveryPolicy.maximumRecoveryAttempts)
+        XCTAssertEqual(owner.stopCount, 0, "历史尝试上限后不得永久停止恢复")
+        try await Task.sleep(nanoseconds: 20_000_000)
+        XCTAssertGreaterThan(owner.restartCount, observed, "无人值守恢复意图必须持续存在")
         await manager.shutdownAsync()
     }
 
     @MainActor
-    func testManualStartResetsAutomaticCooldown() async throws {
+    func testManualStartRemainsAvailableDuringPersistentRecovery() async throws {
         let tunnel = TunnelConfig(
             id: "stage1-manual-restart",
             name: "Manual Restart",
@@ -183,27 +179,20 @@ final class StabilityStage1Tests: XCTestCase {
               Date() < cooldownDeadline {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
-        XCTAssertEqual(owner.restartCount, HealthRecoveryPolicy.maximumRecoveryAttempts)
+        XCTAssertGreaterThanOrEqual(owner.restartCount, HealthRecoveryPolicy.maximumRecoveryAttempts)
         XCTAssertEqual(owner.stopCount, 0)
-        // 等第 10 次失败的冷却登记完成并静置确认，再验证人工启动能重置冷却。
-        try await Task.sleep(nanoseconds: 100_000_000)
-        XCTAssertEqual(owner.restartCount, HealthRecoveryPolicy.maximumRecoveryAttempts)
 
         owner.shouldFailRestart = false
         manager.start(tunnel.id)
-
-        let recoveryDeadline = Date().addingTimeInterval(2)
-        while owner.restartCount < HealthRecoveryPolicy.maximumRecoveryAttempts + 1,
-              Date() < recoveryDeadline {
+        let startDeadline = Date().addingTimeInterval(2)
+        while owner.startCount == 0, Date() < startDeadline {
+            if manager.busyIDs.isEmpty {
+                manager.start(tunnel.id)
+            }
             try await Task.sleep(nanoseconds: 10_000_000)
         }
 
         XCTAssertEqual(owner.startCount, 1, "人工启动应重新打开隧道并重置恢复代次")
-        XCTAssertGreaterThanOrEqual(
-            owner.restartCount,
-            HealthRecoveryPolicy.maximumRecoveryAttempts + 1,
-            "熔断后人工启动应允许再次进入自动恢复"
-        )
         await manager.shutdownAsync()
     }
 
@@ -240,11 +229,11 @@ final class StabilityStage1Tests: XCTestCase {
         XCTAssertEqual(owner.restartCount, 0, "删除隧道后不得执行已排队的恢复任务")
     }
 
-    func testProductionHealthStateUsesFixedPolicyAndEntersAutomaticCooldown() {
+    func testProductionHealthStateKeepsBoundedRetriesPastHistoricalLimit() {
         var state = HealthRecoveryState()
         let now: UInt64 = 1_000_000_000
 
-        for attempt in 1...HealthRecoveryPolicy.maximumRecoveryAttempts {
+        for attempt in 1...(HealthRecoveryPolicy.maximumRecoveryAttempts + 3) {
             XCTAssertEqual(
                 state.record(
                     .failed(reason: "fixture"),
@@ -276,46 +265,54 @@ final class StabilityStage1Tests: XCTestCase {
                 )
             )
 
-            let finish = state.finishRecovery(
+            XCTAssertEqual(
+                state.finishRecovery(
                 success: false,
                 nowUptimeNanoseconds: now
+                ),
+                .observe
             )
-            if attempt == HealthRecoveryPolicy.maximumRecoveryAttempts {
-                XCTAssertEqual(
-                    finish,
-                    .cooldown(delayNanoseconds: HealthRecoveryPolicy.automaticCooldownNanoseconds)
-                )
-                XCTAssertEqual(state.phase, .monitoring)
-                XCTAssertEqual(state.recoveryAttempts, 0)
-                XCTAssertEqual(
-                    state.cooldownUntilUptimeNanoseconds,
-                    now + HealthRecoveryPolicy.automaticCooldownNanoseconds
-                )
-            } else {
-                XCTAssertEqual(finish, .observe)
-            }
         }
 
-        XCTAssertEqual(
-            state.record(
-                .failed(reason: "during cooldown"),
-                status: .running(pid: 7),
-                keepAlive: true,
-                nowUptimeNanoseconds: now + 1
-            ),
-            .observe
-        )
-        XCTAssertEqual(state.recoveryAttempts, 0)
-        XCTAssertEqual(
-            state.record(
-                .failed(reason: "after cooldown"),
-                status: .running(pid: 7),
-                keepAlive: true,
-                nowUptimeNanoseconds: now + HealthRecoveryPolicy.automaticCooldownNanoseconds + 1
-            ),
-            .observe
-        )
+        XCTAssertEqual(state.recoveryAttempts, HealthRecoveryPolicy.maximumRecoveryAttempts + 3)
         XCTAssertNil(state.cooldownUntilUptimeNanoseconds)
+        XCTAssertEqual(
+            HealthRecoveryPolicy.backoffNanoseconds(for: state.recoveryAttempts),
+            300_000_000_000
+        )
+    }
+
+    func testConfirmedFailureSchedulesOnceAndNeverExhaustsPermanentRecovery() {
+        var state = HealthRecoveryState()
+        XCTAssertEqual(
+            state.record(.failed(reason: "probe-1"), status: .running(pid: 7), keepAlive: true),
+            .observe
+        )
+        XCTAssertEqual(
+            state.record(.failed(reason: "probe-2"), status: .running(pid: 7), keepAlive: true),
+            .observe
+        )
+
+        XCTAssertEqual(
+            state.confirmedFailure(delayOverrideNanoseconds: 0),
+            .schedule(attempt: 1, delayNanoseconds: 0),
+            "明确 launchd/IP 故障必须只记一次，不能受既有探针计数干扰"
+        )
+        for attempt in 2...(HealthRecoveryPolicy.maximumRecoveryAttempts + 3) {
+            XCTAssertEqual(
+                state.confirmedFailure(),
+                .schedule(
+                    attempt: attempt,
+                    delayNanoseconds: HealthRecoveryPolicy.backoffNanoseconds(for: attempt)
+                )
+            )
+        }
+        XCTAssertNil(state.cooldownUntilUptimeNanoseconds)
+        XCTAssertEqual(
+            HealthRecoveryPolicy.backoffNanoseconds(for: state.recoveryAttempts),
+            300_000_000_000,
+            "永久重试允许封顶退避，但不得耗尽后停机"
+        )
     }
 
     @MainActor

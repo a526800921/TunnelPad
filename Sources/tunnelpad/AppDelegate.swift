@@ -2,6 +2,38 @@ import SwiftUI
 import AppKit
 import TunnelPadCore
 
+struct ApplicationTerminationGate {
+    enum Decision: Equatable {
+        case startCleanup
+        case waitForCleanup
+        case terminateNow
+    }
+
+    private enum Phase {
+        case idle
+        case cleaning
+        case approved
+    }
+
+    private var phase: Phase = .idle
+
+    mutating func request() -> Decision {
+        switch phase {
+        case .idle:
+            phase = .cleaning
+            return .startCleanup
+        case .cleaning:
+            return .waitForCleanup
+        case .approved:
+            return .terminateNow
+        }
+    }
+
+    mutating func complete(success: Bool) {
+        phase = success ? .approved : .idle
+    }
+}
+
 /// NSApplicationDelegate：生命周期、菜单栏、主窗口控制与退出语义。
 /// 退出 TunnelPad = 停止全部 launchd 隧道（逐条 bootout），这是计划冻结的语义。
 @MainActor
@@ -11,7 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var apiServer: TunnelAPIServer?
     private var menuBarController: MenuBarController?
     private var mainWindow: NSWindow?
-    private var isTerminating = false
+    private var terminationGate = ApplicationTerminationGate()
     @Published private(set) var isMainWindowVisible = false
 
     override init() {
@@ -47,15 +79,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     /// 正常退出（菜单退出 / Cmd+Q / AppleScript quit）先由 Rust owner 停止全部受管 launchd 隧道，再结束进程。
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard !isTerminating else { return .terminateNow }
-        isTerminating = true
+        switch terminationGate.request() {
+        case .waitForCleanup:
+            return .terminateLater
+        case .terminateNow:
+            return .terminateNow
+        case .startCleanup:
+            break
+        }
 
         Task { @MainActor in
+            guard await manager.shutdownAsync() else {
+                terminationGate.complete(success: false)
+                sender.reply(toApplicationShouldTerminate: false)
+                return
+            }
             let apiServer = self.apiServer
             await Task.detached(priority: .userInitiated) {
                 try? apiServer?.stop()
             }.value
-            await manager.shutdownAsync()
+            terminationGate.complete(success: true)
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater

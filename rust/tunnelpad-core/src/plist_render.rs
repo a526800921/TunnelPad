@@ -6,9 +6,13 @@ use std::fs;
 use std::io;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::paths::TunnelPaths;
+use crate::ssh_command::is_ssh;
 use crate::TunnelConfig;
+
+static ATOMIC_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn escape_xml(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
@@ -37,6 +41,7 @@ pub fn plist_xml_with_log_proxy(
     log_path: &str,
     log_proxy_path: Option<&str>,
 ) -> String {
+    let launchd_keep_alive = tunnel.keep_alive && !(tunnel.auto_start && is_ssh(&tunnel.command));
     let mut out = String::new();
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     out.push_str(
@@ -52,7 +57,7 @@ pub fn plist_xml_with_log_proxy(
     }
     out.push_str(&format!(
         "\t<key>KeepAlive</key>\n\t<{}/>\n",
-        if tunnel.keep_alive { "true" } else { "false" }
+        if launchd_keep_alive { "true" } else { "false" }
     ));
     out.push_str(&format!(
         "\t<key>Label</key>\n\t<string>{}</string>\n",
@@ -144,15 +149,8 @@ fn install_log_proxy(paths: &TunnelPaths) -> io::Result<Option<PathBuf>> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "日志代理目标路径无父目录"))?;
     fs::create_dir_all(parent)?;
     let data = fs::read(&source)?;
-    let temporary = destination.with_extension("tmp-atomic");
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true).mode(0o755);
-    let mut file = options.open(&temporary)?;
-    use std::io::Write;
-    file.write_all(&data)?;
-    file.sync_all()?;
-    drop(file);
-    fs::rename(&temporary, &destination)?;
+    write_atomic_with_mode(&destination, &data, 0o755)?;
+    fs::set_permissions(&destination, fs::Permissions::from_mode(0o755))?;
     Ok(Some(destination))
 }
 
@@ -173,10 +171,50 @@ fn is_app_bundle_executable(executable: &Path) -> bool {
 
 /// Swift `.atomic` 写入语义对齐：写临时文件后 rename。
 pub fn write_atomic(path: &Path, data: &[u8]) -> io::Result<()> {
-    let tmp = path.with_extension("tmp-atomic");
-    fs::write(&tmp, data)?;
-    fs::rename(&tmp, path)?;
-    Ok(())
+    write_atomic_with_mode(path, data, 0o600)
+}
+
+fn write_atomic_with_mode(path: &Path, data: &[u8], mode: u32) -> io::Result<()> {
+    use std::io::Write;
+
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "原子写入目标没有父目录"))?;
+    fs::create_dir_all(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "原子写入目标文件名无效"))?;
+
+    for _ in 0..16 {
+        let sequence = ATOMIC_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let temporary = parent.join(format!(
+            ".{file_name}.tmp-{}-{sequence}",
+            std::process::id()
+        ));
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true).mode(mode);
+        let mut file = match options.open(&temporary) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        };
+        let result = (|| {
+            file.write_all(data)?;
+            file.sync_all()?;
+            drop(file);
+            fs::rename(&temporary, path)
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        return result;
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "无法分配唯一原子写入临时文件",
+    ))
 }
 
 pub fn path_to_string(path: &Path) -> String {
@@ -230,5 +268,41 @@ mod tests {
         assert!(xml.contains("<key>StandardErrorPath</key>\n\t<string>/dev/null</string>"));
         assert!(xml.contains("<key>StandardOutPath</key>\n\t<string>/dev/null</string>"));
         assert!(xml.contains("<key>AbandonProcessGroup</key>\n\t<false/>"));
+    }
+
+    #[test]
+    fn unattended_ssh_disables_launchd_keep_alive() {
+        let tunnel: TunnelConfig = serde_json::from_value(serde_json::json!({
+            "id": "web", "name": "web", "command": ["/usr/bin/ssh", "-N", "host"],
+            "executor": "launchd", "keepAlive": true, "autoStart": true,
+            "throttleInterval": 10
+        }))
+        .unwrap();
+        let xml = plist_xml_with_log_proxy(&tunnel, "/tmp/web.log", Some("/tmp/proxy"));
+        assert!(xml.contains("\t<key>KeepAlive</key>\n\t<false/>"));
+    }
+
+    #[test]
+    fn concurrent_atomic_writes_do_not_share_temporary_file() {
+        let directory = std::env::temp_dir().join(format!(
+            "tunnelpad-atomic-write-{}-{}",
+            std::process::id(),
+            ATOMIC_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let target = directory.join("value");
+        let mut threads = Vec::new();
+        for value in [b"first".as_slice(), b"second".as_slice()] {
+            let target = target.clone();
+            let value = value.to_vec();
+            threads.push(std::thread::spawn(move || write_atomic(&target, &value)));
+        }
+        for thread in threads {
+            thread.join().unwrap().unwrap();
+        }
+        let result = fs::read(&target).unwrap();
+        assert!(result == b"first" || result == b"second");
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+        fs::remove_dir_all(directory).unwrap();
     }
 }

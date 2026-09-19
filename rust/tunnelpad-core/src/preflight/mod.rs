@@ -16,6 +16,7 @@ use tunnelpad_core::launchctl::{
 };
 
 type Result<T> = std::result::Result<T, Failure>;
+const AUTH_RETRY_SECONDS: u64 = 300;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Failure {
@@ -42,7 +43,7 @@ impl Failure {
             .into(),
             category: category.into(),
             retry_hint: match category {
-                "auth" => 1800,
+                "auth" => AUTH_RETRY_SECONDS,
                 "local" | "unknown" => 300,
                 "success" => 0,
                 _ => 5,
@@ -395,4 +396,16 @@ pub fn main() -> i32 {
         }
     }
     status.exit_code
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn authentication_retry_never_exceeds_unattended_retry_bound() {
+        let failure = Failure::new(4, "auth", "cloud_auth");
+        assert_eq!(failure.retry_hint, AUTH_RETRY_SECONDS);
+        assert!(failure.retry_hint <= 300);
+    }
 }

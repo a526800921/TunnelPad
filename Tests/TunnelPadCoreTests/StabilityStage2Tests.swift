@@ -226,7 +226,7 @@ final class StabilityStage2Tests: XCTestCase {
         }
         try await Task.sleep(nanoseconds: 20_000_000)
         owner.releaseFirstSnapshot()
-        await shutdownTask.value
+        _ = await shutdownTask.value
 
         XCTAssertNil(manager.statuses[tunnel.id], "退出开始后的旧快照不得回写 UI")
     }
@@ -286,13 +286,17 @@ final class StabilityStage2Tests: XCTestCase {
         )
 
         try await Self.waitUntil(timeout: 2) {
-            checker.asyncIDs.count >= 1
+            checker.asyncIDs.count >= 2
         }
 
-        XCTAssertEqual(order.values, ["stop", "preflight"])
-        XCTAssertEqual(owner.lifecycleEvents, ["stop"])
-        XCTAssertEqual(checker.asyncIDs, [tunnel.id])
         await manager.shutdownAsync()
+        let values = order.values
+        XCTAssertGreaterThanOrEqual(values.filter { $0 == "stop" }.count, 2)
+        XCTAssertGreaterThanOrEqual(values.filter { $0 == "preflight" }.count, 2)
+        XCTAssertTrue(values.filter { $0 == "start" }.isEmpty)
+        XCTAssertTrue(owner.lifecycleEvents.filter { $0 == "start" }.isEmpty)
+        XCTAssertGreaterThanOrEqual(checker.asyncIDs.count, 2)
+        XCTAssertTrue(checker.asyncIDs.allSatisfy { $0 == tunnel.id })
     }
 
     @MainActor
@@ -332,7 +336,9 @@ final class StabilityStage2Tests: XCTestCase {
             "第一次同步失败后应沿用下一次有界恢复，而不是因 notLoaded 截断"
         )
         XCTAssertEqual(checker.asyncIDs, [tunnel.id, tunnel.id])
-        XCTAssertEqual(manager.lastMessage, "「ECS retry」已自动恢复")
+        try await Self.waitUntil(timeout: 2) {
+            manager.lastMessage == "「ECS retry」已自动恢复（连接探针已确认）"
+        }
         await manager.shutdownAsync()
     }
 
@@ -399,7 +405,9 @@ final class StabilityStage2Tests: XCTestCase {
 
         XCTAssertEqual(order.values, ["stop", "preflight", "start"])
         XCTAssertEqual(checker.asyncIDs, [tunnel.id])
-        XCTAssertEqual(manager.lastMessage, "「ECS transient status」已自动恢复")
+        try await Self.waitUntil(timeout: 2) {
+            manager.lastMessage == "「ECS transient status」已自动恢复（连接探针已确认）"
+        }
         await manager.shutdownAsync()
     }
 
@@ -432,11 +440,9 @@ final class StabilityStage2Tests: XCTestCase {
 
         XCTAssertEqual(order.values, ["stop", "preflight", "start"])
         XCTAssertEqual(checker.asyncIDs, [tunnel.id])
-        XCTAssertEqual(
-            manager.lastMessage,
-            "「ECS transient start」已自动恢复",
-            "events=\(owner.events), lastError=\(manager.lastError ?? "nil")"
-        )
+        try await Self.waitUntil(timeout: 2) {
+            manager.lastMessage == "「ECS transient start」已自动恢复（连接探针已确认）"
+        }
         await manager.shutdownAsync()
     }
 
@@ -524,9 +530,10 @@ final class StabilityStage2Tests: XCTestCase {
         )
     }
 
+    @MainActor
     private static func waitUntil(
         timeout: TimeInterval,
-        condition: @escaping @Sendable () -> Bool
+        condition: @escaping () -> Bool
     ) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition(), Date() < deadline {

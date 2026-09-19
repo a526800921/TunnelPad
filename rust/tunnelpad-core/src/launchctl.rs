@@ -49,7 +49,15 @@ pub enum ExecutorError {
     Cancelled,
 }
 
-/// 受管进程的最小身份票据。完整 argv 不属于运行时身份条件。
+/// TunnelPad 生成的 launchd 作业身份。停止前必须同时匹配 plist 来源和完整
+/// ProgramArguments，不能仅凭 label 或可执行文件路径授权 bootout/信号。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManagedLaunchdIdentity {
+    pub plist_path: PathBuf,
+    pub program_arguments: Vec<String>,
+}
+
+/// 受管进程的运行时身份票据；与上面的 launchd 作业身份共同构成授权条件。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcessIdentity {
     pub pid: i32,
@@ -585,6 +593,8 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
                 status: TunnelStatus::NotLoaded,
                 pid: None,
                 program: None,
+                plist_path: None,
+                program_arguments: None,
             }
         } else {
             let details = parse_status_details(&result.stdout);
@@ -668,10 +678,23 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
         label: &str,
         cancellation: &CancellationToken,
     ) -> Result<bool, ExecutorError> {
-        let result = self.run_process(
-            &["bootout".into(), format!("{}/{}", self.domain(), label)],
-            Some(cancellation),
-        )?;
+        let result = self
+            .runner
+            .run_cancellable_with_timeout(
+                Self::LAUNCHCTL_PATH,
+                &["bootout".into(), format!("{}/{}", self.domain(), label)],
+                cancellation,
+                Duration::from_secs(2),
+            )
+            .map_err(|error| match error {
+                ProcessRunError::Spawn { message } => ExecutorError::Spawn { message },
+                ProcessRunError::Cancelled => ExecutorError::Cancelled,
+                ProcessRunError::TimedOut => ExecutorError::CommandFailed {
+                    operation: "bootout".into(),
+                    exit_code: -1,
+                    stderr: "launchctl bootout 执行超时".into(),
+                },
+            })?;
         if result.exit_code == 0 {
             return Ok(true);
         }
@@ -744,6 +767,8 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
                     status: TunnelStatus::NotLoaded,
                     pid: None,
                     program: None,
+                    plist_path: None,
+                    program_arguments: None,
                 };
                 self.remember_status(label, (details.status.clone(), details.pid));
                 Ok(details)
@@ -778,26 +803,29 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
     pub fn stop_managed_cancellable(
         &self,
         label: &str,
-        executable_path: &Path,
+        managed_identities: &[ManagedLaunchdIdentity],
         cancellation: &CancellationToken,
     ) -> Result<bool, ExecutorError> {
         if cancellation.is_cancelled() {
             return Err(ExecutorError::Cancelled);
         }
-        let (initial_status, pid, program) = match self.status_details_checked(label) {
-            Ok(details) => (details.status, details.pid, details.program),
-            Err(error) if is_status_query_timeout(&error) => {
-                let (status, pid) = self.cached_status(label).ok_or(error)?;
-                (status, pid, None)
-            }
-            Err(error) => return Err(error),
-        };
-        if initial_status == TunnelStatus::NotLoaded {
+        let details = self.status_details_checked(label)?;
+        if details.status == TunnelStatus::NotLoaded {
             return Ok(false);
         }
-        let executable_path = program.as_deref().unwrap_or(executable_path);
-        let expected = match pid {
-            Some(pid) => Some(self.capture_identity(pid, executable_path)?),
+        let managed_identity = managed_identities
+            .iter()
+            .find(|identity| launchd_details_match_identity(&details, identity))
+            .ok_or_else(|| ExecutorError::ManagedProcessIdentityUnknown {
+                stage: "launchd plist 或参数不属于 TunnelPad 受管作业".into(),
+            })?;
+        let Some(executable_path) = managed_identity.program_arguments.first() else {
+            return Err(ExecutorError::ManagedProcessIdentityUnknown {
+                stage: "受管 launchd 参数为空".into(),
+            });
+        };
+        let expected = match details.pid {
+            Some(pid) => Some(self.capture_identity(pid, &[PathBuf::from(executable_path)])?),
             None => None,
         };
         // launchctl bootout 可能等待一个已被 SIGSTOP 的 job 退出；这里必须
@@ -807,6 +835,7 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
         if self.wait_for_convergence(
             label,
             expected.as_ref(),
+            managed_identity,
             MANAGED_STOP_INITIAL_WAIT_MS,
             cancellation,
         )? {
@@ -824,7 +853,7 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
             (SIGTERM_SIGNAL, MANAGED_STOP_TERM_WAIT_MS, false),
             (SIGKILL_SIGNAL, MANAGED_STOP_KILL_WAIT_MS, true),
         ] {
-            self.verify_identity(label, expected, executable_path, cancellation)?;
+            self.verify_identity(label, expected, managed_identity, cancellation)?;
             let result = if group_signal {
                 self.signaler.send_group(expected.process_group_id, signal)
             } else {
@@ -838,7 +867,13 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
                     });
                 }
             }
-            if self.wait_for_convergence(label, Some(expected), wait_ms, cancellation)? {
+            if self.wait_for_convergence(
+                label,
+                Some(expected),
+                managed_identity,
+                wait_ms,
+                cancellation,
+            )? {
                 return Ok(stopped);
             }
         }
@@ -881,7 +916,7 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
     fn capture_identity(
         &self,
         pid: i32,
-        executable_path: &Path,
+        allowed_executable_paths: &[PathBuf],
     ) -> Result<ProcessIdentity, ExecutorError> {
         let identity = self.identity_reader.read(pid).map_err(|_| {
             ExecutorError::ManagedProcessIdentityUnknown {
@@ -891,7 +926,9 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
         if identity.pid != pid
             || identity.uid != self.uid
             || identity.process_group_id != identity.pid
-            || identity.executable_path != executable_path
+            || !allowed_executable_paths
+                .iter()
+                .any(|allowed| allowed == &identity.executable_path)
         {
             return Err(ExecutorError::ManagedProcessIdentityUnknown {
                 stage: "捕获受管身份不匹配".into(),
@@ -904,7 +941,7 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
         &self,
         label: &str,
         expected: &ProcessIdentity,
-        executable_path: &Path,
+        managed_identity: &ManagedLaunchdIdentity,
         cancellation: &CancellationToken,
     ) -> Result<(), ExecutorError> {
         if cancellation.is_cancelled() {
@@ -914,15 +951,12 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
             Ok(details) => {
                 if matches!(details.status, TunnelStatus::NotLoaded)
                     || details.pid != Some(expected.pid)
+                    || !launchd_details_match_identity(&details, managed_identity)
                 {
                     return Err(ExecutorError::ManagedProcessIdentityUnknown {
                         stage: "信号前 launchd 身份变化".into(),
                     });
                 }
-            }
-            Err(error) if is_status_query_timeout(&error) => {
-                // 状态未知时仍必须通过下方完整的进程身份票据核验；不以
-                // timeout 本身推断 PID 所属关系，也不向其他 PID 发信号。
             }
             Err(error) => return Err(error),
         }
@@ -933,7 +967,7 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
         })?;
         if current != *expected
             || current.uid != self.uid
-            || current.executable_path != executable_path
+            || current.process_group_id != current.pid
         {
             return Err(ExecutorError::ManagedProcessIdentityUnknown {
                 stage: "信号前受管身份变化".into(),
@@ -946,6 +980,7 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
         &self,
         label: &str,
         expected: Option<&ProcessIdentity>,
+        managed_identity: &ManagedLaunchdIdentity,
         timeout_ms: u64,
         cancellation: &CancellationToken,
     ) -> Result<bool, ExecutorError> {
@@ -974,27 +1009,11 @@ impl<R: ProcessRunning> LaunchCtlExecutor<R> {
                             }
                         }
                     } else if let Some(expected) = expected {
-                        if details.pid != Some(expected.pid) {
+                        if details.pid != Some(expected.pid)
+                            || !launchd_details_match_identity(&details, managed_identity)
+                        {
                             return Err(ExecutorError::ManagedProcessIdentityUnknown {
                                 stage: "等待收敛时 launchd PID 变化".into(),
-                            });
-                        }
-                    }
-                }
-                Err(error) if is_status_query_timeout(&error) => {
-                    let Some(expected) = expected else {
-                        return Err(error);
-                    };
-                    match self.identity_reader.read(expected.pid) {
-                        Err(ProcessIdentityError::NotFound) => return Ok(true),
-                        Ok(current) if current != *expected => return Ok(true),
-                        Ok(_) => {}
-                        Err(
-                            ProcessIdentityError::PermissionDenied
-                            | ProcessIdentityError::Unavailable,
-                        ) => {
-                            return Err(ExecutorError::ManagedProcessIdentityUnknown {
-                                stage: "超时后确认原 PID 消失".into(),
                             });
                         }
                     }
@@ -1049,18 +1068,41 @@ struct LaunchdStatusDetails {
     status: TunnelStatus,
     pid: Option<i32>,
     program: Option<PathBuf>,
+    plist_path: Option<PathBuf>,
+    program_arguments: Option<Vec<String>>,
 }
 
 fn parse_status_details(stdout: &str) -> LaunchdStatusDetails {
     let mut state: Option<String> = None;
     let mut pid: Option<i32> = None;
     let mut program: Option<PathBuf> = None;
+    let mut plist_path: Option<PathBuf> = None;
+    let mut program_arguments: Option<Vec<String>> = None;
+    let mut collecting_arguments: Option<Vec<String>> = None;
 
     for line in stdout.split('\n').filter(|l| !l.is_empty()) {
-        if leading_tab_count(line) != 1 {
+        let indentation = leading_tab_count(line);
+        let trimmed = line.trim_matches(|c: char| c == ' ' || c == '\t');
+        if let Some(arguments) = collecting_arguments.as_mut() {
+            if indentation == 1 && trimmed == "}" {
+                program_arguments = collecting_arguments.take();
+                continue;
+            }
+            if indentation == 2 {
+                arguments.push(trimmed.to_string());
+                continue;
+            }
+            // 形状不明确时丢弃整个参数块；受管停止会 fail-closed。
+            collecting_arguments = None;
+            program_arguments = None;
+        }
+        if indentation != 1 {
             continue;
         }
-        let trimmed = line.trim_matches(|c: char| c == ' ' || c == '\t');
+        if trimmed == "arguments = {" {
+            collecting_arguments = Some(Vec::new());
+            continue;
+        }
         if state.is_none() {
             if let Some(value) = top_level_value("state", trimmed) {
                 state = Some(value.to_string());
@@ -1079,6 +1121,11 @@ fn parse_status_details(stdout: &str) -> LaunchdStatusDetails {
                 program = Some(PathBuf::from(value));
             }
         }
+        if plist_path.is_none() {
+            if let Some(value) = top_level_value("path", trimmed) {
+                plist_path = Some(PathBuf::from(value));
+            }
+        }
     }
 
     let status = match state.as_deref() {
@@ -1093,7 +1140,21 @@ fn parse_status_details(stdout: &str) -> LaunchdStatusDetails {
         status,
         pid,
         program,
+        plist_path,
+        program_arguments,
     }
+}
+
+fn launchd_details_match_identity(
+    details: &LaunchdStatusDetails,
+    identity: &ManagedLaunchdIdentity,
+) -> bool {
+    let Some(executable) = identity.program_arguments.first() else {
+        return false;
+    };
+    details.plist_path.as_ref() == Some(&identity.plist_path)
+        && details.program.as_deref() == Some(Path::new(executable))
+        && details.program_arguments.as_ref() == Some(&identity.program_arguments)
 }
 
 fn signal_name(signal: i32) -> &'static str {
@@ -1228,12 +1289,29 @@ mod tests {
         })
     }
 
+    fn managed_identity() -> ManagedLaunchdIdentity {
+        ManagedLaunchdIdentity {
+            plist_path: PathBuf::from("/tmp/managed.plist"),
+            program_arguments: vec!["/usr/bin/ssh".into(), "-N".into(), "host".into()],
+        }
+    }
+
+    fn managed_status_output(state: &str, pid: i32) -> Result<ProcessResult, String> {
+        process_output(
+            0,
+            &format!(
+                "\tpath = /tmp/managed.plist\n\tstate = {state}\n\tprogram = /usr/bin/ssh\n\targuments = {{\n\t\t/usr/bin/ssh\n\t\t-N\n\t\thost\n\t}}\n\tpid = {pid}\n"
+            ),
+            "",
+        )
+    }
+
     fn running_output(pid: i32) -> Result<ProcessResult, String> {
-        process_output(0, &format!("\tstate = running\n\tpid = {pid}\n"), "")
+        managed_status_output("running", pid)
     }
 
     fn other_output(pid: i32) -> Result<ProcessResult, String> {
-        process_output(0, &format!("\tstate = SIGTERMed\n\tpid = {pid}\n"), "")
+        managed_status_output("SIGTERMed", pid)
     }
 
     fn not_loaded_output() -> Result<ProcessResult, String> {
@@ -1253,13 +1331,25 @@ mod tests {
     #[test]
     fn parse_status_captures_top_level_program_for_managed_identity() {
         let details = parse_status_details(
-            "\tstate = running\n\tpid = 7\n\tprogram = /tmp/tunnelpad-log-proxy\n\t\tstate = nested\n",
+            "\tpath = /tmp/managed.plist\n\tstate = running\n\tpid = 7\n\tprogram = /tmp/tunnelpad-log-proxy\n\targuments = {\n\t\t/tmp/tunnelpad-log-proxy\n\t\t--\n\t\t/usr/bin/ssh\n\t}\n\t\tstate = nested\n",
         );
         assert_eq!(details.status, TunnelStatus::Running { pid: Some(7) });
         assert_eq!(details.pid, Some(7));
         assert_eq!(
             details.program,
             Some(PathBuf::from("/tmp/tunnelpad-log-proxy"))
+        );
+        assert_eq!(
+            details.plist_path,
+            Some(PathBuf::from("/tmp/managed.plist"))
+        );
+        assert_eq!(
+            details.program_arguments,
+            Some(vec![
+                "/tmp/tunnelpad-log-proxy".into(),
+                "--".into(),
+                "/usr/bin/ssh".into(),
+            ])
         );
     }
 
@@ -1421,6 +1511,30 @@ mod tests {
         );
     }
 
+    #[test]
+    fn managed_stop_fails_closed_when_initial_status_times_out() {
+        let signaler = Signaler::default();
+        let executor = LaunchCtlExecutor::with_process_control(
+            TimedOutRunner,
+            501,
+            Arc::new(IdentityReader::new(vec![])),
+            Arc::new(signaler.clone()),
+        );
+        executor.remember_status("managed", (TunnelStatus::Running { pid: Some(7) }, Some(7)));
+
+        let error = executor
+            .stop_managed_cancellable("managed", &[managed_identity()], &CancellationToken::new())
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ExecutorError::CommandFailed { operation, exit_code: -1, .. }
+                if operation == "status"
+        ));
+        assert!(signaler.signals.lock().unwrap().is_empty());
+        assert!(signaler.group_signals.lock().unwrap().is_empty());
+    }
+
     struct ManagedStopBootoutTimeoutRunner {
         outputs: Mutex<VecDeque<Result<ProcessResult, ProcessRunError>>>,
     }
@@ -1468,12 +1582,45 @@ mod tests {
         assert_eq!(
             executor.stop_managed_cancellable(
                 "managed",
-                Path::new("/usr/bin/ssh"),
+                &[managed_identity()],
                 &CancellationToken::new(),
             ),
             Ok(false)
         );
         assert!(signaler.signals.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn managed_stop_fails_closed_when_status_times_out_after_bootout_timeout() {
+        let reader = IdentityReader::new(vec![Ok(identity(7))]);
+        let signaler = Signaler::default();
+        let executor = LaunchCtlExecutor::with_process_control(
+            ManagedStopBootoutTimeoutRunner {
+                outputs: Mutex::new(
+                    vec![
+                        running_output(7).map_err(|message| ProcessRunError::Spawn { message }),
+                        Err(ProcessRunError::TimedOut),
+                        Err(ProcessRunError::TimedOut),
+                    ]
+                    .into(),
+                ),
+            },
+            501,
+            Arc::new(reader),
+            Arc::new(signaler.clone()),
+        );
+
+        let error = executor
+            .stop_managed_cancellable("managed", &[managed_identity()], &CancellationToken::new())
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ExecutorError::CommandFailed { operation, exit_code: -1, .. }
+                if operation == "status"
+        ));
+        assert!(signaler.signals.lock().unwrap().is_empty());
+        assert!(signaler.group_signals.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -1493,11 +1640,7 @@ mod tests {
         );
 
         let stopped = executor
-            .stop_managed_cancellable(
-                "managed",
-                Path::new("/usr/bin/ssh"),
-                &CancellationToken::new(),
-            )
+            .stop_managed_cancellable("managed", &[managed_identity()], &CancellationToken::new())
             .unwrap();
         assert!(stopped);
         assert!(signaler.signals.lock().unwrap().is_empty());
@@ -1515,11 +1658,7 @@ mod tests {
         );
 
         let stopped = executor
-            .stop_managed_cancellable(
-                "managed",
-                Path::new("/usr/bin/ssh"),
-                &CancellationToken::new(),
-            )
+            .stop_managed_cancellable("managed", &[managed_identity()], &CancellationToken::new())
             .unwrap();
         assert!(!stopped);
         assert!(signaler.signals.lock().unwrap().is_empty());
@@ -1536,11 +1675,7 @@ mod tests {
         );
 
         let error = executor
-            .stop_managed_cancellable(
-                "managed",
-                Path::new("/usr/bin/ssh"),
-                &CancellationToken::new(),
-            )
+            .stop_managed_cancellable("managed", &[managed_identity()], &CancellationToken::new())
             .unwrap_err();
         assert!(matches!(
             error,
@@ -1560,11 +1695,7 @@ mod tests {
         );
 
         let error = executor
-            .stop_managed_cancellable(
-                "managed",
-                Path::new("/usr/bin/ssh"),
-                &CancellationToken::new(),
-            )
+            .stop_managed_cancellable("managed", &[managed_identity()], &CancellationToken::new())
             .unwrap_err();
         assert!(matches!(
             error,
@@ -1572,6 +1703,83 @@ mod tests {
                 if operation == "status"
         ));
         assert!(signaler.signals.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn managed_stop_rejects_foreign_launchd_program_before_identity_capture() {
+        let signaler = Signaler::default();
+        let executor = LaunchCtlExecutor::with_process_control(
+            FakeRunner::new(vec![process_output(
+                0,
+                "\tstate = running\n\tpid = 7\n\tprogram = /tmp/foreign-program\n",
+                "",
+            )]),
+            501,
+            Arc::new(IdentityReader::new(vec![])),
+            Arc::new(signaler.clone()),
+        );
+
+        let error = executor
+            .stop_managed_cancellable("managed", &[managed_identity()], &CancellationToken::new())
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ExecutorError::ManagedProcessIdentityUnknown { .. }
+        ));
+        assert!(signaler.signals.lock().unwrap().is_empty());
+        assert!(signaler.group_signals.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn managed_stop_rejects_same_executable_with_unmanaged_arguments() {
+        let signaler = Signaler::default();
+        let executor = LaunchCtlExecutor::with_process_control(
+            FakeRunner::new(vec![process_output(
+                0,
+                "\tpath = /tmp/managed.plist\n\tstate = running\n\tpid = 7\n\tprogram = /usr/bin/ssh\n\targuments = {\n\t\t/usr/bin/ssh\n\t\t-N\n\t\tother-host\n\t}\n",
+                "",
+            )]),
+            501,
+            Arc::new(IdentityReader::new(vec![])),
+            Arc::new(signaler.clone()),
+        );
+
+        let error = executor
+            .stop_managed_cancellable("managed", &[managed_identity()], &CancellationToken::new())
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ExecutorError::ManagedProcessIdentityUnknown { .. }
+        ));
+        assert!(signaler.signals.lock().unwrap().is_empty());
+        assert!(signaler.group_signals.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn managed_stop_rejects_same_executable_from_unmanaged_plist() {
+        let signaler = Signaler::default();
+        let executor = LaunchCtlExecutor::with_process_control(
+            FakeRunner::new(vec![process_output(
+                0,
+                "\tpath = /tmp/foreign.plist\n\tstate = running\n\tpid = 7\n\tprogram = /usr/bin/ssh\n\targuments = {\n\t\t/usr/bin/ssh\n\t\t-N\n\t\thost\n\t}\n",
+                "",
+            )]),
+            501,
+            Arc::new(IdentityReader::new(vec![])),
+            Arc::new(signaler.clone()),
+        );
+
+        let error = executor
+            .stop_managed_cancellable("managed", &[managed_identity()], &CancellationToken::new())
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ExecutorError::ManagedProcessIdentityUnknown { .. }
+        ));
+        assert!(signaler.signals.lock().unwrap().is_empty());
+        assert!(signaler.group_signals.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -1603,11 +1811,7 @@ mod tests {
         );
 
         let stopped = executor
-            .stop_managed_cancellable(
-                "managed",
-                Path::new("/usr/bin/ssh"),
-                &CancellationToken::new(),
-            )
+            .stop_managed_cancellable("managed", &[managed_identity()], &CancellationToken::new())
             .unwrap();
         assert!(stopped);
         assert_eq!(
@@ -1636,11 +1840,7 @@ mod tests {
         );
 
         let error = executor
-            .stop_managed_cancellable(
-                "managed",
-                Path::new("/usr/bin/ssh"),
-                &CancellationToken::new(),
-            )
+            .stop_managed_cancellable("managed", &[managed_identity()], &CancellationToken::new())
             .unwrap_err();
         assert!(matches!(
             error,

@@ -38,6 +38,9 @@ public final class TunnelManager: ObservableObject {
     private var rustOperationGenerations: [String: UInt64] = [:]
     /// 每条隧道独立维护健康状态；熔断只影响该隧道，监测仍可继续提供只读状态。
     private var healthRecoveryStates: [String: HealthRecoveryState] = [:]
+    /// 用户显式停止是独立于瞬时恢复状态的意图。配置编辑/重载不能清除此集合；
+    /// 只有显式 start/restart 或删除同一 ID 才能改变它。
+    private var manuallyStoppedIDs: Set<String> = []
     private var recoveryTasks: [String: Task<Void, Never>] = [:]
     /// 删除隧道后保留代次墓碑，避免不可立即取消的旧任务在同 ID 重建后复活。
     private var recoveryGenerations: [String: UInt] = [:]
@@ -48,23 +51,22 @@ public final class TunnelManager: ObservableObject {
     private static let lifecycleStatusSettleAttempts = 30
     private static let lifecycleStatusSettleDelayNanoseconds: UInt64 = 100_000_000
     private static let defaultLaunchdFailureMonitorIntervalNanoseconds: UInt64 = 1_000_000_000
-    private static let launchdRecoveryStableSampleCount = 3
     private let healthMonitorIntervalNanoseconds: UInt64
     private let launchdFailureMonitorIntervalNanoseconds: UInt64
     private let healthSleep: @Sendable (UInt64) async throws -> Void
     private struct LaunchdFailureObservation: Sendable {
         var isHealthy: Bool
         var pid: Int32?
-        var healthySampleCount: Int
     }
     private var launchdFailureObservations: [String: LaunchdFailureObservation] = [:]
-    /// launchd 报告 running 不能证明 SSH 已建立；直接故障恢复后必须观察到
-    /// 连续稳定的 PID，才清除本轮恢复计数。
-    private var launchdRecoveryAwaitingStability: Set<String> = []
+    /// launchd 报告 running 不能证明 SSH 已建立；只有连接探针成功才清除
+    /// 本轮恢复计数。无探针隧道保留恢复历史并继续监听 launchd 异常。
+    private var recoveryAwaitingConnectivityConfirmation: Set<String> = []
     private let launchRestoreDiscoveryAttempts: Int
     private let launchRestoreDiscoveryPollNanoseconds: UInt64
     private let appEventLog: AppEventLog
     private let launchClock: LaunchRecoveryClock
+    private let recoveryPreflightCoordinator: SharedRecoveryPreflightCoordinator
     private var launchCoordinator: LaunchRecoveryCoordinator?
     private var launchSetupTask: Task<Void, Never>?
     private var launchExcludedIDs: Set<String> = []
@@ -128,8 +130,9 @@ public final class TunnelManager: ObservableObject {
         self.launchRestoreDiscoveryPollNanoseconds = launchRestoreDiscoveryPollNanoseconds
         self.appEventLog = AppEventLog(paths: paths)
         self.launchClock = launchClock
+        self.recoveryPreflightCoordinator = SharedRecoveryPreflightCoordinator(clock: launchClock)
         self.shutdownHandle = Shutdown.OwnerHandle {
-            (try? rustCore.shutdown()) ?? 0
+            try rustCore.shutdown()
         }
         do {
             self.config = try rustCore.loadConfig()
@@ -229,7 +232,6 @@ public final class TunnelManager: ObservableObject {
             lastError = "保存「\(tunnel.name)」失败：隧道不存在或已被删除"
             return false
         }
-        let old = config.tunnels[index]
         var nextConfig = config
         nextConfig.tunnels[index] = tunnel
         let configToSave = nextConfig
@@ -243,10 +245,12 @@ public final class TunnelManager: ObservableObject {
                 return false
             }
             config = nextConfig
-            if old != tunnel {
+            if runtimeChanged {
                 launchdFailureObservations.removeValue(forKey: tunnel.id)
-                launchdRecoveryAwaitingStability.remove(tunnel.id)
-                healthRecoveryStates.removeValue(forKey: tunnel.id)
+                recoveryAwaitingConnectivityConfirmation.remove(tunnel.id)
+                if !manuallyStoppedIDs.contains(tunnel.id) {
+                    healthRecoveryStates.removeValue(forKey: tunnel.id)
+                }
             }
             if tunnel.probe == nil {
                 updateRuntime { $0.setProbeResult(nil, for: tunnel.id) }
@@ -364,8 +368,20 @@ public final class TunnelManager: ObservableObject {
         guard budget > 0 else { return .retry(.transient) }
         var status = try await Task.detached(priority: .utility) { [budget] in try owner.launchRecoveryStatus(id: id, generation: generation, timeout: min(2, budget)) }.value
         try validate()
-        if case .running(let pid) = status, let pid, pid > 0 { return .running(.running(pid: pid)) }
-        if status == .notRunning && !expected.keepAlive {
+        if case .running(let pid) = status, let pid, pid > 0 {
+            let requiresSingleOwnerMigration = expected.autoStart
+                && expected.keepAlive
+                && SSHCommand.isSSH(expected.command)
+            if !requiresSingleOwnerMigration {
+                return .running(.running(pid: pid))
+            }
+            budget = remaining()
+            status = try await Task.detached(priority: .utility) { [budget] in
+                try owner.launchRecoveryStop(id: id, generation: generation, timeout: budget)
+            }.value
+            try validate()
+        }
+        if status == .notRunning {
             budget = remaining()
             status = try await Task.detached(priority: .utility) { [budget] in try owner.launchRecoveryStop(id: id, generation: generation, timeout: budget) }.value
             try validate()
@@ -422,6 +438,7 @@ public final class TunnelManager: ObservableObject {
                 $0.setProbeResult(nil, for: id)
             }
             healthRecoveryStates.removeValue(forKey: id)
+            manuallyStoppedIDs.remove(id)
             syncLogStore()
             refresh()
         } catch {
@@ -450,6 +467,7 @@ public final class TunnelManager: ObservableObject {
                 $0.setProbeResult(nil, for: id)
             }
             healthRecoveryStates.removeValue(forKey: id)
+            manuallyStoppedIDs.remove(id)
             syncLogStore()
             await refreshAsync()
         } catch is CancellationError {
@@ -552,10 +570,20 @@ public final class TunnelManager: ObservableObject {
         let nextByID = Dictionary(uniqueKeysWithValues: nextConfig.tunnels.map { ($0.id, $0) })
         let changedIDs = Set(oldByID.keys).union(nextByID.keys).filter { oldByID[$0] != nextByID[$0] }
         for id in changedIDs {
-            if let old = oldByID[id], nextByID[id].map({ old.matchesLaunchRuntime($0) }) != true { cancelLaunchRecovery(id) }
+            let runtimeChanged = oldByID[id].flatMap { old in
+                nextByID[id].map { !old.matchesLaunchRuntime($0) }
+            } ?? true
+            guard runtimeChanged else { continue }
+            // 首次有效配置可能在 App 启动后才读到；新增项此时仍属于冻结候选。
+            // 只有原来已经存在的候选发生运行时变化/删除才排除本轮启动恢复。
+            if oldByID[id] != nil {
+                cancelLaunchRecovery(id)
+            }
             cancelRecovery(for: id)
             launchdFailureObservations.removeValue(forKey: id)
-            healthRecoveryStates.removeValue(forKey: id)
+            if !manuallyStoppedIDs.contains(id) {
+                healthRecoveryStates.removeValue(forKey: id)
+            }
         }
         if !changedIDs.isEmpty {
             invalidateProbeResults()
@@ -563,6 +591,7 @@ public final class TunnelManager: ObservableObject {
 
         config = nextConfig
         let validIDs = Set(nextConfig.tunnels.map(\.id))
+        manuallyStoppedIDs.formIntersection(validIDs)
         updateRuntime { state in
             state.prune(to: validIDs)
             for id in changedIDs { state.setProbeResult(nil, for: id) }
@@ -660,9 +689,7 @@ public final class TunnelManager: ObservableObject {
     private func runLaunchdFailureCycle() async {
         guard !Task.isCancelled, !isShuttingDown,
               let reader = rustCore as? any RustHealthStatusReader else { return }
-        let candidates = config.tunnels.filter {
-            $0.autoStart && $0.keepAlive && SSHCommand.isSSH($0.command)
-        }
+        let candidates = unattendedRecoveryCandidates()
         for candidate in candidates {
             let id = candidate.id
             guard !Task.isCancelled, !isShuttingDown,
@@ -675,6 +702,7 @@ public final class TunnelManager: ObservableObject {
                 }.value
             } catch {
                 // 状态不确定时不推断抖动，也不执行 bootout 或同步。
+                launchdFailureObservations.removeValue(forKey: id)
                 continue
             }
             guard !Task.isCancelled, !isShuttingDown,
@@ -685,9 +713,9 @@ public final class TunnelManager: ObservableObject {
     }
 
     private func observeLaunchdFailure(for tunnel: TunnelConfig, status: TunnelStatus) {
-        guard healthRecoveryStates[tunnel.id]?.phase != .manuallyStopped else {
+        guard !manuallyStoppedIDs.contains(tunnel.id) else {
             launchdFailureObservations.removeValue(forKey: tunnel.id)
-            launchdRecoveryAwaitingStability.remove(tunnel.id)
+            recoveryAwaitingConnectivityConfirmation.remove(tunnel.id)
             return
         }
         let id = tunnel.id
@@ -703,23 +731,10 @@ public final class TunnelManager: ObservableObject {
 
         if let previous = launchdFailureObservations[id] {
             let didChange = previous.isHealthy != isHealthy || previous.pid != currentPID
-            let sameHealthyPID = previous.isHealthy && isHealthy && previous.pid == currentPID
-            let healthySampleCount = sameHealthyPID ? previous.healthySampleCount + 1 : (isHealthy ? 1 : 0)
             launchdFailureObservations[id] = LaunchdFailureObservation(
                 isHealthy: isHealthy,
-                pid: currentPID,
-                healthySampleCount: healthySampleCount
+                pid: currentPID
             )
-
-            if isHealthy,
-               launchdRecoveryAwaitingStability.contains(id),
-               healthySampleCount >= Self.launchdRecoveryStableSampleCount {
-                launchdRecoveryAwaitingStability.remove(id)
-                var state = healthRecoveryStates[id] ?? HealthRecoveryState()
-                _ = state.finishRecovery(success: true)
-                healthRecoveryStates[id] = state
-                appEventLog.write("「\(tunnel.name)」SSH 已稳定，自动恢复计数已清除")
-            }
 
             // 从非健康回到 running 是恢复观察，不是新的故障；只有再次退出或
             // PID 再次变化，才启动下一轮 bootout-first 恢复。
@@ -727,8 +742,7 @@ public final class TunnelManager: ObservableObject {
         } else {
             launchdFailureObservations[id] = LaunchdFailureObservation(
                 isHealthy: isHealthy,
-                pid: currentPID,
-                healthySampleCount: isHealthy ? 1 : 0
+                pid: currentPID
             )
             // 第一次观察到非健康状态也必须恢复：启动后如果 KeepAlive 已经在
             // 抖动，不能要求先积累三次 PID 变化。
@@ -751,9 +765,7 @@ public final class TunnelManager: ObservableObject {
               let checker = preStartChecker as? any ECSIPDriftChecking,
               let reader = rustCore as? any RustHealthStatusReader else { return }
 
-        let candidates = config.tunnels.filter {
-            $0.autoStart && $0.keepAlive && SSHCommand.isSSH($0.command)
-        }
+        let candidates = unattendedRecoveryCandidates()
         for candidate in candidates {
             let id = candidate.id
             guard !Task.isCancelled, !isShuttingDown,
@@ -777,7 +789,7 @@ public final class TunnelManager: ObservableObject {
                 let result = try await checker.checkCurrentState(tunnel: candidate, timeout: 30)
                 guard !Task.isCancelled, !isShuttingDown,
                       self.tunnel(id: id)?.matchesLaunchRuntime(candidate) == true else { return }
-                if result.sanitizedCode == "ip_drift" {
+                if ["ip_drift", "transaction_pending"].contains(result.sanitizedCode) {
                     triggerAutomaticRecovery(
                         for: candidate,
                         reason: "ECS SSH `/32` 漂移",
@@ -796,8 +808,8 @@ public final class TunnelManager: ObservableObject {
     }
 
     /// 把单次明确的无人值守故障映射为现有健康恢复状态机的阈值事件。
-    /// 已确认的 IP 漂移立即执行；launchd 故障的首次恢复立即执行，后续失败
-    /// 使用状态机退避，避免远端转发冲突等持久故障形成快速循环。
+    /// 已确认的 IP 漂移和每次新观察到的 launchd 断开都立即执行；只有同一
+    /// 恢复任务内部的同步/生命周期失败使用有上限退避。
     private func triggerAutomaticRecovery(
         for tunnel: TunnelConfig,
         reason: String,
@@ -810,35 +822,19 @@ public final class TunnelManager: ObservableObject {
         guard allowNotRunning || isRunning(statuses[id]) else { return }
 
         var state = healthRecoveryStates[id] ?? HealthRecoveryState()
-        var action: HealthRecoveryState.Action = .observe
-        let statusForRecord = allowNotRunning && !isRunning(statuses[id])
-            ? TunnelStatus.running(pid: nil)
-            : statuses[id]
-        for _ in 0..<HealthRecoveryPolicy.failureThreshold {
-            action = state.record(
-                .failed(reason: reason),
-                status: statusForRecord,
-                keepAlive: tunnel.keepAlive
-            )
-        }
+        let action = state.confirmedFailure(
+            delayOverrideNanoseconds: delayOverrideNanoseconds
+        )
         healthRecoveryStates[id] = state
 
         guard case .schedule(let attempt, let delayNanoseconds) = action else { return }
-        if allowNotRunning {
-            launchdRecoveryAwaitingStability.insert(id)
-        }
-        let effectiveDelay: UInt64
-        if allowNotRunning, attempt > 1 {
-            effectiveDelay = delayNanoseconds
-        } else {
-            effectiveDelay = delayOverrideNanoseconds ?? delayNanoseconds
-        }
+        recoveryAwaitingConnectivityConfirmation.insert(id)
         appEventLog.write("检测到「\(tunnel.name)」\(reason)，开始 bootout→同步→重启")
         scheduleRecovery(
             for: id,
             tunnelName: tunnel.name,
             attempt: attempt,
-            delayNanoseconds: effectiveDelay
+            delayNanoseconds: delayNanoseconds
         )
     }
 
@@ -967,10 +963,17 @@ public final class TunnelManager: ObservableObject {
         )
         healthRecoveryStates[id] = state
 
+        if case .satisfied = result,
+           recoveryAwaitingConnectivityConfirmation.remove(id) != nil {
+            lastMessage = "「\(tunnel.name)」已自动恢复（连接探针已确认）"
+            appEventLog.write("「\(tunnel.name)」连接探针已确认恢复，自动恢复计数已清除")
+        }
+
         switch action {
         case .observe:
             return
         case .schedule(let attempt, let delayNanoseconds):
+            recoveryAwaitingConnectivityConfirmation.insert(id)
             scheduleRecovery(
                 for: id,
                 tunnelName: tunnel.name,
@@ -995,18 +998,78 @@ public final class TunnelManager: ObservableObject {
         recoveryGenerations[id] = generation
         let sleep = healthSleep
         recoveryTasks[id] = Task { [weak self] in
-            do {
-                try await sleep(delayNanoseconds)
-            } catch {
-                return
+            var nextAttempt = attempt
+            var nextDelay = delayNanoseconds
+            while !Task.isCancelled {
+                do {
+                    try await sleep(nextDelay)
+                } catch {
+                    break
+                }
+                guard !Task.isCancelled, let self else { break }
+                let outcome = await self.performAutomaticRecovery(
+                    id: id,
+                    tunnelName: tunnelName,
+                    attempt: nextAttempt,
+                    generation: generation
+                )
+                switch outcome {
+                case .recovered, .cancelled:
+                    self.clearRecoveryTask(for: id, generation: generation)
+                    return
+                case .retry(let code, let delayOverrideNanoseconds):
+                    guard let retry = self.prepareAutomaticRetry(
+                        id: id,
+                        generation: generation,
+                        failureCode: code,
+                        delayOverrideNanoseconds: delayOverrideNanoseconds
+                    ) else {
+                        self.clearRecoveryTask(for: id, generation: generation)
+                        return
+                    }
+                    nextAttempt = retry.attempt
+                    nextDelay = retry.delayNanoseconds
+                }
             }
-            guard !Task.isCancelled else { return }
-            await self?.performAutomaticRecovery(
-                id: id,
-                tunnelName: tunnelName,
-                attempt: attempt,
-                generation: generation
-            )
+            self?.clearRecoveryTask(for: id, generation: generation)
+        }
+    }
+
+    private enum AutomaticRecoveryOutcome {
+        case recovered
+        case retry(code: String, delayOverrideNanoseconds: UInt64? = nil)
+        case cancelled
+    }
+
+    private struct AutomaticRecoveryPreflightFailure: Error {
+        let result: LaunchPreflightResult
+    }
+
+    private func prepareAutomaticRetry(
+        id: String,
+        generation: UInt,
+        failureCode: String,
+        delayOverrideNanoseconds: UInt64?
+    ) -> (attempt: Int, delayNanoseconds: UInt64)? {
+        guard !isShuttingDown,
+              recoveryGenerations[id] == generation,
+              let tunnel = tunnel(id: id),
+              tunnel.keepAlive else { return nil }
+        var state = healthRecoveryStates[id] ?? HealthRecoveryState()
+        guard state.phase == .monitoring else { return nil }
+        let action = state.confirmedFailure(
+            delayOverrideNanoseconds: delayOverrideNanoseconds
+        )
+        healthRecoveryStates[id] = state
+        guard case .schedule(let attempt, let delayNanoseconds) = action else { return nil }
+        let seconds = delayNanoseconds / 1_000_000_000
+        appEventLog.write("「\(tunnel.name)」自动恢复未完成（\(failureCode)），\(seconds) 秒后继续尝试")
+        return (attempt, delayNanoseconds)
+    }
+
+    private func clearRecoveryTask(for id: String, generation: UInt) {
+        if recoveryGenerations[id] == generation {
+            recoveryTasks[id] = nil
         }
     }
 
@@ -1015,22 +1078,17 @@ public final class TunnelManager: ObservableObject {
         tunnelName: String,
         attempt: Int,
         generation: UInt
-    ) async {
-        guard recoveryGenerations[id] == generation else { return }
-        // 保留任务登记直到本次恢复完整结束，避免恢复调用执行较慢时，
-        // 后续探针失败又为同一隧道创建并推进另一条恢复链。
-        defer {
-            if recoveryGenerations[id] == generation {
-                recoveryTasks[id] = nil
-            }
-        }
-        guard let tunnel = tunnel(id: id), tunnel.keepAlive else { return }
+    ) async -> AutomaticRecoveryOutcome {
+        guard recoveryGenerations[id] == generation else { return .cancelled }
+        guard let tunnel = tunnel(id: id), tunnel.keepAlive else { return .cancelled }
         let recoveryState = healthRecoveryStates[id]
         guard recoveryState?.phase == .monitoring,
-              recoveryState?.recoveryAttempts == attempt else { return }
+              recoveryState?.recoveryAttempts == attempt else { return .cancelled }
 
         let rustCore = self.rustCore
-        guard let statusReader = rustCore as? any RustHealthStatusReader else { return }
+        guard let statusReader = rustCore as? any RustHealthStatusReader else {
+            return .retry(code: "status_capability_unavailable")
+        }
         var currentStatus: TunnelStatus
         do {
             currentStatus = try await Task.detached(priority: .utility) {
@@ -1041,16 +1099,19 @@ public final class TunnelManager: ObservableObject {
             // 仍会重新读取/核验目标 label 与完整进程身份。
             guard statusReader.isStatusQueryTimeout(error),
                   let cachedStatus = statuses[id],
-                  isRunning(cachedStatus) else { return }
+                  isRunning(cachedStatus) else { return .retry(code: "status_unavailable") }
             currentStatus = cachedStatus
         }
-        guard recoveryGenerations[id] == generation, !Task.isCancelled else { return }
-        let mayRetryWithoutRunning = canRetryQuiescedRecovery(for: id, tunnel: tunnel, state: recoveryState)
-        guard (isRunning(currentStatus) || mayRetryWithoutRunning),
-              !runtimeState.busyIDs.contains(id) else { return }
+        guard recoveryGenerations[id] == generation, !Task.isCancelled else { return .cancelled }
+        guard (isRunning(currentStatus) || (recoveryState?.recoveryAttempts ?? 0) > 0) else {
+            return .retry(code: "not_running")
+        }
+        guard !runtimeState.busyIDs.contains(id) else { return .retry(code: "operation_busy") }
         updateRuntime { $0.setStatus(currentStatus, for: id) }
 
-        guard let operation = beginOperation(for: id, cancelsRecovery: false) else { return }
+        guard let operation = beginOperation(for: id, cancelsRecovery: false) else {
+            return .retry(code: "operation_busy")
+        }
         defer { endOperation(for: id, generation: operation) }
 
         do {
@@ -1089,14 +1150,14 @@ public final class TunnelManager: ObservableObject {
                 }
                 updateRuntime { $0.setStatus(.notLoaded, for: id) }
 
-                try await preStartChecker.checkAsync(tunnel: tunnel)
-                guard !Task.isCancelled, recoveryGenerations[id] == generation else { return }
+                try await runCoordinatedRecoveryPreflight(tunnel: tunnel)
+                guard !Task.isCancelled, recoveryGenerations[id] == generation else { return .cancelled }
                 status = try await runRustOperation(id: id, generation: nextRustGeneration) {
                     try rustCore.start(id: id, generation: nextRustGeneration)
                 }
             } else {
-                try await preStartChecker.checkAsync(tunnel: tunnel)
-                guard !Task.isCancelled, recoveryGenerations[id] == generation else { return }
+                try await runCoordinatedRecoveryPreflight(tunnel: tunnel)
+                guard !Task.isCancelled, recoveryGenerations[id] == generation else { return .cancelled }
                 guard let nextRustGeneration = beginRustOperation(for: id) else {
                     throw HealthRecoveryError.lifecycleUnavailable
                 }
@@ -1128,24 +1189,73 @@ public final class TunnelManager: ObservableObject {
                 throw HealthRecoveryError.restartDidNotRun
             }
             updateRuntime { $0.setStatus(status, for: id) }
-            if launchdRecoveryAwaitingStability.contains(id) {
-                lastMessage = "「\(tunnelName)」已启动，等待 SSH 稳定"
+            if tunnel.probe != nil {
+                lastMessage = "「\(tunnelName)」已启动，等待连接探针确认"
             } else {
-                var state = healthRecoveryStates[id] ?? HealthRecoveryState()
-                _ = state.finishRecovery(success: true)
-                healthRecoveryStates[id] = state
-                lastMessage = "「\(tunnelName)」已自动恢复"
+                lastMessage = "「\(tunnelName)」已启动；未配置连接探针，继续监控运行异常"
             }
+            return .recovered
         } catch is CancellationError {
-            return
+            return .cancelled
         } catch {
-            guard recoveryGenerations[id] == generation, !Task.isCancelled else { return }
-            var state = healthRecoveryStates[id] ?? HealthRecoveryState()
-            // 失败次数与冷却只在内存推进，不写 lastError：lastError 只供新增/设置弹窗
-            // 就地展示操作错误，后台写入无处展示，还会污染弹窗的错误判断。
-            _ = state.finishRecovery(success: false)
-            healthRecoveryStates[id] = state
+            guard recoveryGenerations[id] == generation, !Task.isCancelled else { return .cancelled }
+            let failure = automaticRecoveryFailure(error)
+            return .retry(
+                code: failure.code,
+                delayOverrideNanoseconds: failure.delayOverrideNanoseconds
+            )
         }
+    }
+
+    private func runCoordinatedRecoveryPreflight(tunnel: TunnelConfig) async throws {
+        guard SSHCommand.isSSH(tunnel.command),
+              let resourceChecker = preStartChecker as? any LaunchPreflightChecking else {
+            try await preStartChecker.checkAsync(tunnel: tunnel)
+            return
+        }
+        let resource = try await resourceChecker.launchResource()
+        try Task.checkCancellation()
+        let result = try await recoveryPreflightCoordinator.run(resource: resource) {
+            try await resourceChecker.checkLaunch(tunnel: tunnel, timeout: 30)
+        }
+        try Task.checkCancellation()
+        if result.category == .cancelled {
+            throw CancellationError()
+        }
+        guard result.exitCode == 0, result.category == .success else {
+            throw AutomaticRecoveryPreflightFailure(result: result)
+        }
+    }
+
+    private func automaticRecoveryFailure(
+        _ error: Error
+    ) -> (code: String, delayOverrideNanoseconds: UInt64?) {
+        if let preflight = error as? AutomaticRecoveryPreflightFailure {
+            let result = preflight.result
+            let delaySeconds: Int
+            if result.category == .auth {
+                delaySeconds = 300
+            } else if result.retryHint > 0 {
+                delaySeconds = min(result.retryHint, 300)
+            } else {
+                delaySeconds = 0
+            }
+            let delay = delaySeconds > 0
+                ? UInt64(delaySeconds) * 1_000_000_000
+                : nil
+            return (
+                "ecs_\(result.category.rawValue)_\(result.sanitizedCode)",
+                delay
+            )
+        }
+        if error is ECSPreStartError { return ("ecs_preflight_failed", nil) }
+        if error is ECSPreflightProcessError { return ("ecs_preflight_process_failed", nil) }
+        if error is HealthRecoveryError { return ("lifecycle_unavailable", nil) }
+        if let clientError = error as? RustCoreClient.ClientError,
+           case .remote(let code, _) = clientError {
+            return ("core_\(code)", nil)
+        }
+        return ("lifecycle_failed", nil)
     }
 
     private func cancelRecovery(for id: String) {
@@ -1153,7 +1263,7 @@ public final class TunnelManager: ObservableObject {
         recoveryTasks[id]?.cancel()
         recoveryTasks[id] = nil
         launchdFailureObservations.removeValue(forKey: id)
-        launchdRecoveryAwaitingStability.remove(id)
+        recoveryAwaitingConnectivityConfirmation.remove(id)
     }
 
     private func beginStateRead() -> StateReadToken {
@@ -1259,6 +1369,22 @@ public final class TunnelManager: ObservableObject {
         return (state?.recoveryAttempts ?? 0) > 0
     }
 
+    /// 仅监控本次 App 启动时已经声明为无人值守的隧道。运行期间新增或把
+    /// autoStart 从 false 改为 true 的配置，留到下次 App 启动再接管。
+    private func unattendedRecoveryCandidates() -> [TunnelConfig] {
+        let initial = launchInitialConfig ?? config
+        let eligibleIDs = Set(initial.tunnels.filter {
+            $0.autoStart && $0.keepAlive && SSHCommand.isSSH($0.command)
+        }.map(\.id))
+        return config.tunnels.filter {
+            eligibleIDs.contains($0.id)
+                && $0.autoStart
+                && $0.keepAlive
+                && SSHCommand.isSSH($0.command)
+                && !manuallyStoppedIDs.contains($0.id)
+        }
+    }
+
     // MARK: - 启停
 
     public func start(_ id: String) {
@@ -1270,6 +1396,7 @@ public final class TunnelManager: ObservableObject {
         guard let tunnel = tunnel(id: id) else { return }
         guard let operation = beginOperation(for: id) else { return }
         defer { endOperation(for: id, generation: operation) }
+        manuallyStoppedIDs.remove(id)
         resetHealthRecovery(for: id, phase: .monitoring)
         do {
             try preStartChecker.check(tunnel: tunnel)
@@ -1291,6 +1418,7 @@ public final class TunnelManager: ObservableObject {
         guard let tunnel = tunnel(id: id) else { return .notFound }
         guard let operation = beginOperation(for: id) else { return .inProgress }
         defer { endOperation(for: id, generation: operation) }
+        manuallyStoppedIDs.remove(id)
         resetHealthRecovery(for: id, phase: .monitoring)
 
         let preStartChecker = self.preStartChecker
@@ -1337,6 +1465,7 @@ public final class TunnelManager: ObservableObject {
         guard let tunnel = tunnel(id: id) else { return }
         guard let operation = beginOperation(for: id) else { return }
         defer { endOperation(for: id, generation: operation) }
+        manuallyStoppedIDs.insert(id)
         resetHealthRecovery(for: id, phase: .manuallyStopped)
         guard let rustGeneration = beginRustOperation(for: id) else { return }
         do {
@@ -1355,6 +1484,7 @@ public final class TunnelManager: ObservableObject {
         guard let tunnel = tunnel(id: id) else { return .notFound }
         guard let operation = beginOperation(for: id) else { return .inProgress }
         defer { endOperation(for: id, generation: operation) }
+        manuallyStoppedIDs.insert(id)
         resetHealthRecovery(for: id, phase: .manuallyStopped)
 
         guard let rustGeneration = beginRustOperation(for: id) else { return .failed }
@@ -1386,6 +1516,7 @@ public final class TunnelManager: ObservableObject {
         guard let tunnel = tunnel(id: id) else { return }
         guard let operation = beginOperation(for: id) else { return }
         defer { endOperation(for: id, generation: operation) }
+        manuallyStoppedIDs.remove(id)
         resetHealthRecovery(for: id, phase: .monitoring)
         do {
             try preStartChecker.check(tunnel: tunnel)
@@ -1407,6 +1538,7 @@ public final class TunnelManager: ObservableObject {
         guard let tunnel = tunnel(id: id) else { return .notFound }
         guard let operation = beginOperation(for: id) else { return .inProgress }
         defer { endOperation(for: id, generation: operation) }
+        manuallyStoppedIDs.remove(id)
         resetHealthRecovery(for: id, phase: .monitoring)
 
         let preStartChecker = self.preStartChecker
@@ -1445,7 +1577,8 @@ public final class TunnelManager: ObservableObject {
     }
 
     /// 应用退出时由 Rust owner 统一停止全部受管 launchd 隧道并关闭 handle。
-    public func shutdownAsync() async {
+    @discardableResult
+    public func shutdownAsync() async -> Bool {
         isShuttingDown = true
         launchSetupTask?.cancel()
         await launchSetupTask?.value
@@ -1466,17 +1599,31 @@ public final class TunnelManager: ObservableObject {
         for task in pendingRecoveryTasks {
             await task.value
         }
-        await logStore.shutdown()
         do {
             let rustCore = self.rustCore
             _ = try await Task.detached(priority: .userInitiated) {
                 try rustCore.shutdown()
             }.value
         } catch is CancellationError {
-            return
+            resumeAfterFailedShutdown()
+            return false
         } catch {
             lastError = "Rust Core 退出清理失败：\(error)"
+            resumeAfterFailedShutdown()
+            return false
         }
+        await logStore.shutdown()
+        return true
+    }
+
+    /// 退出清理 fail-closed 时 App 不退出；恢复无人值守监测，让后续重试和
+    /// 显式操作仍可继续，而不是把一次 launchctl 异常变成静默停机。
+    private func resumeAfterFailedShutdown() {
+        isShuttingDown = false
+        launchSetupTask = nil
+        launchCoordinator = nil
+        startHealthMonitoring()
+        startLaunchdFailureMonitoring()
     }
 
     // MARK: - 迁移

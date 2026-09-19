@@ -3,7 +3,8 @@
 use std::path::Path;
 
 use crate::launchctl::{
-    CancellationToken, ExecutorError, LaunchCtlExecutor, ProcessRunning, TunnelStatus,
+    CancellationToken, ExecutorError, LaunchCtlExecutor, ManagedLaunchdIdentity, ProcessRunning,
+    TunnelStatus,
 };
 
 pub trait LaunchdExecuting: Send + Sync {
@@ -28,7 +29,7 @@ pub trait LaunchdExecuting: Send + Sync {
     fn recovery_stop(
         &self,
         _label: &str,
-        _path: &Path,
+        _managed_identities: &[ManagedLaunchdIdentity],
         _ssh: bool,
         _cancel: &CancellationToken,
         _timeout: std::time::Duration,
@@ -80,7 +81,7 @@ pub trait LaunchdExecuting: Send + Sync {
     fn stop_managed_cancellable(
         &self,
         label: &str,
-        _executable_path: &Path,
+        _managed_identities: &[ManagedLaunchdIdentity],
         cancellation: &CancellationToken,
     ) -> Result<bool, ExecutorError> {
         let stopped = self.bootout_cancellable(label, cancellation)?;
@@ -122,7 +123,7 @@ impl<R: ProcessRunning> LaunchdExecuting for LaunchCtlExecutor<R> {
     fn recovery_stop(
         &self,
         label: &str,
-        path: &Path,
+        managed_identities: &[ManagedLaunchdIdentity],
         ssh: bool,
         cancel: &CancellationToken,
         timeout: std::time::Duration,
@@ -144,7 +145,7 @@ impl<R: ProcessRunning> LaunchdExecuting for LaunchCtlExecutor<R> {
                     cancel.cancel();
                 }
             });
-            let result = self.stop_managed_cancellable(label, path, cancel);
+            let result = self.stop_managed_cancellable(label, managed_identities, cancel);
             let _ = done.send(());
             result
         })
@@ -190,9 +191,9 @@ impl<R: ProcessRunning> LaunchdExecuting for LaunchCtlExecutor<R> {
     fn stop_managed_cancellable(
         &self,
         label: &str,
-        executable_path: &Path,
+        managed_identities: &[ManagedLaunchdIdentity],
         cancellation: &CancellationToken,
     ) -> Result<bool, ExecutorError> {
-        LaunchCtlExecutor::stop_managed_cancellable(self, label, executable_path, cancellation)
+        LaunchCtlExecutor::stop_managed_cancellable(self, label, managed_identities, cancellation)
     }
 }

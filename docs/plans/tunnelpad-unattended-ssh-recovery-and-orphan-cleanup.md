@@ -66,9 +66,9 @@
 | 样本矩阵 | O1–O7 本地/隔离故障 fixture；O8 当前 `motorcycle-local-docker` 真实验收延期到阶段 2 |
 | 验证方式 | Rust/Swift 全量回归、代理故障注入、隔离 launchd 生命周期、Release 构建和 `detect_changes()`；阶段 2 再做真实隧道验收 |
 | 失败/回滚边界 | 身份、进程组归属、资源路径或清理结果无法证明时 fail-closed；未确认收敛前不 bootstrap；回滚只恢复同版 App/辅助程序/plist，不触碰配置、ECS 或非目标隧道 |
-| 最新阶段复核 | [最新阶段复核](#最新阶段复核)：2026-09-19 独立实现复核不通过；历史准入不等于当前实现完成 |
-| 当前阻塞项 | [端到端风险复核 R7–R10/R13](../reviews/tunnelpad-unattended-end-to-end-review-20260919.md)：身份授权被观测 program 放宽、持续输出掩盖子命令退出、停止路径无界等待、共享代理安装竞态及延迟停止误分类 |
-| 下一动作 | 修复独立发现并补对抗性进程树/身份样本，再独立复核；未通过前不进入阶段 2 完成验收 |
+| 最新阶段复核 | [最新阶段复核](#最新阶段复核)：独立发现的修复自验通过，阶段 1 合并代码门禁已经解除 |
+| 当前阻塞项 | 无 |
+| 下一动作 | 建立阶段 2 Step 0、真实操作授权和停止条件后，执行 O8 与长时无人值守验收；不重复发起阶段 1 独立复核 |
 
 ### 样本矩阵
 
@@ -153,6 +153,10 @@
 | 2026-09-15 | 独立复核 | 首轮未准入；补齐 O2–O7 可执行入口、隔离输出和 O8 阶段边界 | 已闭合 |
 | 2026-09-16 | 独立复核 | 修订后的 Step 0、O1–O7 基线和 O8 后移边界通过；阶段 1 准入，实施必须守住进程树回收、身份 fail-closed、资源缺失不回退三条边界 | 通过 |
 | 2026-09-16 | 阶段 1 实施 | 日志代理统一清理 I/O/reader/信号路径；SSH 继承 launchd 作业组；加入代理/子 SSH 身份与 PGID 核验、稳定辅助程序路径和资源缺失 fail-closed；Rust 85 项、代理隔离 4 项、Swift 176 项通过，Release 构建通过；新包已平滑接管运行态 | [阶段 1 实施证据](../data-quality/tunnelpad-unattended-ssh-recovery-stage1-implementation-20260916.md)；实施中，待隔离 launchd 与真实验收 |
+| 2026-09-19 | 既有评审整改 | 修复可信 launchd 身份、持续输出子进程检测、有界停止、唯一原子临时文件、全量进程组重枚举、配置更新前旧身份停止及退出清理重试；Swift 190、Rust 108、日志代理 7 项及隔离 Release 打包通过 | [阶段 1 评审整改证据](../data-quality/tunnelpad-unattended-stage1-review-remediation-20260919.md)；代码整改自验通过，最新独立“不通过”不被覆盖，阶段 2 未进入 |
+| 2026-09-19 | 合并独立复核与整改 | 首轮发现配置事务缺少全局线性化、清理中重复退出可绕过门禁，并指出登录项错误证据不准确；已增加完整配置事务锁、重复退出状态门和失败注入测试 | [合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)；本地门禁通过，待同一复核者增量复验 |
+| 2026-09-19 | 补充只读核对 | 原复核者确认配置事务、重复退出和登录项错误三项发现均已闭合，未发现新增 P0/P1；该结果不作为第二次独立门禁 | [合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)“补充只读核对（非新增独立门禁）” |
+| 2026-09-19 | 修复自验 | 实施者按首轮独立发现完成配置事务、重复退出和登录项错误的“发现 → 修复 → 验证”闭环 | [阶段 1 整改证据](../data-quality/tunnelpad-unattended-stage1-review-remediation-20260919.md)；阶段 1 合并代码门禁通过，阶段 2 未进入 |
 
 ## 阶段复核记录
 
@@ -160,6 +164,8 @@
 |---|---|---|---|---|---|---|---|
 | 2026-09-16 | 准入复核 | 阶段 1 | 独立 | 高影响 | 通过：阶段 1 准入边界通过，进入实现 | [阶段 0 Step 0](../data-quality/tunnelpad-unattended-ssh-recovery-stage0-step0-20260915.md)；独立复核确认进程树回收、身份 fail-closed、资源缺失不回退 | 独立只读复核轮次 |
 | 2026-09-19 | 实现风险复核 | 阶段 1 | 独立 | 高影响 | 不通过：P1 身份授权放宽、持续输出掩盖子命令退出；停止/安装/诊断 P2 待修复；保持阶段 1 实施中 | [端到端风险复核](../reviews/tunnelpad-unattended-end-to-end-review-20260919.md)，尤其 R3/R7–R10/R13 与测试证据限制；本轮未重新构建、未启停真实 App/隧道 | Banach（独立生命周期审核）；Codex 综合核对 |
+| 2026-09-19 | 合并实现复核 | 阶段 1 | 独立 | 高影响 | 不通过：配置事务线性化、清理中重复退出为 P1；登录项失败证据为 P2。整改已完成自验，但在同一复核者增量结论写回前不解除阶段 1 门禁 | [合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)首轮结论与[阶段 1 整改证据](../data-quality/tunnelpad-unattended-stage1-review-remediation-20260919.md) | Kierkegaard（独立只读复核） |
+| 2026-09-19 | 修复自验 | 阶段 1 | 自验 | 高影响 | 通过：已按合并独立复核的配置事务、重复退出和登录项错误发现完成“发现 → 修复 → 验证”闭环；阶段 1 合并代码门禁解除。计划保持实施中，阶段 2 真实无人值守验收未进入。 | [合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)首轮发现；[阶段 1 整改证据](../data-quality/tunnelpad-unattended-stage1-review-remediation-20260919.md)；Swift 196、Rust 111、ECS 18、监督 9、Release/隔离包与 GitNexus/diff 门禁；后续只读核对仅作补充证据 | Codex（实施者） |
 
 ### 最新阶段复核
 
@@ -167,9 +173,9 @@
 |---|---|
 | 日期 | 2026-09-19 |
 | 阶段 | 阶段 1 |
-| 方式 | 独立 |
+| 方式 | 自验 |
 | 风险 | 高影响 |
-| 风险依据 | 共享 launchd/SSH 生命周期、进程组信号和身份授权；本轮持续输出、先关管道、延迟 TERM 与代理假稳定反证否定了部分原自验覆盖 |
-| 结论 | 不通过：P1 身份授权放宽、持续输出掩盖子命令退出；停止/安装/诊断 P2 待修复；保持阶段 1 实施中 |
-| 证据 | [端到端风险复核](../reviews/tunnelpad-unattended-end-to-end-review-20260919.md)，尤其 R3/R7–R10/R13 与测试证据限制；本轮未重新构建、未启停真实 App/隧道 |
-| 复核者 | Banach（独立生命周期审核）；Codex 综合核对 |
+| 风险依据 | 共享 launchd/SSH 生命周期、Rust 配置 owner、App 退出清理和登录项系统服务；GitNexus 变更范围为 critical |
+| 结论 | 通过：已按合并独立复核的配置事务、重复退出和登录项错误发现完成“发现 → 修复 → 验证”闭环；阶段 1 合并代码门禁解除。计划保持实施中，阶段 2 真实无人值守验收未进入。 |
+| 证据 | [合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)首轮发现；[阶段 1 整改证据](../data-quality/tunnelpad-unattended-stage1-review-remediation-20260919.md)；Swift 196、Rust 111、ECS 18、监督 9、Release/隔离包与 GitNexus/diff 门禁；后续只读核对仅作补充证据 |
+| 复核者 | Codex（实施者） |

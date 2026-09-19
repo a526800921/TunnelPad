@@ -11,15 +11,25 @@ public enum Shutdown {
     /// 由唯一 Rust owner 提供的同步退出句柄。它是 Sendable 的，因为信号
     /// dispatch source 不在 MainActor 上执行；句柄本身不创建第二个 owner。
     public final class OwnerHandle: @unchecked Sendable {
-        private let action: @Sendable () -> Int
+        private let action: @Sendable () throws -> Int
 
-        public init(action: @escaping @Sendable () -> Int) {
+        public init(action: @escaping @Sendable () throws -> Int) {
             self.action = action
         }
 
         @discardableResult
         public func stopAllManagedTunnels() -> Int {
-            action()
+            (try? action()) ?? 0
+        }
+
+        /// 信号退出必须区分“成功且停止 0 条”与“清理失败”。
+        func stopAllManagedTunnelsChecked() -> Bool {
+            do {
+                _ = try action()
+                return true
+            } catch {
+                return false
+            }
         }
     }
 
@@ -51,12 +61,28 @@ public enum Shutdown {
         code: Int32 = 0,
         owner: OwnerHandle? = nil
     ) -> Never {
-        if let owner {
-            owner.stopAllManagedTunnels()
-        } else {
-            stopAllManagedTunnels(paths: paths)
+        while true {
+            let cleaned: Bool
+            if let owner {
+                cleaned = owner.stopAllManagedTunnelsChecked()
+            } else {
+                cleaned = stopAllManagedTunnelsChecked(paths: paths)
+            }
+            if cleaned {
+                exit(code)
+            }
+            Thread.sleep(forTimeInterval: 1)
         }
-        exit(code)
+    }
+
+    private static func stopAllManagedTunnelsChecked(paths: TunnelPaths) -> Bool {
+        do {
+            let owner = try RustCoreClient(paths: paths)
+            _ = try owner.shutdown()
+            return true
+        } catch {
+            return false
+        }
     }
 
 }

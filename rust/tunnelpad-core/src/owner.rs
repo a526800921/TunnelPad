@@ -6,7 +6,6 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -14,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::config_store::ConfigStore;
-use crate::launchctl::{CancellationToken, ExecutorError, TunnelStatus};
+use crate::launchctl::{CancellationToken, ExecutorError, ManagedLaunchdIdentity, TunnelStatus};
 use crate::launchd_executing::LaunchdExecuting;
 use crate::paths::TunnelPaths;
 use crate::plist_render::write_plist;
@@ -128,6 +127,9 @@ impl CoreResponse {
 pub struct CoreOwner<L: LaunchdExecuting> {
     paths: TunnelPaths,
     pub(crate) launchd: L,
+    /// 配置读取、写入、删除和关闭必须作为完整事务线性化；仅锁住内存快照
+    /// 无法阻止旧身份停止与磁盘提交之间被另一条配置操作穿插。
+    config_transaction: Mutex<()>,
     config: Mutex<AppConfig>,
     tunnel_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     operations: Mutex<HashMap<String, OperationState>>,
@@ -143,6 +145,7 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
         Ok(Self {
             paths,
             launchd,
+            config_transaction: Mutex::new(()),
             config: Mutex::new(config),
             tunnel_locks: Mutex::new(HashMap::new()),
             operations: Mutex::new(HashMap::new()),
@@ -229,72 +232,41 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
     }
 
     fn load_config(&self) -> Result<AppConfig, TpError> {
+        let _transaction = self
+            .config_transaction
+            .lock()
+            .expect("owner config transaction mutex 不应中毒");
         self.ensure_open()?;
         let config = load_owner_config(&self.paths)?;
         validate_launchd_config(&config)?;
 
-        // 配置重载不能先丢失旧配置再处理已删除的 label。否则仍在运行的
-        // launchd 服务会脱离 owner，之后 shutdown/status 都无法再找到它。
-        // 先复制旧配置并按稳定顺序持有待删除隧道锁，避免与同一隧道的启停
-        // 交错；全部删除项收敛后才替换 owner 配置。
+        // 配置重载不能先丢失旧运行身份。删除或替换 command/plist 参数前，
+        // 必须用旧配置完成精确停止，否则之后只剩新身份，旧 SSH 将无法安全
+        // 清理并可能成为孤儿进程。
         let previous = self
             .config
             .lock()
             .expect("owner config mutex 不应中毒")
             .clone();
-        let next_ids: std::collections::HashSet<_> = config
-            .tunnels
-            .iter()
-            .map(|tunnel| tunnel.id.as_str())
-            .collect();
-        let mut removed: Vec<_> = previous
-            .tunnels
-            .iter()
-            .filter(|tunnel| !next_ids.contains(tunnel.id.as_str()))
-            .cloned()
-            .collect();
-        removed.sort_by(|left, right| left.id.cmp(&right.id));
-        let locks: Vec<_> = removed
-            .iter()
-            .map(|tunnel| self.lock_for(&tunnel.id))
-            .collect();
-        let _guards: Vec<_> = locks
-            .iter()
-            .map(|lock| lock.lock().expect("owner tunnel mutex 不应中毒"))
-            .collect();
-
-        let mut first_error = None;
-        for tunnel in &removed {
-            let label = tunnel.launchd_label();
-            if self.launchd.status(&label) == TunnelStatus::NotLoaded {
-                continue;
-            }
-            if let Err(error) = self.launchd.bootout(&label) {
-                if first_error.is_none() {
-                    let mut failure = executor_error("配置刷新前停止", error);
-                    failure.message = format!("{}（label={label}）", failure.message);
-                    first_error = Some(failure);
-                }
-                continue;
-            }
-            if self.launchd.status(&label) != TunnelStatus::NotLoaded && first_error.is_none() {
-                first_error = Some(TpError::new(
-                    error_code::EXECUTOR,
-                    format!("配置刷新前停止后仍加载 launchd 服务：{label}"),
-                ));
-            }
-        }
-        if let Some(error) = first_error {
-            return Err(error);
-        }
+        self.stop_obsolete_launch_runtimes(&previous, &config, "配置刷新前停止")?;
 
         *self.config.lock().expect("owner config mutex 不应中毒") = config.clone();
         Ok(config)
     }
 
     fn save_config(&self, config: AppConfig) -> Result<(), TpError> {
+        let _transaction = self
+            .config_transaction
+            .lock()
+            .expect("owner config transaction mutex 不应中毒");
         self.ensure_open()?;
         validate_launchd_config(&config)?;
+        let previous = self
+            .config
+            .lock()
+            .expect("owner config mutex 不应中毒")
+            .clone();
+        self.stop_obsolete_launch_runtimes(&previous, &config, "保存配置前停止")?;
         ConfigStore::new(self.paths.clone())
             .save(&config)
             .map_err(|error| {
@@ -305,6 +277,52 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
             })?;
         *self.config.lock().expect("owner config mutex 不应中毒") = config;
         Ok(())
+    }
+
+    /// 在旧运行身份被配置替换/删除前完成停止。每个目标均持有自己的生命周期
+    /// 锁；单条失败仍继续尝试其余目标，最后返回首个错误且不提交新配置。
+    fn stop_obsolete_launch_runtimes(
+        &self,
+        previous: &AppConfig,
+        next: &AppConfig,
+        operation: &str,
+    ) -> Result<(), TpError> {
+        let mut obsolete: Vec<_> = previous
+            .tunnels
+            .iter()
+            .filter(|old| {
+                next.tunnels
+                    .iter()
+                    .find(|new| new.id == old.id)
+                    .is_none_or(|new| !same_installed_launchd_identity(old, new))
+            })
+            .cloned()
+            .collect();
+        obsolete.sort_by(|left, right| left.id.cmp(&right.id));
+        let locks: Vec<_> = obsolete
+            .iter()
+            .map(|tunnel| self.lock_for(&tunnel.id))
+            .collect();
+        let _guards: Vec<_> = locks
+            .iter()
+            .map(|lock| lock.lock().expect("owner tunnel mutex 不应中毒"))
+            .collect();
+
+        let mut first_error = None;
+        for tunnel in &obsolete {
+            let cancellation = CancellationToken::new();
+            if let Err(mut error) = self.stop_tunnel_checked(tunnel, &cancellation, operation) {
+                if first_error.is_none() {
+                    error.message =
+                        format!("{}（label={}）", error.message, tunnel.launchd_label());
+                    first_error = Some(error);
+                }
+            }
+        }
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
     fn lock_for(&self, id: &str) -> Arc<Mutex<()>> {
@@ -460,14 +478,19 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
             .map_err(|error| recovery_executor_error(error, deadline))?;
         check()?;
         if stop {
-            // 仅为 KeepAlive=false 的确定停止作业提供受管停止入口。
-            if tunnel.keep_alive || !matches!(status, TunnelStatus::NotRunning) {
+            // loaded/notRunning 无论配置 KeepAlive 与否都必须先安全卸载，
+            // 再进入统一的预检→启动链，不能把无人值守隧道永久留在停止态。
+            if !matches!(
+                status,
+                TunnelStatus::Running { .. } | TunnelStatus::NotRunning
+            ) {
                 return Ok(json!({"id":id,"operation":"observe","status":status}));
             }
+            let managed_identities = self.managed_launchd_identities(&tunnel);
             self.launchd
                 .recovery_stop(
                     &label,
-                    Path::new(&tunnel.command[0]),
+                    &managed_identities,
                     is_ssh(&tunnel.command),
                     &cancellation,
                     deadline.saturating_duration_since(Instant::now()),
@@ -643,20 +666,11 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
         self.ensure_generation(id, generation)?;
         let cancellation = self.cancellation_for(id, generation);
         let tunnel = self.tunnel(id)?;
-        let label = tunnel.launchd_label();
-        let stopped = if is_ssh(&tunnel.command) {
-            self.launchd
-                .stop_managed_cancellable(&label, Path::new(&tunnel.command[0]), &cancellation)
-                .map_err(|error| executor_error("停止", error))?
-        } else {
-            self.launchd
-                .bootout_cancellable(&label, &cancellation)
-                .map_err(|error| executor_error("停止", error))?
-        };
+        let stopped = self.stop_tunnel_checked(&tunnel, &cancellation, "停止")?;
         self.ensure_generation(id, generation)?;
-        let status = self.launchd.status(&label);
-        self.ensure_generation(id, generation)?;
-        Ok(json!({ "id": id, "operation": "stop", "stopped": stopped, "status": status }))
+        Ok(
+            json!({ "id": id, "operation": "stop", "stopped": stopped, "status": TunnelStatus::NotLoaded }),
+        )
     }
 
     pub fn restart(&self, id: &str) -> Result<Value, TpError> {
@@ -673,24 +687,9 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
         let tunnel = self.tunnel(id)?;
         // 未加载由 executor 明确归类为可继续；其他 bootout 失败必须
         // fail-closed，不能在旧实例未收敛时继续写 plist/bootstrap。
-        let label = tunnel.launchd_label();
-        if is_ssh(&tunnel.command) {
-            // SSH 的 launchd 顶层进程是日志代理；直接 bootout 只确认 job
-            // 卸载，不保证代理/SSH 进程组已经退出，远端 -R 端口可能短暂仍被
-            // 旧 sshd 占用。复用受管停止的身份核验和有界收敛，避免新连接
-            // 在旧远端转发释放前抢占同一个 18080。
-            self.launchd
-                .stop_managed_cancellable(
-                    &label,
-                    Path::new(&tunnel.command[0]),
-                    &cancellation,
-                )
-                .map_err(|error| executor_error("重启前停止", error))?;
-        } else {
-            self.launchd
-                .bootout_cancellable(&label, &cancellation)
-                .map_err(|error| executor_error("重启前停止", error))?;
-        }
+        // SSH 的 launchd 顶层进程是日志代理；统一停止会同时核验旧 plist、
+        // 完整参数和运行时身份，并确认进程组收敛后才允许 bootstrap。
+        self.stop_tunnel_checked(&tunnel, &cancellation, "重启前停止")?;
         self.ensure_generation(id, generation)?;
         let plist = write_plist(&tunnel, &self.paths).map_err(|error| {
             TpError::new(
@@ -707,11 +706,83 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
         Ok(json!({ "id": id, "operation": "restart", "status": status }))
     }
 
+    fn managed_launchd_identities(&self, tunnel: &TunnelConfig) -> Vec<ManagedLaunchdIdentity> {
+        let plist_path = self.paths.launchd_plist_url(tunnel);
+        let direct = ManagedLaunchdIdentity {
+            plist_path: plist_path.clone(),
+            program_arguments: tunnel.command.clone(),
+        };
+        let proxy = self
+            .paths
+            .support_directory()
+            .join("bin/tunnelpad-log-proxy");
+        let mut proxied_arguments = vec![
+            proxy.to_string_lossy().into_owned(),
+            "--log".into(),
+            self.paths.log_url(tunnel).to_string_lossy().into_owned(),
+            "--".into(),
+        ];
+        proxied_arguments.extend(tunnel.command.iter().cloned());
+        vec![
+            ManagedLaunchdIdentity {
+                plist_path,
+                program_arguments: proxied_arguments,
+            },
+            direct,
+        ]
+    }
+
+    /// 停止一条当前配置仍可信的 launchd 作业。SSH 必须走完整身份票据与
+    /// 进程组收敛；其他作业也必须使用 checked 状态和有界 bootout，只有
+    /// 新鲜读取明确为 notLoaded 才返回成功。
+    fn stop_tunnel_checked(
+        &self,
+        tunnel: &TunnelConfig,
+        cancellation: &CancellationToken,
+        operation: &str,
+    ) -> Result<bool, TpError> {
+        let label = tunnel.launchd_label();
+        if is_ssh(&tunnel.command) {
+            let managed_identities = self.managed_launchd_identities(tunnel);
+            return self
+                .launchd
+                .stop_managed_cancellable(&label, &managed_identities, cancellation)
+                .map_err(|error| executor_error(operation, error));
+        }
+
+        let status = self
+            .launchd
+            .status_checked(&label)
+            .map_err(|error| executor_error(operation, error))?;
+        if status == TunnelStatus::NotLoaded {
+            return Ok(false);
+        }
+        let stopped = self
+            .launchd
+            .bootout_cancellable(&label, cancellation)
+            .map_err(|error| executor_error(operation, error))?;
+        let status = self
+            .launchd
+            .status_checked(&label)
+            .map_err(|error| executor_error(operation, error))?;
+        if status != TunnelStatus::NotLoaded {
+            return Err(TpError::new(
+                error_code::STILL_RUNNING,
+                format!("{operation}后仍加载 launchd 服务：{label}"),
+            ));
+        }
+        Ok(stopped)
+    }
+
     pub fn remove(&self, id: &str) -> Result<Value, TpError> {
         self.remove_with_generation(id, None)
     }
 
     fn remove_with_generation(&self, id: &str, generation: Option<u64>) -> Result<Value, TpError> {
+        let _transaction = self
+            .config_transaction
+            .lock()
+            .expect("owner config transaction mutex 不应中毒");
         self.ensure_open()?;
         self.ensure_generation(id, generation)?;
         let lock = self.lock_for(id);
@@ -719,17 +790,8 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
         self.ensure_generation(id, generation)?;
         let cancellation = self.cancellation_for(id, generation);
         let tunnel = self.tunnel(id)?;
-        let status = self.launchd.status(&tunnel.launchd_label());
+        self.stop_tunnel_checked(&tunnel, &cancellation, "删除时停止")?;
         self.ensure_generation(id, generation)?;
-        if status != TunnelStatus::NotLoaded {
-            self.launchd
-                .bootout_cancellable(&tunnel.launchd_label(), &cancellation)
-                .map_err(|error| executor_error("删除时停止", error))?;
-            self.ensure_generation(id, generation)?;
-            if self.launchd.status(&tunnel.launchd_label()) != TunnelStatus::NotLoaded {
-                return Err(TpError::new(error_code::STILL_RUNNING, "实例未成功停止"));
-            }
-        }
 
         self.ensure_generation(id, generation)?;
         let plist = self.paths.launchd_plist_url(&tunnel);
@@ -805,54 +867,47 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
     /// 释放 closed 门闩，允许调用方再次尝试收敛未完成的服务；成功后重复
     /// shutdown 仍不会再次产生 launchd 副作用。
     pub fn shutdown(&self) -> Result<Value, TpError> {
+        let _transaction = self
+            .config_transaction
+            .lock()
+            .expect("owner config transaction mutex 不应中毒");
         if self.closed.swap(true, Ordering::AcqRel) {
             return Err(TpError::new(error_code::OWNER_CLOSED, "Rust Core 已关闭"));
         }
         let outcome = (|| {
             self.cancel_all_operations();
-            let ids = {
-                let mut ids: Vec<String> = self
+            let mut tunnels = {
+                let mut tunnels = self
                     .config
                     .lock()
                     .expect("owner config mutex 不应中毒")
                     .tunnels
-                    .iter()
-                    .map(|tunnel| tunnel.id.clone())
-                    .collect();
-                ids.sort();
-                ids
+                    .clone();
+                tunnels.sort_by(|left, right| left.id.cmp(&right.id));
+                tunnels
             };
-            let locks: Vec<_> = ids.iter().map(|id| self.lock_for(id)).collect();
+            let locks: Vec<_> = tunnels
+                .iter()
+                .map(|tunnel| self.lock_for(&tunnel.id))
+                .collect();
             let _guards: Vec<_> = locks
                 .iter()
                 .map(|lock| lock.lock().expect("owner tunnel mutex 不应中毒"))
                 .collect();
             let mut stopped = 0;
             let mut first_error = None;
-            for id in ids {
-                let tunnel = self.tunnel(&id)?;
+            for tunnel in tunnels.drain(..) {
                 let label = tunnel.launchd_label();
-                if self.launchd.status(&label) != TunnelStatus::NotLoaded {
-                    match self.launchd.bootout(&label) {
-                        Ok(_) => {
-                            if self.launchd.status(&label) == TunnelStatus::NotLoaded {
-                                stopped += 1;
-                            } else if first_error.is_none() {
-                                first_error = Some(TpError::new(
-                                    error_code::EXECUTOR,
-                                    format!("退出清理后仍加载 launchd 服务：{label}"),
-                                ));
-                            }
+                match self.stop_tunnel_checked(&tunnel, &CancellationToken::new(), "退出清理") {
+                    Ok(true) => stopped += 1,
+                    Ok(false) => {}
+                    Err(mut error) => {
+                        if first_error.is_none() {
+                            error.message = format!("{}（label={label}）", error.message);
+                            first_error = Some(error);
                         }
-                        Err(error) => {
-                            if first_error.is_none() {
-                                let mut failure = executor_error("退出清理", error);
-                                failure.message = format!("{}（label={label}）", failure.message);
-                                first_error = Some(failure);
-                            }
-                            // 即使当前 label 失败，也继续处理剩余配置中的受管服务。
-                            // 失败结果在所有 label 尝试完成后统一返回。
-                        }
+                        // 即使当前 label 失败，也继续处理剩余配置中的受管服务。
+                        // 失败结果在所有 label 尝试完成后统一返回。
                     }
                 }
             }
@@ -948,6 +1003,17 @@ fn same_launch_runtime(a: &TunnelConfig, b: &TunnelConfig) -> bool {
         && a.auto_start == b.auto_start
 }
 
+/// 仅比较会改变 launchd plist/进程身份的字段。探针属于连接确认策略，
+/// 显示字段也不应为了保存配置而中断一个健康隧道。
+fn same_installed_launchd_identity(a: &TunnelConfig, b: &TunnelConfig) -> bool {
+    a.id == b.id
+        && a.command == b.command
+        && a.executor == b.executor
+        && a.keep_alive == b.keep_alive
+        && a.throttle_interval == b.throttle_interval
+        && a.auto_start == b.auto_start
+}
+
 fn executor_error(operation: &str, error: ExecutorError) -> TpError {
     let cancelled = matches!(&error, ExecutorError::Cancelled);
     let message = match error {
@@ -984,7 +1050,7 @@ mod tests {
     };
     use std::collections::VecDeque;
     use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::mpsc::{self, Receiver, Sender};
     use std::thread;
     use std::time::Duration;
@@ -1083,6 +1149,120 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Default)]
+    struct IdentityRecordingLaunchd {
+        stops: Arc<Mutex<Vec<Vec<ManagedLaunchdIdentity>>>>,
+    }
+
+    impl LaunchdExecuting for IdentityRecordingLaunchd {
+        fn bootstrap(&self, _label: &str, _plist_path: &Path) -> Result<(), ExecutorError> {
+            Ok(())
+        }
+
+        fn bootout(&self, _label: &str) -> Result<bool, ExecutorError> {
+            Ok(false)
+        }
+
+        fn status(&self, _label: &str) -> TunnelStatus {
+            TunnelStatus::NotLoaded
+        }
+
+        fn stop_managed_cancellable(
+            &self,
+            _label: &str,
+            managed_identities: &[ManagedLaunchdIdentity],
+            _cancellation: &CancellationToken,
+        ) -> Result<bool, ExecutorError> {
+            self.stops.lock().unwrap().push(managed_identities.to_vec());
+            Ok(false)
+        }
+    }
+
+    #[derive(Clone)]
+    struct BlockingConfigLaunchd {
+        stops: Arc<Mutex<Vec<Vec<ManagedLaunchdIdentity>>>>,
+        active: Arc<AtomicUsize>,
+        max_active: Arc<AtomicUsize>,
+        block_next: Arc<AtomicBool>,
+        entered: Arc<Mutex<Option<Sender<()>>>>,
+        release: Arc<Mutex<Receiver<()>>>,
+    }
+
+    impl BlockingConfigLaunchd {
+        fn new() -> (Self, Receiver<()>, Sender<()>) {
+            let (entered_tx, entered_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            (
+                Self {
+                    stops: Arc::new(Mutex::new(vec![])),
+                    active: Arc::new(AtomicUsize::new(0)),
+                    max_active: Arc::new(AtomicUsize::new(0)),
+                    block_next: Arc::new(AtomicBool::new(true)),
+                    entered: Arc::new(Mutex::new(Some(entered_tx))),
+                    release: Arc::new(Mutex::new(release_rx)),
+                },
+                entered_rx,
+                release_tx,
+            )
+        }
+
+        fn update_max(&self, active: usize) {
+            let mut current = self.max_active.load(Ordering::Relaxed);
+            while active > current {
+                match self.max_active.compare_exchange(
+                    current,
+                    active,
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => break,
+                    Err(actual) => current = actual,
+                }
+            }
+        }
+
+        fn max_active(&self) -> usize {
+            self.max_active.load(Ordering::SeqCst)
+        }
+
+        fn stop_count(&self) -> usize {
+            self.stops.lock().unwrap().len()
+        }
+    }
+
+    impl LaunchdExecuting for BlockingConfigLaunchd {
+        fn bootstrap(&self, _label: &str, _plist_path: &Path) -> Result<(), ExecutorError> {
+            Ok(())
+        }
+
+        fn bootout(&self, _label: &str) -> Result<bool, ExecutorError> {
+            Ok(false)
+        }
+
+        fn status(&self, _label: &str) -> TunnelStatus {
+            TunnelStatus::NotLoaded
+        }
+
+        fn stop_managed_cancellable(
+            &self,
+            _label: &str,
+            managed_identities: &[ManagedLaunchdIdentity],
+            _cancellation: &CancellationToken,
+        ) -> Result<bool, ExecutorError> {
+            self.stops.lock().unwrap().push(managed_identities.to_vec());
+            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+            self.update_max(active);
+            if self.block_next.swap(false, Ordering::SeqCst) {
+                if let Some(entered) = self.entered.lock().unwrap().take() {
+                    entered.send(()).unwrap();
+                }
+                self.release.lock().unwrap().recv().unwrap();
+            }
+            self.active.fetch_sub(1, Ordering::SeqCst);
+            Ok(false)
+        }
+    }
+
     #[derive(Clone)]
     struct BlockingRunner {
         entered: Arc<Mutex<Option<Sender<()>>>>,
@@ -1133,6 +1313,7 @@ mod tests {
     struct RestartBlockingRunner {
         calls: Arc<Mutex<Vec<Vec<String>>>>,
         bootstrap_entered: Arc<Mutex<Option<Sender<()>>>>,
+        status_reads: Arc<AtomicUsize>,
     }
 
     impl RestartBlockingRunner {
@@ -1142,6 +1323,7 @@ mod tests {
                 Self {
                     calls: Arc::new(Mutex::new(vec![])),
                     bootstrap_entered: Arc::new(Mutex::new(Some(entered_tx))),
+                    status_reads: Arc::new(AtomicUsize::new(0)),
                 },
                 entered_rx,
             )
@@ -1162,6 +1344,29 @@ mod tests {
             Err("restart 使用了不可取消 launchctl 路径".into())
         }
 
+        fn run_with_timeout(
+            &self,
+            _executable_path: &str,
+            arguments: &[String],
+            _timeout: Duration,
+        ) -> Result<ProcessResult, ProcessRunError> {
+            self.calls.lock().unwrap().push(arguments.to_vec());
+            match arguments.first().map(String::as_str) {
+                Some("print") => {
+                    let read = self.status_reads.fetch_add(1, Ordering::SeqCst);
+                    if read == 0 {
+                        not_running().map_err(|message| ProcessRunError::Spawn { message })
+                    } else {
+                        not_loaded().map_err(|message| ProcessRunError::Spawn { message })
+                    }
+                }
+                Some("bootout") => {
+                    process(0, "", "").map_err(|message| ProcessRunError::Spawn { message })
+                }
+                other => panic!("unexpected bounded launchctl operation: {other:?}"),
+            }
+        }
+
         fn run_cancellable(
             &self,
             _executable_path: &str,
@@ -1170,11 +1375,6 @@ mod tests {
         ) -> Result<ProcessResult, ProcessRunError> {
             self.calls.lock().unwrap().push(arguments.to_vec());
             match arguments.first().map(String::as_str) {
-                Some("bootout") => Ok(ProcessResult {
-                    exit_code: 0,
-                    stdout: String::new(),
-                    stderr: String::new(),
-                }),
                 Some("bootstrap") => {
                     if let Some(entered) = self.bootstrap_entered.lock().unwrap().take() {
                         entered.send(()).unwrap();
@@ -1774,7 +1974,7 @@ mod tests {
 
         let error = owner.load_config().unwrap_err();
 
-        assert_eq!(error.code, error_code::EXECUTOR);
+        assert_eq!(error.code, error_code::STILL_RUNNING);
         assert!(error.message.contains("仍加载"));
         assert_eq!(owner.config.lock().unwrap().tunnels.len(), 1);
         runner.assert_exhausted();
@@ -1814,10 +2014,10 @@ mod tests {
     }
 
     #[test]
-    fn reload_config_keeps_same_loaded_label_without_automatic_restart() {
+    fn reload_config_stops_changed_runtime_before_commit() {
         let home = temp_home("reload-same-id-change");
         let old = tunnel("same", "/usr/bin/old");
-        let runner = ScriptedRunner::new(vec![]);
+        let runner = ScriptedRunner::new(vec![running(100), process(0, "", ""), not_loaded()]);
         let paths = TunnelPaths::new(&home);
         ConfigStore::new(paths.clone())
             .save(&config_with_tunnels(vec![old]))
@@ -1835,8 +2035,266 @@ mod tests {
             owner.config.lock().unwrap().tunnels[0].command,
             vec!["/usr/bin/new"]
         );
+        assert_eq!(
+            runner
+                .calls()
+                .iter()
+                .map(|call| call[0].as_str())
+                .collect::<Vec<_>>(),
+            vec!["print", "bootout", "print"]
+        );
         runner.assert_exhausted();
         let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn save_config_stops_old_ssh_identity_before_committing_runtime_change() {
+        let home = temp_home("save-old-ssh-identity");
+        let paths = TunnelPaths::new(&home);
+        let old = TunnelConfig {
+            command: vec!["/usr/bin/ssh".into(), "-N".into(), "old-host".into()],
+            ..tunnel("managed-ssh", "/usr/bin/ssh")
+        };
+        ConfigStore::new(paths.clone())
+            .save(&config_with_tunnels(vec![old.clone()]))
+            .unwrap();
+        let launchd = IdentityRecordingLaunchd::default();
+        let stops = launchd.stops.clone();
+        let owner = CoreOwner::new(paths, launchd).unwrap();
+        let next = TunnelConfig {
+            command: vec!["/usr/bin/ssh".into(), "-N".into(), "new-host".into()],
+            ..old
+        };
+
+        owner
+            .save_config(config_with_tunnels(vec![next.clone()]))
+            .unwrap();
+
+        {
+            let stops = stops.lock().unwrap();
+            assert_eq!(stops.len(), 1);
+            assert!(stops[0].iter().any(
+                |identity| identity.program_arguments == vec!["/usr/bin/ssh", "-N", "old-host"]
+            ));
+            assert!(!stops[0].iter().any(|identity| identity
+                .program_arguments
+                .iter()
+                .any(|argument| argument == "new-host")));
+        }
+        assert_eq!(owner.config.lock().unwrap().tunnels[0], next);
+
+        let mut probe_only = next.clone();
+        probe_only.probe = Some(crate::ProbeConfig {
+            url: "http://127.0.0.1:1/health".into(),
+            expected_statuses: vec![200],
+        });
+        owner
+            .save_config(config_with_tunnels(vec![probe_only]))
+            .unwrap();
+        assert_eq!(
+            stops.lock().unwrap().len(),
+            1,
+            "探针变化不得中断 launchd 作业"
+        );
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn config_transaction_serializes_load_behind_in_flight_save() {
+        let home = temp_home("config-transaction-load-save");
+        let paths = TunnelPaths::new(&home);
+        let original = TunnelConfig {
+            command: vec!["/usr/bin/ssh".into(), "-N".into(), "original".into()],
+            ..tunnel("managed-ssh", "/usr/bin/ssh")
+        };
+        ConfigStore::new(paths.clone())
+            .save(&config_with_tunnels(vec![original.clone()]))
+            .unwrap();
+        let (launchd, entered, release) = BlockingConfigLaunchd::new();
+        let owner = Arc::new(CoreOwner::new(paths.clone(), launchd).unwrap());
+        let saved = TunnelConfig {
+            command: vec!["/usr/bin/ssh".into(), "-N".into(), "saved".into()],
+            ..original.clone()
+        };
+        let save_owner = Arc::clone(&owner);
+        let saved_config = config_with_tunnels(vec![saved.clone()]);
+        let save = thread::spawn(move || save_owner.save_config(saved_config));
+        entered.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        let external = TunnelConfig {
+            command: vec!["/usr/bin/ssh".into(), "-N".into(), "external".into()],
+            ..original
+        };
+        ConfigStore::new(paths.clone())
+            .save(&config_with_tunnels(vec![external]))
+            .unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (loaded_tx, loaded_rx) = mpsc::channel();
+        let load_owner = Arc::clone(&owner);
+        let load = thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            loaded_tx.send(load_owner.load_config()).unwrap();
+        });
+        started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(loaded_rx.recv_timeout(Duration::from_millis(100)).is_err());
+
+        release.send(()).unwrap();
+        save.join().unwrap().unwrap();
+        let loaded = loaded_rx
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .unwrap();
+        load.join().unwrap();
+        assert_eq!(loaded.tunnels[0], saved);
+        assert_eq!(owner.config.lock().unwrap().tunnels[0], saved);
+        assert_eq!(load_owner_config(&paths).unwrap().tunnels[0], saved);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn config_transaction_serializes_concurrent_saves_across_tunnels() {
+        let home = temp_home("config-transaction-save-save");
+        let paths = TunnelPaths::new(&home);
+        let original_a = TunnelConfig {
+            command: vec!["/usr/bin/ssh".into(), "-N".into(), "a-original".into()],
+            ..tunnel("managed-a", "/usr/bin/ssh")
+        };
+        let original_b = TunnelConfig {
+            command: vec!["/usr/bin/ssh".into(), "-N".into(), "b-original".into()],
+            ..tunnel("managed-b", "/usr/bin/ssh")
+        };
+        ConfigStore::new(paths.clone())
+            .save(&config_with_tunnels(vec![
+                original_a.clone(),
+                original_b.clone(),
+            ]))
+            .unwrap();
+        let (launchd, entered, release) = BlockingConfigLaunchd::new();
+        let launchd_probe = launchd.clone();
+        let owner = Arc::new(CoreOwner::new(paths.clone(), launchd).unwrap());
+        let first = TunnelConfig {
+            command: vec!["/usr/bin/ssh".into(), "-N".into(), "a-first".into()],
+            ..original_a.clone()
+        };
+        let first_config = config_with_tunnels(vec![first, original_b.clone()]);
+        let first_owner = Arc::clone(&owner);
+        let first_save = thread::spawn(move || first_owner.save_config(first_config));
+        entered.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        let second = TunnelConfig {
+            command: vec!["/usr/bin/ssh".into(), "-N".into(), "b-second".into()],
+            ..original_b
+        };
+        let second_config = config_with_tunnels(vec![original_a, second]);
+        let expected = second_config.clone();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let second_owner = Arc::clone(&owner);
+        let second_save = thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            done_tx
+                .send(second_owner.save_config(second_config))
+                .unwrap();
+        });
+        started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(done_rx.recv_timeout(Duration::from_millis(100)).is_err());
+        assert_eq!(launchd_probe.stop_count(), 1);
+
+        release.send(()).unwrap();
+        first_save.join().unwrap().unwrap();
+        done_rx
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .unwrap();
+        second_save.join().unwrap();
+        assert_eq!(launchd_probe.max_active(), 1);
+        assert_eq!(*owner.config.lock().unwrap(), expected);
+        assert_eq!(load_owner_config(&paths).unwrap(), expected);
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn config_transaction_serializes_remove_behind_in_flight_save() {
+        let home = temp_home("config-transaction-save-remove");
+        let paths = TunnelPaths::new(&home);
+        let original = TunnelConfig {
+            command: vec!["/usr/bin/ssh".into(), "-N".into(), "original".into()],
+            ..tunnel("managed-ssh", "/usr/bin/ssh")
+        };
+        ConfigStore::new(paths.clone())
+            .save(&config_with_tunnels(vec![original.clone()]))
+            .unwrap();
+        let (launchd, entered, release) = BlockingConfigLaunchd::new();
+        let owner = Arc::new(CoreOwner::new(paths.clone(), launchd).unwrap());
+        let saved = TunnelConfig {
+            command: vec!["/usr/bin/ssh".into(), "-N".into(), "saved".into()],
+            ..original
+        };
+        let save_owner = Arc::clone(&owner);
+        let save = thread::spawn(move || save_owner.save_config(config_with_tunnels(vec![saved])));
+        entered.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        let (started_tx, started_rx) = mpsc::channel();
+        let (removed_tx, removed_rx) = mpsc::channel();
+        let remove_owner = Arc::clone(&owner);
+        let remove = thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            removed_tx.send(remove_owner.remove("managed-ssh")).unwrap();
+        });
+        started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(removed_rx.recv_timeout(Duration::from_millis(100)).is_err());
+
+        release.send(()).unwrap();
+        save.join().unwrap().unwrap();
+        removed_rx
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .unwrap();
+        remove.join().unwrap();
+        assert!(owner.config.lock().unwrap().tunnels.is_empty());
+        assert!(load_owner_config(&paths).unwrap().tunnels.is_empty());
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn reload_remove_and_shutdown_use_managed_identity_stop_for_ssh() {
+        for operation in ["reload", "remove", "shutdown"] {
+            let home = temp_home(&format!("managed-cleanup-{operation}"));
+            let paths = TunnelPaths::new(&home);
+            let managed = TunnelConfig {
+                command: vec!["/usr/bin/ssh".into(), "-N".into(), "managed-host".into()],
+                ..tunnel("managed-ssh", "/usr/bin/ssh")
+            };
+            ConfigStore::new(paths.clone())
+                .save(&config_with_tunnels(vec![managed.clone()]))
+                .unwrap();
+            let launchd = IdentityRecordingLaunchd::default();
+            let stops = launchd.stops.clone();
+            let owner = CoreOwner::new(paths, launchd).unwrap();
+
+            match operation {
+                "reload" => {
+                    ConfigStore::new(owner.paths().clone())
+                        .save(&config_with_tunnels(vec![]))
+                        .unwrap();
+                    owner.load_config().unwrap();
+                }
+                "remove" => {
+                    owner.remove("managed-ssh").unwrap();
+                }
+                "shutdown" => {
+                    owner.shutdown().unwrap();
+                }
+                _ => unreachable!(),
+            }
+
+            let stops = stops.lock().unwrap();
+            assert_eq!(stops.len(), 1, "{operation} 必须走受管停止");
+            assert!(stops[0]
+                .iter()
+                .any(|identity| identity.program_arguments == managed.command));
+            let _ = fs::remove_dir_all(home);
+        }
     }
 
     #[test]
@@ -2107,7 +2565,7 @@ mod tests {
         let _ = fs::remove_dir_all(home);
 
         let home = temp_home("matrix-stop");
-        let runner = ScriptedRunner::new(vec![process(0, "", ""), not_running()]);
+        let runner = ScriptedRunner::new(vec![not_running(), process(0, "", ""), not_loaded()]);
         let owner = scripted_owner(&home, &["matrix-stop"], runner.clone());
         let result = owner.stop("matrix-stop").unwrap();
         assert_eq!(result["operation"], "stop");
@@ -2118,17 +2576,13 @@ mod tests {
                 .iter()
                 .map(|call| call[0].as_str())
                 .collect::<Vec<_>>(),
-            vec!["bootout", "print"]
+            vec!["print", "bootout", "print"]
         );
         runner.assert_exhausted();
         let _ = fs::remove_dir_all(home);
 
         let home = temp_home("matrix-restart");
-        let runner = ScriptedRunner::new(vec![
-            process(3, "", "Could not find service"),
-            process(0, "", ""),
-            running(456),
-        ]);
+        let runner = ScriptedRunner::new(vec![not_loaded(), process(0, "", ""), running(456)]);
         let owner = scripted_owner(&home, &["matrix-restart"], runner.clone());
         let result = owner.restart("matrix-restart").unwrap();
         assert_eq!(result["operation"], "restart");
@@ -2139,7 +2593,7 @@ mod tests {
                 .iter()
                 .map(|call| call[0].as_str())
                 .collect::<Vec<_>>(),
-            vec!["bootout", "bootstrap", "print"]
+            vec!["print", "bootstrap", "print"]
         );
         runner.assert_exhausted();
         let _ = fs::remove_dir_all(home);
@@ -2303,7 +2757,7 @@ mod tests {
                 .iter()
                 .map(|call| call[0].as_str())
                 .collect::<Vec<_>>(),
-            vec!["bootout", "bootstrap"]
+            vec!["print", "bootout", "print", "bootstrap"]
         );
         let _ = fs::remove_dir_all(home);
     }
@@ -2361,7 +2815,10 @@ mod tests {
     #[test]
     fn restart_blocks_bootstrap_after_bootout_error() {
         let home = temp_home("stage0-restart-bootout-error");
-        let runner = ScriptedRunner::new(vec![process(9, "", "Operation not permitted")]);
+        let runner = ScriptedRunner::new(vec![
+            not_running(),
+            process(9, "", "Operation not permitted"),
+        ]);
         let owner = scripted_owner(&home, &["stage0-restart-bootout-error"], runner.clone());
 
         let error = owner.restart("stage0-restart-bootout-error").unwrap_err();
@@ -2373,7 +2830,7 @@ mod tests {
                 .iter()
                 .map(|call| call[0].as_str())
                 .collect::<Vec<_>>(),
-            vec!["bootout"],
+            vec!["print", "bootout"],
             "bootout 失败后不得继续 bootstrap"
         );
         runner.assert_exhausted();

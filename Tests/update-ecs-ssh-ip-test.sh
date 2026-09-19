@@ -78,8 +78,8 @@ count_calls() {
   grep -c "^$1 " "$CALL_LOG" 2>/dev/null || true
 }
 
-current_rule='{"Description":"tunnelpad-dynamic-ssh-managed","Direction":"ingress","IpProtocol":"TCP","PortRange":"22/22","Policy":"Accept","NicType":"intranet","SourceCidrIp":"45.67.89.101/32","SecurityGroupRuleId":"sgr-current"}'
-old_rule='{"Description":"tunnelpad-dynamic-ssh-managed","Direction":"ingress","IpProtocol":"TCP","PortRange":"22/22","Policy":"Accept","NicType":"intranet","SourceCidrIp":"45.67.89.100/32","SecurityGroupRuleId":"sgr-old"}'
+current_rule='{"Description":"tunnelpad-dynamic-ssh-managed","Direction":"ingress","IpProtocol":"TCP","PortRange":"22/22","Policy":"Accept","Priority":"1","NicType":"intranet","SourcePortRange":"","SourceCidrIp":"45.67.89.101/32","SecurityGroupRuleId":"sgr-current"}'
+old_rule='{"Description":"tunnelpad-dynamic-ssh-managed","Direction":"ingress","IpProtocol":"TCP","PortRange":"22/22","Policy":"Accept","Priority":"1","NicType":"intranet","SourcePortRange":"","SourceCidrIp":"45.67.89.100/32","SecurityGroupRuleId":"sgr-old"}'
 other_rule='{"Description":"createdByEcsWorkbench","Direction":"ingress","IpProtocol":"TCP","PortRange":"22/22","Policy":"Accept","NicType":"intranet","SourceCidrIp":"0.0.0.0/0","SecurityGroupRuleId":"sgr-other"}'
 
 prepare_case current
@@ -91,6 +91,16 @@ assert_eq 0 "$(count_calls AuthorizeSecurityGroup)" '当前规则不应新增'
 assert_eq 0 "$(count_calls RevokeSecurityGroup)" '当前规则不应撤销'
 assert_not_contains "$(cat "$LOG_FILE")" '45.67.89.101' '日志不得包含原始 IP'
 printf '%s\n' 'PASS current-managed-rule'
+
+prepare_case restricted-source-port
+restricted_source_port_rule='{"Description":"tunnelpad-dynamic-ssh-managed","Direction":"ingress","IpProtocol":"TCP","PortRange":"22/22","Policy":"Accept","Priority":"1","NicType":"intranet","SourcePortRange":"22/22","SourceCidrIp":"45.67.89.101/32","SecurityGroupRuleId":"sgr-restricted"}'
+write_state "{\"Permissions\":{\"Permission\":[$restricted_source_port_rule]}}"
+run_update
+assert_eq 4 "$RC" '受限源端口规则不得被接管为 TunnelPad 规则'
+assert_contains "$OUTPUT" 'managed_ambiguous' '不完整五元组应稳定 fail-closed'
+assert_eq 0 "$(count_calls AuthorizeSecurityGroup)" '不完整五元组不得新增'
+assert_eq 0 "$(count_calls RevokeSecurityGroup)" '不完整五元组不得撤销'
+printf '%s\n' 'PASS restricted-source-port-rejected'
 
 prepare_case mismatch
 write_state "{\"Permissions\":{\"Permission\":[$current_rule]}}"
@@ -164,8 +174,17 @@ assert_contains "$(cat "$STATE_FILE")" '45.67.89.100/32' '撤销失败应保留�
 assert_contains "$(cat "$STATE_FILE")" '45.67.89.101/32' '撤销失败应保留新规则'
 printf '%s\n' 'PASS revoke-failure'
 
-# 阶段 0 反证：外部临时撤销故障已解除，旧脚本仍会因双规则拒绝重试。
-# 无人值守实现后应以可信事务恢复的目标断言替换，未知多规则仍 fail-closed。
+# 只读检查不能把尚未完成的 journal 误报为已同步，也不能执行写操作。
+authorize_calls_before_check=$(count_calls AuthorizeSecurityGroup)
+revoke_calls_before_check=$(count_calls RevokeSecurityGroup)
+run_update --check
+assert_eq 4 "$RC" '存在可信未完成事务时 --check 必须要求恢复'
+assert_contains "$OUTPUT" 'transaction_pending' '--check 应返回稳定的事务待恢复错误码'
+assert_eq "$authorize_calls_before_check" "$(count_calls AuthorizeSecurityGroup)" '--check 不得续作新增'
+assert_eq "$revoke_calls_before_check" "$(count_calls RevokeSecurityGroup)" '--check 不得续作撤销'
+printf '%s\n' 'PASS check-pending-transaction'
+
+# 外部临时撤销故障解除后，应续作可信事务；未知多规则仍 fail-closed。
 unset FAKE_REVOKE_FAIL
 revoke_calls_before_retry=$(count_calls RevokeSecurityGroup)
 run_update
@@ -186,7 +205,7 @@ printf '%s\n' 'PASS revoke-uncertain-converged'
 
 prepare_case ambiguous
 ambiguous_a="$old_rule"
-ambiguous_b='{"Description":"tunnelpad-dynamic-ssh-managed","Direction":"ingress","IpProtocol":"TCP","PortRange":"22/22","Policy":"Accept","NicType":"intranet","SourceCidrIp":"45.67.89.99/32","SecurityGroupRuleId":"sgr-ambiguous"}'
+ambiguous_b='{"Description":"tunnelpad-dynamic-ssh-managed","Direction":"ingress","IpProtocol":"TCP","PortRange":"22/22","Policy":"Accept","Priority":"1","NicType":"intranet","SourcePortRange":"","SourceCidrIp":"45.67.89.99/32","SecurityGroupRuleId":"sgr-ambiguous"}'
 write_state "{\"Permissions\":{\"Permission\":[$ambiguous_a,$ambiguous_b]}}"
 run_update
 assert_eq 4 "$RC" '多条受管规则应返回 4'
