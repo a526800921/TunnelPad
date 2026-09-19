@@ -18,7 +18,7 @@ pub fn app_config_to_apple_json(config: &AppConfig) -> String {
 
 /// 层级：`{`(0) → 键(2) → tunnel `{`(4) → 键(6) → probe `{`(6→键 8) → 数组项(8→项 10)。
 fn render_tunnel(tunnel: &TunnelConfig) -> String {
-    // 键按字母序：autoStart, command, executor, id, keepAlive, name, probe, remark, throttleInterval
+    // 键按字母序：autoStart, command, executor, forceRemotePortCleanup, id, keepAlive, name, probe, remark, throttleInterval
     let mut out = String::from("{\n");
     out.push_str(&format!("      \"autoStart\" : {},\n", tunnel.auto_start));
     out.push_str(&format!(
@@ -28,6 +28,10 @@ fn render_tunnel(tunnel: &TunnelConfig) -> String {
     out.push_str(&format!(
         "      \"executor\" : {},\n",
         render_string("launchd")
+    ));
+    out.push_str(&format!(
+        "      \"forceRemotePortCleanup\" : {},\n",
+        tunnel.force_remote_port_cleanup
     ));
     out.push_str(&format!("      \"id\" : {},\n", render_string(&tunnel.id)));
     out.push_str(&format!("      \"keepAlive\" : {},\n", tunnel.keep_alive));
@@ -126,7 +130,7 @@ mod tests {
             r#"{"version":1,"tunnels":[{"id":"admin-tunnel","name":"管理\"引号\"\\反斜杠","command":["/usr/bin/ssh","-N","-L","8080:127.0.0.1:80","host"],"executor":"launchd","keepAlive":true,"throttleInterval":10,"probe":{"url":"http://127.0.0.1:8080/health","expectedStatuses":[200,204]}}]}"#,
         )
         .unwrap();
-        let expected = "{\n  \"tunnels\" : [\n    {\n      \"autoStart\" : false,\n      \"command\" : [\n        \"\\/usr\\/bin\\/ssh\",\n        \"-N\",\n        \"-L\",\n        \"8080:127.0.0.1:80\",\n        \"host\"\n      ],\n      \"executor\" : \"launchd\",\n      \"id\" : \"admin-tunnel\",\n      \"keepAlive\" : true,\n      \"name\" : \"管理\\\"引号\\\"\\\\反斜杠\",\n      \"probe\" : {\n        \"expectedStatuses\" : [\n          200,\n          204\n        ],\n        \"url\" : \"http:\\/\\/127.0.0.1:8080\\/health\"\n      },\n      \"remark\" : \"\",\n      \"throttleInterval\" : 10\n    }\n  ],\n  \"version\" : 1\n}";
+        let expected = "{\n  \"tunnels\" : [\n    {\n      \"autoStart\" : false,\n      \"command\" : [\n        \"\\/usr\\/bin\\/ssh\",\n        \"-N\",\n        \"-L\",\n        \"8080:127.0.0.1:80\",\n        \"host\"\n      ],\n      \"executor\" : \"launchd\",\n      \"forceRemotePortCleanup\" : false,\n      \"id\" : \"admin-tunnel\",\n      \"keepAlive\" : true,\n      \"name\" : \"管理\\\"引号\\\"\\\\反斜杠\",\n      \"probe\" : {\n        \"expectedStatuses\" : [\n          200,\n          204\n        ],\n        \"url\" : \"http:\\/\\/127.0.0.1:8080\\/health\"\n      },\n      \"remark\" : \"\",\n      \"throttleInterval\" : 10\n    }\n  ],\n  \"version\" : 1\n}";
         assert_eq!(app_config_to_apple_json(&config), expected);
     }
 }

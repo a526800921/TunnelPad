@@ -171,6 +171,45 @@ actor SharedRecoveryPreflightCoordinator {
     }
 }
 
+/// 远端端口清理按规范化目标串行，但每个调用都必须重新执行并确认；
+/// 与共享 ECS `/32` 前置不同，这里绝不复用上一条隧道的成功结果。
+actor RemotePortCleanupCoordinator {
+    private var heldResources = Set<String>()
+    private var waiters: [String: [CheckedContinuation<Void, Never>]] = [:]
+
+    func run(
+        resource: String,
+        operation: @escaping @Sendable () async throws -> LaunchPreflightResult
+    ) async throws -> LaunchPreflightResult {
+        await acquire(resource)
+        defer { release(resource) }
+        try Task.checkCancellation()
+        return try await operation()
+    }
+
+    private func acquire(_ resource: String) async {
+        if heldResources.insert(resource).inserted { return }
+        await withCheckedContinuation { continuation in
+            waiters[resource, default: []].append(continuation)
+        }
+    }
+
+    private func release(_ resource: String) {
+        guard var queue = waiters[resource], !queue.isEmpty else {
+            waiters.removeValue(forKey: resource)
+            heldResources.remove(resource)
+            return
+        }
+        let next = queue.removeFirst()
+        if queue.isEmpty {
+            waiters.removeValue(forKey: resource)
+        } else {
+            waiters[resource] = queue
+        }
+        next.resume()
+    }
+}
+
 /// 容量与所有权集中在 MainActor。取消后 active 项保留到后端清理实际完成。
 @MainActor
 final class LaunchRecoveryCoordinator {
@@ -320,5 +359,6 @@ extension TunnelConfig {
     func matchesLaunchRuntime(_ other: TunnelConfig) -> Bool {
         id == other.id && command == other.command && executor == other.executor && keepAlive == other.keepAlive
             && throttleInterval == other.throttleInterval && probe == other.probe && autoStart == other.autoStart
+            && forceRemotePortCleanup == other.forceRemotePortCleanup
     }
 }

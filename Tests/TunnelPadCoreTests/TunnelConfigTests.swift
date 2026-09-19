@@ -25,6 +25,7 @@ final class TunnelConfigTests: XCTestCase {
         XCTAssertEqual(tunnel.remark, "")
         XCTAssertTrue(tunnel.keepAlive)
         XCTAssertEqual(tunnel.throttleInterval, 10)
+        XCTAssertFalse(tunnel.forceRemotePortCleanup)
     }
 
     func testDecodingRejectsInvalidID() {
@@ -78,6 +79,24 @@ final class TunnelConfigTests: XCTestCase {
         ])
         let roundtrip = try JSONDecoder().decode(AppConfig.self, from: JSONEncoder().encode(original))
         XCTAssertEqual(roundtrip, original, "autoStart 编解码应往返保留")
+    }
+
+    func testForceRemotePortCleanupDefaultsOffAndRoundtripsExplicitOptIn() throws {
+        let missing = #"{"version":1,"tunnels":[{"id":"x","name":"X","command":["/usr/bin/ssh"]}]}"#
+        let decoded = try JSONDecoder().decode(AppConfig.self, from: Data(missing.utf8))
+        XCTAssertFalse(try XCTUnwrap(decoded.tunnels.first).forceRemotePortCleanup)
+
+        let original = AppConfig(tunnels: [
+            TunnelConfig(
+                id: "motorcycle",
+                name: "Motorcycle",
+                command: ["/usr/bin/ssh", "-N"],
+                forceRemotePortCleanup: true
+            ),
+        ])
+        let roundtrip = try JSONDecoder().decode(AppConfig.self, from: JSONEncoder().encode(original))
+        XCTAssertTrue(try XCTUnwrap(roundtrip.tunnels.first).forceRemotePortCleanup)
+        XCTAssertEqual(roundtrip, original)
     }
 
     func testRemarkDoesNotChangeLaunchdLabel() {

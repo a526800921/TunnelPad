@@ -10,6 +10,7 @@ final class TunnelRemarksTests: XCTestCase {
         form.commandText = "/usr/bin/ssh\n-N"
         form.keepAlive = false
         form.throttleInterval = 17
+        form.forceRemotePortCleanup = true
 
         let tunnel = try form.makeTunnel(id: "admin-tunnel")
 
@@ -18,6 +19,7 @@ final class TunnelRemarksTests: XCTestCase {
         XCTAssertEqual(tunnel.command, ["/usr/bin/ssh", "-N"])
         XCTAssertFalse(tunnel.keepAlive)
         XCTAssertEqual(tunnel.throttleInterval, 17)
+        XCTAssertTrue(tunnel.forceRemotePortCleanup)
         XCTAssertEqual(tunnel.launchdLabel, "com.jafish.tunnelpad.admin-tunnel")
     }
 
@@ -34,10 +36,12 @@ final class TunnelRemarksTests: XCTestCase {
 
     func testFormLoadsExistingRemark() {
         let tunnel = TunnelConfig(
-            id: "existing", name: "已有", remark: "  说明  ", command: ["/bin/true"]
+            id: "existing", name: "已有", remark: "  说明  ", command: ["/bin/true"],
+            forceRemotePortCleanup: true
         )
 
         XCTAssertEqual(TunnelFormState(tunnel: tunnel).remark, "  说明  ")
+        XCTAssertTrue(TunnelFormState(tunnel: tunnel).forceRemotePortCleanup)
     }
 
     func testSidebarSubtitlePrefersTrimmedRemark() {

@@ -128,6 +128,36 @@ final class LaunchRecoveryCoordinatorTests: XCTestCase {
         calls = await probe.calls
         XCTAssertEqual(calls, 2, "冷却到期后才允许新的安全复核")
     }
+    func testRemotePortCleanupSerializesSamePortWithoutSharingResult() async throws {
+        let coordinator = RemotePortCleanupCoordinator()
+        let probe = RemotePortCleanupProbe()
+
+        async let first = coordinator.run(resource: "root@example:22/tcp/18080") {
+            await probe.run("first")
+        }
+        async let second = coordinator.run(resource: "root@example:22/tcp/18080") {
+            await probe.run("second")
+        }
+
+        var snapshot = await probe.snapshot()
+        for _ in 0..<2_000 where snapshot.calls.count < 1 {
+            try await Task.sleep(nanoseconds: 1_000_000)
+            snapshot = await probe.snapshot()
+        }
+        XCTAssertEqual(snapshot.calls.count, 1)
+        XCTAssertEqual(snapshot.maximumActive, 1)
+
+        await probe.releaseOne()
+        for _ in 0..<2_000 where snapshot.calls.count < 2 {
+            try await Task.sleep(nanoseconds: 1_000_000)
+            snapshot = await probe.snapshot()
+        }
+        XCTAssertEqual(Set(snapshot.calls), ["first", "second"], "每条隧道都必须重新执行端口确认")
+        XCTAssertEqual(snapshot.maximumActive, 1, "同一远端端口不能并发强杀")
+
+        await probe.releaseOne()
+        _ = try await (first, second)
+    }
     func testRunningWithoutPIDDoesNotHandoff() async throws {
         let clock = LaunchTestClock(); var calls = 0; var handed = false
         let coordinator = LaunchRecoveryCoordinator(clock: clock.clock, attempt: { _ in calls += 1; return .running(.running(pid: nil)) }, handoff: { _, _ in handed = true }, report: { _, _, _ in })
@@ -196,5 +226,42 @@ private actor SharedPreflightAuthenticationProbe {
             sanitizedCode: "authentication_failed",
             exitCode: 3
         )
+    }
+}
+
+private actor RemotePortCleanupProbe {
+    struct Snapshot: Sendable {
+        let calls: [String]
+        let maximumActive: Int
+    }
+
+    private var calls: [String] = []
+    private var active = 0
+    private var maximumActive = 0
+    private var continuations: [CheckedContinuation<Void, Never>] = []
+
+    func run(_ label: String) async -> LaunchPreflightResult {
+        calls.append(label)
+        active += 1
+        maximumActive = max(maximumActive, active)
+        await withCheckedContinuation { continuations.append($0) }
+        active -= 1
+        return LaunchPreflightResult(
+            version: 1,
+            stage: "remote_port_cleanup",
+            category: .success,
+            retryHint: 0,
+            sanitizedCode: "listener_absent",
+            exitCode: 0
+        )
+    }
+
+    func snapshot() -> Snapshot {
+        Snapshot(calls: calls, maximumActive: maximumActive)
+    }
+
+    func releaseOne() {
+        guard !continuations.isEmpty else { return }
+        continuations.removeFirst().resume()
     }
 }

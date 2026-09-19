@@ -32,6 +32,7 @@ struct TunnelFormState: Equatable {
     var probeURL = ""
     var probeStatuses = "200"
     var autoStart = false
+    var forceRemotePortCleanup = false
 
     init() {}
 
@@ -47,6 +48,7 @@ struct TunnelFormState: Equatable {
         probeURL = tunnel.probe?.url ?? ""
         probeStatuses = tunnel.probe.map { $0.expectedStatuses.map(String.init).joined(separator: ", ") } ?? "200"
         autoStart = tunnel.autoStart
+        forceRemotePortCleanup = tunnel.forceRemotePortCleanup
     }
 
     var parsedCommand: [String] {
@@ -84,7 +86,8 @@ struct TunnelFormState: Equatable {
             keepAlive: keepAlive,
             throttleInterval: throttleInterval,
             probe: probe,
-            autoStart: autoStart
+            autoStart: autoStart,
+            forceRemotePortCleanup: forceRemotePortCleanup
         )
     }
 

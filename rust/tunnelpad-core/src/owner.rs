@@ -1435,6 +1435,7 @@ mod tests {
                     throttle_interval: 10,
                     probe: None,
                     auto_start: false,
+                    force_remote_port_cleanup: false,
                 })
                 .collect(),
         }
@@ -1458,6 +1459,7 @@ mod tests {
             throttle_interval: 10,
             probe: None,
             auto_start: false,
+            force_remote_port_cleanup: false,
         }
     }
 

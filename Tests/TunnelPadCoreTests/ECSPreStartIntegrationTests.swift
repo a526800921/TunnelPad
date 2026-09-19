@@ -334,6 +334,98 @@ final class ECSPreStartIntegrationTests: XCTestCase {
         }
     }
 
+    func testRemotePortCleanupIsDisabledByDefaultWithoutLaunchingSSH() async throws {
+        let runner = RecordingPreflightRunner(result: ProcessResult(exitCode: 0))
+        let checker = ECSPreStartChecker(
+            scriptURL: nil,
+            cleanupScriptURL: nil,
+            runner: runner,
+            environment: [:],
+            timeout: 1
+        )
+        let tunnel = TunnelConfig(
+            id: "cleanup-off",
+            name: "Cleanup off",
+            command: ["/usr/bin/ssh", "-N", "-R", "127.0.0.1:18080:127.0.0.1:8080", "root@47.109.202.254"]
+        )
+
+        let result = try await checker.cleanupRemotePort(tunnel: tunnel, timeout: 1)
+
+        XCTAssertEqual(result.sanitizedCode, "not_required")
+        XCTAssertTrue(runner.asyncCalls.isEmpty)
+        XCTAssertNil(checker.remotePortCleanupResource(tunnel: tunnel))
+    }
+
+    func testRemotePortCleanupUsesRestrictedSSHAndConfirmsAbsentAfterKill() async throws {
+        let cleanupURL = temporaryScriptURL()
+        defer { try? FileManager.default.removeItem(at: cleanupURL) }
+        try Data("#!/bin/bash\nexit 0\n".utf8).write(to: cleanupURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cleanupURL.path)
+        let runner = ScriptedCleanupRunner(results: [
+            ProcessResult(exitCode: 0, stdout: #"{"version":1,"stage":"remoteCleanup","category":"success","retryHint":0,"sanitizedCode":"listeners_killed","exitCode":0}"#),
+            ProcessResult(exitCode: 0, stdout: #"{"version":1,"stage":"remoteCleanup","category":"success","retryHint":0,"sanitizedCode":"listener_absent","exitCode":0}"#),
+        ])
+        let checker = ECSPreStartChecker(
+            scriptURL: nil,
+            cleanupScriptURL: cleanupURL,
+            runner: runner,
+            environment: [:],
+            timeout: 1
+        )
+        let tunnel = TunnelConfig(
+            id: "motorcycle",
+            name: "Motorcycle",
+            command: [
+                "/usr/bin/ssh", "-i", "/tmp/motorcycle.pem",
+                "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
+                "-N", "-T",
+                "-R", "127.0.0.1:18080:127.0.0.1:8080",
+                "-L", "127.0.0.1:10080:100.100.100.200:80",
+                "root@47.109.202.254",
+            ],
+            forceRemotePortCleanup: true
+        )
+
+        let result = try await checker.cleanupRemotePort(tunnel: tunnel, timeout: 2)
+
+        XCTAssertEqual(result.sanitizedCode, "listeners_released")
+        XCTAssertEqual(runner.calls.count, 2)
+        let arguments = try XCTUnwrap(runner.calls.first?.arguments)
+        XCTAssertEqual(Array(arguments.prefix(2)), [cleanupURL.path, "/usr/bin/ssh"])
+        XCTAssertTrue(arguments.contains("ClearAllForwardings=yes"))
+        XCTAssertFalse(arguments.contains("-R"))
+        XCTAssertFalse(arguments.contains("-L"))
+        XCTAssertEqual(Array(arguments.suffix(5)), ["/usr/bin/python3", "-I", "-S", "-", "18080"])
+        XCTAssertEqual(checker.remotePortCleanupResource(tunnel: tunnel), "root@47.109.202.254:22/tcp/18080")
+    }
+
+    func testRemotePortCleanupRejectsUnsupportedCommandWithoutLaunchingSSH() async throws {
+        let cleanupURL = temporaryScriptURL()
+        defer { try? FileManager.default.removeItem(at: cleanupURL) }
+        try Data("#!/bin/bash\nexit 0\n".utf8).write(to: cleanupURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cleanupURL.path)
+        let runner = RecordingPreflightRunner(result: ProcessResult(exitCode: 0))
+        let checker = ECSPreStartChecker(
+            scriptURL: nil,
+            cleanupScriptURL: cleanupURL,
+            runner: runner,
+            environment: [:],
+            timeout: 1
+        )
+        let tunnel = TunnelConfig(
+            id: "unsafe-cleanup",
+            name: "Unsafe cleanup",
+            command: ["ssh", "-N", "-R", "127.0.0.1:18080:127.0.0.1:8080", "root@47.109.202.254"],
+            forceRemotePortCleanup: true
+        )
+
+        let result = try await checker.cleanupRemotePort(tunnel: tunnel, timeout: 1)
+
+        XCTAssertEqual(result.category, .local)
+        XCTAssertEqual(result.sanitizedCode, "cleanup_command_unsupported")
+        XCTAssertTrue(runner.asyncCalls.isEmpty)
+    }
+
     private func temporaryPaths() -> TunnelPaths {
         TunnelPaths(
             homeDirectory: FileManager.default.temporaryDirectory
@@ -344,6 +436,48 @@ final class ECSPreStartIntegrationTests: XCTestCase {
     private func temporaryScriptURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("tunnelpad-ecs-prestart-\(UUID().uuidString)", isDirectory: false)
+    }
+}
+
+private final class ScriptedCleanupRunner: ECSPreflightProcessRunning, @unchecked Sendable {
+    struct Call {
+        let executablePath: String
+        let arguments: [String]
+    }
+
+    private let lock = NSLock()
+    private var results: [ProcessResult]
+    private var callsStorage: [Call] = []
+
+    init(results: [ProcessResult]) {
+        self.results = results
+    }
+
+    var calls: [Call] { lock.withLock { callsStorage } }
+
+    func run(
+        executablePath: String,
+        arguments: [String],
+        environment: [String: String],
+        timeout: TimeInterval
+    ) throws -> ProcessResult {
+        try next(executablePath: executablePath, arguments: arguments)
+    }
+
+    func runAsync(
+        executablePath: String,
+        arguments: [String],
+        environment: [String: String]
+    ) async throws -> ProcessResult {
+        try next(executablePath: executablePath, arguments: arguments)
+    }
+
+    private func next(executablePath: String, arguments: [String]) throws -> ProcessResult {
+        try lock.withLock {
+            callsStorage.append(Call(executablePath: executablePath, arguments: arguments))
+            guard !results.isEmpty else { throw ECSPreflightProcessError.launchFailed }
+            return results.removeFirst()
+        }
     }
 }
 

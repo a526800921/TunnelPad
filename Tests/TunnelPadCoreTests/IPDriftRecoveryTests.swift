@@ -259,13 +259,14 @@ final class IPDriftRecoveryTests: XCTestCase {
     func testConcurrentRuntimeRecoverySharesSingleECSPreflightByResource() async throws {
         let home = FileManager.default.temporaryDirectory
             .appendingPathComponent("tunnelpad-shared-runtime-preflight-\(UUID().uuidString)", isDirectory: true)
-        let tunnels = ["shared-a", "shared-b"].map {
+        let tunnels = ["shared-a", "shared-b"].enumerated().map { index, id in
             TunnelConfig(
-                id: $0,
-                name: $0,
-                command: ["/usr/bin/ssh", "-N", "fixture"],
+                id: id,
+                name: id,
+                command: ["/usr/bin/ssh", "-N", "-R", "127.0.0.1:\(18_080 + index):127.0.0.1:8080", "root@fixture"],
                 keepAlive: true,
-                autoStart: true
+                autoStart: true,
+                forceRemotePortCleanup: true
             )
         }
         let owner = SharedRuntimeRecoveryOwner(config: AppConfig(tunnels: tunnels))
@@ -297,6 +298,8 @@ final class IPDriftRecoveryTests: XCTestCase {
 
         XCTAssertEqual(owner.startedIDs, Set(["shared-a", "shared-b"]))
         XCTAssertEqual(checker.calls, 1, "等待者必须复用首次同步结果，而不是收到 lock_busy 后重试")
+        XCTAssertEqual(Set(checker.cleanupIDs), Set(["shared-a", "shared-b"]), "共享同步后仍须逐隧道清理")
+        XCTAssertEqual(checker.cleanupIDs.count, 2, "远端清理成功不能跨隧道复用")
         XCTAssertEqual(checker.maxConcurrentCalls, 1)
         await manager.shutdownAsync()
     }
@@ -461,10 +464,12 @@ private final class SharedRuntimeRecoveryChecker: LaunchPreflightChecking, ECSIP
     private var activeCalls = 0
     private var maxConcurrentCallsStorage = 0
     private var continuation: CheckedContinuation<Void, Never>?
+    private var cleanupIDsStorage: [String] = []
 
     var requiresAutomaticRecoveryQuiescence: Bool { true }
     var calls: Int { lock.withLock { callsStorage } }
     var maxConcurrentCalls: Int { lock.withLock { maxConcurrentCallsStorage } }
+    var cleanupIDs: [String] { lock.withLock { cleanupIDsStorage } }
 
     func check(tunnel: TunnelConfig) throws {}
 
@@ -502,6 +507,20 @@ private final class SharedRuntimeRecoveryChecker: LaunchPreflightChecking, ECSIP
     }
 
     func launchResource() async throws -> String { "shared-resource" }
+
+    func remotePortCleanupResource(tunnel: TunnelConfig) -> String? { "cleanup:\(tunnel.id)" }
+
+    func cleanupRemotePort(tunnel: TunnelConfig, timeout: TimeInterval) async throws -> LaunchPreflightResult {
+        lock.withLock { cleanupIDsStorage.append(tunnel.id) }
+        return .init(
+            version: 1,
+            stage: "remoteCleanup",
+            category: .success,
+            retryHint: 0,
+            sanitizedCode: "listener_absent",
+            exitCode: 0
+        )
+    }
 
     func checkCurrentState(tunnel: TunnelConfig, timeout: TimeInterval) async throws -> LaunchPreflightResult {
         .init(

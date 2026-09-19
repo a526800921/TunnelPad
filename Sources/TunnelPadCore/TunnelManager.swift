@@ -67,6 +67,7 @@ public final class TunnelManager: ObservableObject {
     private let appEventLog: AppEventLog
     private let launchClock: LaunchRecoveryClock
     private let recoveryPreflightCoordinator: SharedRecoveryPreflightCoordinator
+    private let remotePortCleanupCoordinator = RemotePortCleanupCoordinator()
     private var launchCoordinator: LaunchRecoveryCoordinator?
     private var launchSetupTask: Task<Void, Never>?
     private var launchExcludedIDs: Set<String> = []
@@ -396,6 +397,18 @@ public final class TunnelManager: ObservableObject {
             try validate()
             if result.category == .cancelled { return .cancelled }
             guard result.exitCode == 0 && result.category == .success else { return .retry(result.category == .success ? .unknown : result.category) }
+            budget = remaining()
+            guard budget > 0 else { return .retry(.transient) }
+            let cleanup = try await runRemotePortCleanupIfNeeded(
+                checker: checker,
+                tunnel: expected,
+                timeout: min(20, budget)
+            )
+            try validate()
+            if cleanup.category == .cancelled { return .cancelled }
+            guard cleanup.exitCode == 0 && cleanup.category == .success else {
+                return .retry(cleanup.category == .success ? .unknown : cleanup.category)
+            }
         }
         budget = remaining()
         guard budget > 0 else { return .retry(.transient) }
@@ -1213,6 +1226,38 @@ public final class TunnelManager: ObservableObject {
         }
         guard result.exitCode == 0, result.category == .success else {
             throw AutomaticRecoveryPreflightFailure(result: result)
+        }
+        let cleanup = try await runRemotePortCleanupIfNeeded(
+            checker: resourceChecker,
+            tunnel: tunnel,
+            timeout: 20
+        )
+        try Task.checkCancellation()
+        if cleanup.category == .cancelled {
+            throw CancellationError()
+        }
+        guard cleanup.exitCode == 0, cleanup.category == .success else {
+            throw AutomaticRecoveryPreflightFailure(result: cleanup)
+        }
+    }
+
+    private func runRemotePortCleanupIfNeeded(
+        checker: any LaunchPreflightChecking,
+        tunnel: TunnelConfig,
+        timeout: TimeInterval
+    ) async throws -> LaunchPreflightResult {
+        guard let resource = checker.remotePortCleanupResource(tunnel: tunnel) else {
+            return LaunchPreflightResult(
+                version: 1,
+                stage: "remoteCleanup",
+                category: .success,
+                retryHint: 0,
+                sanitizedCode: "not_required",
+                exitCode: 0
+            )
+        }
+        return try await remotePortCleanupCoordinator.run(resource: resource) {
+            try await checker.cleanupRemotePort(tunnel: tunnel, timeout: timeout)
         }
     }
 

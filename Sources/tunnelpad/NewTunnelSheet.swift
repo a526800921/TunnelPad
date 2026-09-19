@@ -103,6 +103,12 @@ struct NewTunnelSheet: View {
 
             Toggle("断线自动重连（keepAlive）", isOn: $form.keepAlive)
             Toggle("随 App 启动自动拉起（登录自启场景使用）", isOn: $form.autoStart)
+            Toggle("恢复前强制清理远端 -R 端口", isOn: $form.forceRemotePortCleanup)
+            if form.forceRemotePortCleanup {
+                Label("高风险：自动恢复时会强杀该远端 TCP 端口的全部监听进程，不检查 IP、用户或进程归属。", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
             HStack(spacing: 8) {
                 Text("重启间隔")
                     .font(.callout)

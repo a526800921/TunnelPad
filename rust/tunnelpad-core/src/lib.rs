@@ -90,7 +90,7 @@ fn default_expected_statuses() -> Vec<i32> {
 
 /// 隧道配置。解码语义对齐 Swift `TunnelConfig.init(from:)`：
 /// 允许省略带默认值的字段；`remark` 缺省为空字符串；`probe` 缺省即不探测；
-/// `auto_start` 缺省即不参与启动恢复；id/command 非法时拒绝。
+/// `auto_start` 与 `force_remote_port_cleanup` 缺省均为 false；id/command 非法时拒绝。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TunnelConfig {
@@ -109,6 +109,8 @@ pub struct TunnelConfig {
     pub probe: Option<ProbeConfig>,
     #[serde(default)]
     pub auto_start: bool,
+    #[serde(default)]
+    pub force_remote_port_cleanup: bool,
 }
 
 fn default_true() -> bool {
@@ -272,12 +274,12 @@ mod tests {
 
     /// 规范形状 fixture：按 Swift `CodingKeys` 声明顺序书写。
     /// 跨语言等价性按解码后语义判定（Swift JSONEncoder 无 sortKeys 时键序不确定）。
-    const FULL: &str = r#"{"version":1,"tunnels":[{"id":"admin-tunnel","name":"管理隧道","remark":"用于 🚀 \"内网\"","command":["/usr/bin/ssh","-N","-L","8080:127.0.0.1:80","host"],"executor":"launchd","keepAlive":true,"throttleInterval":10,"probe":{"url":"http://127.0.0.1:8080/health","expectedStatuses":[200,204]},"autoStart":false}]}"#;
+    const FULL: &str = r#"{"version":1,"tunnels":[{"id":"admin-tunnel","name":"管理隧道","remark":"用于 🚀 \"内网\"","command":["/usr/bin/ssh","-N","-L","8080:127.0.0.1:80","host"],"executor":"launchd","keepAlive":true,"throttleInterval":10,"probe":{"url":"http://127.0.0.1:8080/health","expectedStatuses":[200,204]},"autoStart":false,"forceRemotePortCleanup":false}]}"#;
 
     /// Swift 手写配置允许省略默认字段；编码时补全为默认值。
     const MINIMAL_INPUT: &str =
         r#"{"version":1,"tunnels":[{"id":"web","name":"web","command":["/usr/bin/ssh","-N"]}]}"#;
-    const MINIMAL_CANONICAL: &str = r#"{"version":1,"tunnels":[{"id":"web","name":"web","remark":"","command":["/usr/bin/ssh","-N"],"executor":"launchd","keepAlive":true,"throttleInterval":10,"autoStart":false}]}"#;
+    const MINIMAL_CANONICAL: &str = r#"{"version":1,"tunnels":[{"id":"web","name":"web","remark":"","command":["/usr/bin/ssh","-N"],"executor":"launchd","keepAlive":true,"throttleInterval":10,"autoStart":false,"forceRemotePortCleanup":false}]}"#;
 
     fn canon(s: &str) -> serde_json::Value {
         serde_json::from_str(s).expect("fixture 必须是合法 JSON")

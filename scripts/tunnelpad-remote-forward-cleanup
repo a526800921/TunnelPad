@@ -1,0 +1,17 @@
+#!/bin/bash
+set -u
+
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+HELPER="$SCRIPT_DIR/tunnelpad-remote-forward-helper.py"
+
+fail() {
+  printf '%s\n' '{"version":1,"stage":"remoteCleanup","category":"local","retryHint":60,"sanitizedCode":"cleanup_helper_missing","exitCode":2}'
+  exit 2
+}
+
+[ -r "$HELPER" ] || fail
+[ "${1:-}" = "/usr/bin/ssh" ] || fail
+shift
+
+# exec 使本机有界监督器直接拥有 ssh PID；远端 helper 只从 stdin 执行一次立即动作。
+exec /usr/bin/ssh "$@" < "$HELPER"

@@ -13,12 +13,13 @@
 - TERM 不响应、管道被孙进程持有、代理被强制终止等故障，均不得留下可继续占用转发端口的孤儿 SSH；无法证明归属时 fail-closed，不杀任意 SSH。
 - launchd 状态中的 PID/可执行文件与 Rust Core 的受管身份核验一致；旧实例未收敛时禁止启动新实例。
 - 日志代理失效、辅助程序缺失或 Bundle 路径不再有效时，输出可定位的本地错误，并在满足前置条件后自动恢复。
+- 本地进程树已经收敛但 ECS 仍遗留远端监听时，对显式开启 `forceRemotePortCleanup` 的隧道，在新 SSH 启动前强制结束该 `-R` 远端端口的全部 TCP 监听进程；确认端口为空后才重连。
 
 ## 非目标
 
-- 不修改配置 schema、18080 端口映射、SSH 参数语义或 ECS 远端授权。
-- 不清理用户手工启动、其他 launchd label、其他进程组或无法证明属于 TunnelPad 当前作业的 SSH。
-- 不通过固定 PID、端口占用或日志内容单独推断归属；不以“进程列表为空”替代 launchd 的收敛确认。
+- 不修改 `18080` 端口映射、SSH 转发参数语义或 ECS 远端授权；配置 schema 只新增默认关闭的逐隧道强杀布尔值。
+- 不清理目标 `-R` 端口以外的进程；关闭配置时不执行任何远端端口清理。
+- 不使用固定历史 PID、`fuser -k` 或 `pkill`；开启强杀后以“监听目标端口”为用户明确授权，进程类型、UID、IP 和会话归属不再作为筛选条件，但仍使用 pidfd 防止 PID 复用误伤。
 - 不把当前真实隧道的偶发错误日志直接判定为代码修复完成；真实验收必须有隔离故障注入和独立复核证据。
 
 ## 现状基线与已知缺口
@@ -30,12 +31,13 @@
 - 现有代理的日志写入循环在 `write_log_line(...)` 出错时会提前返回；该路径必须先终止并等待 SSH，再允许代理退出，否则 launchd 的 KeepAlive 重试可能与旧 SSH 重叠。
 - 当前 plist 中代理路径来自运行时 App Bundle 的绝对路径。Bundle 移动、替换或资源缺失时，自动恢复必须先识别为本地前置失败，不能盲目 bootstrap。
 - 现有 Rust `stop_managed_cancellable` 按可执行文件核验受管身份；代理接管后需要明确“launchd PID 是代理、代理子进程是 SSH”的身份契约，避免停止 fallback 误判或绕过核验。
+- 2026-09-19 真实断线后，本地 SSH 已退出但 ECS 仍由旧 `sshd` 持有 `127.0.0.1:18080`；服务端未启用 SSH 层 client-alive，默认 TCP keepalive 可能使监听保留数小时。用户决定保持 `18080`，并明确要求为 `motorcycle` 开启排他端口强杀：任何监听该端口的进程均结束，不检查 IP 或归属。
 
 ### 现有契约复用
 
 - Rust Core 继续作为配置、launchd 生命周期、进程信号和代次校验的唯一 owner。
 - 复用现有 60 秒操作预算、bootout-first、`notLoaded`/收敛门禁、健康恢复退避、generation 取消和资源锁；本计划只补齐代理层进程树及其与 launchd 的交接。日志追加/保留和写放大约束沿用[日志低写放大与流式保留](tunnelpad-log-write-amplification.md)。
-- ECS 前置检查、日志保留/写放大、HTTP API 与 18080 的现行契约不因本计划改变。
+- ECS 前置检查、日志保留/写放大、HTTP API 与 `18080` 映射不变；新增顺序为“本地收敛 → `/32` 同步 → 远端专用监听清理 → 启动”。
 
 ## 不变量
 
@@ -44,6 +46,7 @@
 - 同一 label 在旧作业未确证 `notLoaded` 且受管进程未收敛前，禁止写新 plist/bootstrap。
 - 对 `autoStart + keepAlive` 的无人值守 SSH，launchd plist 必须禁用 `KeepAlive`；断线后的重新调度只由 TunnelManager 的“收敛旧实例 → ECS 前置 → 启动”单一恢复链负责，禁止形成第二个 SSH 启动 owner。
 - 代理、SSH 及其必要孙进程的归属边界必须可测试；不对未知进程做全局清理。
+- 远端强杀只在本地 launchd 已确认 `notLoaded`、共享 `/32` 同步成功且该隧道显式开启配置后执行；只按当轮解析出的远端端口枚举监听者，使用 pidfd 发 SIGKILL，并确认端口为空。权限、pidfd、清理或确认失败均 fail-closed。
 
 ## 阶段路线图
 
@@ -62,13 +65,13 @@
 | 准入状态 | 实施中 |
 | 复核策略 | 风险分流 |
 | 风险级别 | 高影响：共享生命周期、进程信号、无人值守恢复 |
-| Step 0 | [阶段 0 Step 0](#step-0-证据)：本节“样本矩阵”与“失败/回滚边界” |
-| 样本矩阵 | O1–O7 本地/隔离故障 fixture；O8 当前 `motorcycle-local-docker` 真实验收延期到阶段 2 |
+| Step 0 | [阶段 0 Step 0](#step-0-证据)及[远端转发清理增量 Step 0](../data-quality/tunnelpad-unattended-remote-forward-cleanup-step0-20260919.md) |
+| 样本矩阵 | O1–O7 本地/隔离故障 fixture；O8 当前 `motorcycle-local-docker` 真实验收；R1–R15 远端排他端口强杀 |
 | 验证方式 | Rust/Swift 全量回归、代理故障注入、隔离 launchd 生命周期、Release 构建和 `detect_changes()`；阶段 2 再做真实隧道验收 |
 | 失败/回滚边界 | 身份、进程组归属、资源路径或清理结果无法证明时 fail-closed；未确认收敛前不 bootstrap；回滚只恢复同版 App/辅助程序/plist，不触碰配置、ECS 或非目标隧道 |
-| 最新阶段复核 | [最新阶段复核](#最新阶段复核)：独立发现的修复自验通过，阶段 1 合并代码门禁已经解除 |
+| 最新阶段复核 | [最新阶段复核](#最新阶段复核)：实施者已按唯一独立设计复核的 5 项 P1 完成修复自验；历史 `NOT READY` 保留，不重复独立复核 |
 | 当前阻塞项 | 无 |
-| 下一动作 | 建立阶段 2 Step 0、真实操作授权和停止条件后，执行 O8 与长时无人值守验收；不重复发起阶段 1 独立复核 |
+| 下一动作 | 等待用户按阶段 2 场景触发真实断线或 `/32` 漂移，验证 `18080` 旧监听被强杀、新 SSH 自动接管且无需人工干预 |
 
 ### 样本矩阵
 
@@ -82,6 +85,7 @@
 | O6 | stale PID、同 label 外部替换、状态查询超时 | 身份不确定时 fail-closed，不发危险信号；保持可诊断 | 仅凭 PID/端口/日志清理其他进程 |
 | O7 | Bundle 移动、代理资源缺失或版本不匹配 | 标记 local prerequisite，暂停启动；资源恢复后重新验证并恢复 | 自动循环报错、启动不存在的路径或永久卡死 |
 | O8 | 当前 `motorcycle-local-docker` 受控重启/异常恢复（阶段 2） | 日志有逐行时间；运行状态 fresh；18080 转发恢复；同一时刻最多一条 SSH | 只看 HTTP 200 但 SSH/端口仍有孤儿，或需要人工点击 |
+| R1–R15 | 配置开关、任意类型/UID/IP 的目标端口监听、多 PID、pidfd 竞态、取消、共享同步与 SSH 参数边界 | 关闭时零远端动作；开启时在本地收敛和 `/32` 同步后强杀目标端口全部监听者并确认释放 | 默认扩大权限、普通 PID kill、漏杀、并行清理、绕过前置启动或失败后停止重试；详见增量 Step 0 |
 
 ## Step 0 证据
 
@@ -116,7 +120,7 @@
 1. 进程树所有权：确认 launchd 是否负责代理及其子进程组的最终清理；代理自身必须覆盖 I/O 错误、取消、信号和 wait 失败路径。
 2. 身份契约：将 launchd 受管身份定义为代理可执行文件，并为代理子 SSH 保存受管 PID/进程组票据；停止操作不能继续把 `/usr/bin/ssh` 当作 launchd 顶层 PID。
 3. 辅助程序部署：选择稳定的同版资源路径或显式 fail-closed 的安装前置；禁止 plist 永久引用已不存在的旧 Bundle。
-4. 端口与清理：只把端口占用作为验收信号，不把它作为清理授权；清理目标必须来自当前 launchd/代理票据。
+4. 端口与清理：新增默认关闭的 `forceRemotePortCleanup`。用户对 `motorcycle` 明确授权端口单因子强杀；开启时不检查 IP/UID/进程类型/会话归属，必须用 pidfd 强杀该端口全部监听 PID并确认释放；关闭时零远端动作。
 
 ### 失败与回滚边界
 
@@ -133,12 +137,14 @@
 - `rust/tunnelpad-core/src/plist_render.rs`、`rust/tunnelpad-core/src/owner.rs`、`rust/tunnelpad-core/src/launchctl.rs`：对齐 launchd 顶层代理身份与受管 SSH 子进程的停止/重启契约，保持 bootout-first 和 fail-closed。
 - `Sources/TunnelPadCore/LaunchdPlistRenderer.swift`、打包脚本及必要的安装资源定位：仅在阶段 0 证明需要时修改，不能绕过 Rust owner。
 - `rust/tunnelpad-core/tests/`、`Tests/TunnelPadCoreTests/`：覆盖 O1–O7 适用分支，并为阶段 2 的 O8 保留隔离 launchd 进程树检查入口。
+- Swift/Rust `TunnelConfig` 与设置表单：增加默认关闭且带风险说明的 `forceRemotePortCleanup`，保持 JSON parity。
+- `Sources/TunnelPadCore/ECSPreStart.swift`、`TunnelManager.swift`、`SSHCommand.swift`、`scripts/`、`scripts/build_app.sh` 及对应测试：共享 `/32` 同步后执行逐隧道 pidfd 端口强杀；不改变普通手动前置。
 
 所有既有函数、方法或结构体的编辑前必须先执行 GitNexus upstream impact；若结果为 HIGH/CRITICAL，先向用户报告 blast radius 并暂停实现，直至风险边界收敛。
 
 ## 验证与完成条件
 
-- 阶段 0：Step 0、O1–O7、身份/所有权/超时/回滚契约写实；独立复核通过；`plan-governance-cli check . --strict-readiness` 达到阶段 1 准入要求。
+- 阶段 0：Step 0、O1–O7、身份/所有权/超时/回滚契约写实；唯一独立复核结论及用户追加权限已登记；其发现必须由实现后的修复自验闭环。
 - 阶段 1：Rust/Swift 全量测试、代理故障注入、隔离 launchd 生命周期、`git diff --check`、构建与打包通过；`detect_changes()` 只显示预期符号和流程。
 - 阶段 2：受控 Release App 验证异常恢复、端口释放、无孤儿 SSH、非目标进程隔离及长时间无人值守；用户接受后才关闭计划。
 - 技术测试通过不等于真实无人值守验收通过；在用户验收前计划保持“实施中”，下一动作记录为等待验收。
@@ -159,6 +165,10 @@
 | 2026-09-19 | 修复自验 | 实施者按首轮独立发现完成配置事务、重复退出和登录项错误的“发现 → 修复 → 验证”闭环 | [阶段 1 整改证据](../data-quality/tunnelpad-unattended-stage1-review-remediation-20260919.md)；阶段 1 合并代码门禁通过，阶段 2 未进入 |
 | 2026-09-19 | 运行期退避修复 | 真实端口冲突暴露短暂 `running` 结束恢复任务、监控随后重复按首次故障调度的问题；统一为 `0/5/10/30/60/60…` 秒，并要求连续两次健康采样才清零 | [运行期退避修复证据](../data-quality/tunnelpad-unattended-runtime-backoff-remediation-20260919.md)；本地自验通过，当前 App 尚未替换，待阶段 2 真实复验 |
 | 2026-09-19 | 新版部署与启动 | 提交 `8502ecd` 的新包原位替换并启动；旧 App 优雅退出后代理、SSH、launchd label 均收敛，未保留备份；新版 App/代理/SSH 单实例稳定超过 1 分钟，远端 `18080` 单 listener | [运行期退避修复证据](../data-quality/tunnelpad-unattended-runtime-backoff-remediation-20260919.md)“新版部署与启动”；阶段 2 连续故障完整退避复验仍待执行 |
+| 2026-09-19 | 远端孤儿反例与方案变更 | 真实断线后旧 ECS `sshd` 长期占用 `18080`；用户决定保持端口并采用严格身份核验后的精确进程清理。GitNexus 将共享前置标为 CRITICAL，实施前冻结范围并安排一次独立设计复核 | [远端转发清理增量 Step 0](../data-quality/tunnelpad-unattended-remote-forward-cleanup-step0-20260919.md)；待设计复核 |
+| 2026-09-19 | 远端清理独立设计复核 | 唯一 `medium` 独立复核结论 `NOT READY`：共享结果复用、归属不足、PID 复用、取消后延迟动作和 SSH 参数边界共 5 项 P1 | [独立设计复核](../reviews/tunnelpad-unattended-remote-forward-cleanup-independent-review-20260919.md)；待修复自验，不重复独立复核 |
+| 2026-09-19 | 用户追加强杀权限 | 新增默认关闭的 `forceRemotePortCleanup`；`motorcycle` 的 `18080` 为排他端口，开启后任何监听进程均 pidfd SIGKILL，不检查 IP/UID/类型/归属 | [远端转发清理增量 Step 0](../data-quality/tunnelpad-unattended-remote-forward-cleanup-step0-20260919.md)；待实现与自验 |
+| 2026-09-19 | 远端清理修复自验与部署 | 完成共享 `/32`/逐隧道清理拆分、pidfd 强杀、远端单动作、SSH 允许列表和默认关闭配置；Swift 205、Rust 111、ECS 18、监督 9、helper 2 项及真实 ECS 隔离端口通过，Release 已启动且 `motorcycle` 单独开启 | [远端清理修复自验](../data-quality/tunnelpad-unattended-remote-forward-cleanup-remediation-20260919.md)；阶段 1 代码阻塞解除，等待阶段 2 用户验收 |
 
 ## 阶段复核记录
 
@@ -169,6 +179,8 @@
 | 2026-09-19 | 合并实现复核 | 阶段 1 | 独立 | 高影响 | 不通过：配置事务线性化、清理中重复退出为 P1；登录项失败证据为 P2。整改已完成自验，但在同一复核者增量结论写回前不解除阶段 1 门禁 | [合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)首轮结论与[阶段 1 整改证据](../data-quality/tunnelpad-unattended-stage1-review-remediation-20260919.md) | Kierkegaard（独立只读复核） |
 | 2026-09-19 | 修复自验 | 阶段 1 | 自验 | 高影响 | 通过：已按合并独立复核的配置事务、重复退出和登录项错误发现完成“发现 → 修复 → 验证”闭环；阶段 1 合并代码门禁解除。计划保持实施中，阶段 2 真实无人值守验收未进入。 | [合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)首轮发现；[阶段 1 整改证据](../data-quality/tunnelpad-unattended-stage1-review-remediation-20260919.md)；Swift 196、Rust 111、ECS 18、监督 9、Release/隔离包与 GitNexus/diff 门禁；后续只读核对仅作补充证据 | Codex（实施者） |
 | 2026-09-19 | 增量修复自验 | 阶段 1 | 自验 | 高影响 | 通过：现场快速重试反例已修复为 `0/5/10/30/60/60…` 秒统一退避，连续两次健康采样后才清零；本次属于既有独立复核范围内的增量修复，按风险分流由实施者自验，不重复发起独立复核。计划保持实施中，阶段 2 新 build 真实无人值守验收未完成。 | [运行期退避修复证据](../data-quality/tunnelpad-unattended-runtime-backoff-remediation-20260919.md)；Swift 全量 197、Rust 111、ECS 18、监督 9 项和 Release 编译通过；既有[合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)范围保持有效 | Codex（实施者） |
+| 2026-09-19 | 远端清理设计复核 | 阶段 1 | 独立 | 高影响 | 未通过：无 P0；共享结果、归属、PID 复用、远端延迟动作及 SSH 参数边界 5 项 P1。用户随后追加默认关闭的排他端口强杀权限；其余发现和配置隔离仍待实现后修复自验。 | [独立设计复核](../reviews/tunnelpad-unattended-remote-forward-cleanup-independent-review-20260919.md)；[修订 Step 0](../data-quality/tunnelpad-unattended-remote-forward-cleanup-step0-20260919.md) | Hume（独立只读复核） |
+| 2026-09-19 | 修复自验 | 阶段 1 | 自验 | 高影响 | 通过：唯一独立设计复核的共享结果、显式授权、PID 复用、远端延迟动作和 SSH 参数边界 5 项 P1 均已完成“发现 → 修复 → 验证”；不重复独立复核。阶段 1 代码阻塞解除，计划保持实施中等待阶段 2 长时与用户验收。 | [远端清理修复自验](../data-quality/tunnelpad-unattended-remote-forward-cleanup-remediation-20260919.md)；Swift 205、Rust 111、ECS 18、监督 9、helper 2 项、真实 ECS `48080` 隔离强杀、Release 构建与当前 App 启动观察 | Codex（实施者） |
 
 ### 最新阶段复核
 
@@ -178,7 +190,7 @@
 | 阶段 | 阶段 1 |
 | 方式 | 自验 |
 | 风险 | 高影响 |
-| 风险依据 | 共享 launchd/SSH 生命周期、Rust 配置 owner、App 退出清理和登录项系统服务；GitNexus 变更范围为 critical |
-| 结论 | 通过：现场快速重试反例已修复为 `0/5/10/30/60/60…` 秒统一退避，连续两次健康采样后才清零；本次属于既有独立复核范围内的增量修复，按风险分流由实施者自验，不重复发起独立复核。计划保持实施中，阶段 2 新 build 真实无人值守验收未完成。 |
-| 证据 | [运行期退避修复证据](../data-quality/tunnelpad-unattended-runtime-backoff-remediation-20260919.md)；Swift 全量 197、Rust 111、ECS 18、监督 9 项和 Release 编译通过；既有[合并独立复核](../reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)范围保持有效 |
+| 风险依据 | 新增远端进程 SIGKILL 权限、共享 ECS 前置拆分、配置 schema 与 SSH 参数解析；GitNexus 对共享前置为 CRITICAL |
+| 结论 | 通过：唯一独立设计复核的共享结果、显式授权、PID 复用、远端延迟动作和 SSH 参数边界 5 项 P1 均已完成“发现 → 修复 → 验证”；不重复独立复核。阶段 1 代码阻塞解除，计划保持实施中等待阶段 2 长时与用户验收。 |
+| 证据 | [远端清理修复自验](../data-quality/tunnelpad-unattended-remote-forward-cleanup-remediation-20260919.md)；Swift 205、Rust 111、ECS 18、监督 9、helper 2 项、真实 ECS `48080` 隔离强杀、Release 构建与当前 App 启动观察 |
 | 复核者 | Codex（实施者） |

@@ -70,6 +70,7 @@ enum ECSPreStartError: Error, LocalizedError, Equatable, Sendable {
 struct ECSPreStartChecker: ECSPreStartChecking, Sendable {
     static let bashPath = "/bin/bash"
     static let scriptName = "update-ecs-ssh-ip"
+    static let cleanupScriptName = "tunnelpad-remote-forward-cleanup"
     static let defaultTimeout: TimeInterval = 30
     private static let fallbackPathEntries = [
         "/opt/homebrew/bin",
@@ -83,6 +84,7 @@ struct ECSPreStartChecker: ECSPreStartChecking, Sendable {
     ]
 
     let scriptURL: URL?
+    let cleanupScriptURL: URL?
     let runner: any ECSPreflightProcessRunning
     let environment: [String: String]
     let timeout: TimeInterval
@@ -91,11 +93,13 @@ struct ECSPreStartChecker: ECSPreStartChecking, Sendable {
 
     init(
         scriptURL: URL? = ECSPreStartChecker.defaultScriptURL(),
+        cleanupScriptURL: URL? = ECSPreStartChecker.defaultCleanupScriptURL(),
         runner: any ECSPreflightProcessRunning = SystemECSPreflightProcessRunner(),
         environment: [String: String] = ECSPreStartChecker.defaultEnvironment(),
         timeout: TimeInterval = ECSPreStartChecker.defaultTimeout
     ) {
         self.scriptURL = scriptURL
+        self.cleanupScriptURL = cleanupScriptURL
         self.runner = runner
         self.environment = environment
         self.timeout = timeout
@@ -133,7 +137,8 @@ struct ECSPreStartChecker: ECSPreStartChecking, Sendable {
             let result = try await runWithTimeout(
                 executablePath: Self.bashPath,
                 arguments: [scriptURL.path],
-                environment: environment
+                environment: environment,
+                timeout: timeout
             )
             try Task.checkCancellation()
             try Self.validate(result)
@@ -148,6 +153,10 @@ struct ECSPreStartChecker: ECSPreStartChecking, Sendable {
 
     static func defaultScriptURL(bundle: Bundle = .main) -> URL? {
         bundle.resourceURL?.appendingPathComponent(scriptName)
+    }
+
+    static func defaultCleanupScriptURL(bundle: Bundle = .main) -> URL? {
+        bundle.resourceURL?.appendingPathComponent(cleanupScriptName)
     }
 
     static let allowedEnvironmentKeys = [
@@ -214,7 +223,8 @@ struct ECSPreStartChecker: ECSPreStartChecking, Sendable {
     private func runWithTimeout(
         executablePath: String,
         arguments: [String],
-        environment: [String: String]
+        environment: [String: String],
+        timeout: TimeInterval
     ) async throws -> ProcessResult {
         try await withThrowingTaskGroup(of: ProcessResult.self) { group in
             group.addTask {
@@ -259,6 +269,23 @@ struct SystemECSPreflightProcessRunner: ECSPreflightProcessRunning, Sendable {
 protocol LaunchPreflightChecking: ECSPreStartChecking {
     func launchResource() async throws -> String
     func checkLaunch(tunnel: TunnelConfig, timeout: TimeInterval) async throws -> LaunchPreflightResult
+    func remotePortCleanupResource(tunnel: TunnelConfig) -> String?
+    func cleanupRemotePort(tunnel: TunnelConfig, timeout: TimeInterval) async throws -> LaunchPreflightResult
+}
+
+extension LaunchPreflightChecking {
+    func remotePortCleanupResource(tunnel: TunnelConfig) -> String? { nil }
+
+    func cleanupRemotePort(tunnel: TunnelConfig, timeout: TimeInterval) async throws -> LaunchPreflightResult {
+        LaunchPreflightResult(
+            version: 1,
+            stage: "remoteCleanup",
+            category: .success,
+            retryHint: 0,
+            sanitizedCode: "not_required",
+            exitCode: 0
+        )
+    }
 }
 
 /// 只读检查 ECS 受管 SSH `/32` 是否仍与当前公网 IP 一致。
@@ -287,6 +314,49 @@ extension ECSPreStartChecker: LaunchPreflightChecking, ECSIPDriftChecking {
         return decodeLaunchResult(result)
     }
 
+    func remotePortCleanupResource(tunnel: TunnelConfig) -> String? {
+        guard tunnel.forceRemotePortCleanup else { return nil }
+        return (try? SSHCommand.remotePortCleanupTarget(tunnel.command).resource) ?? "invalid:\(tunnel.id)"
+    }
+
+    func cleanupRemotePort(tunnel: TunnelConfig, timeout: TimeInterval) async throws -> LaunchPreflightResult {
+        guard tunnel.forceRemotePortCleanup else { return Self.success(code: "not_required") }
+        guard let cleanupScriptURL, FileManager.default.isExecutableFile(atPath: cleanupScriptURL.path) else {
+            return Self.failure(category: .local, code: "cleanup_helper_missing", exitCode: 2)
+        }
+        let target: SSHCommand.RemotePortCleanupTarget
+        do {
+            target = try SSHCommand.remotePortCleanupTarget(tunnel.command)
+        } catch {
+            return Self.failure(category: .local, code: "cleanup_command_unsupported", exitCode: 2)
+        }
+
+        let started = ProcessInfo.processInfo.systemUptime
+        let budget = min(20, max(0.001, timeout))
+        var lastKilled = 0
+        while ProcessInfo.processInfo.systemUptime - started < budget {
+            try Task.checkCancellation()
+            let remaining = budget - (ProcessInfo.processInfo.systemUptime - started)
+            let result = try await runWithTimeout(
+                executablePath: Self.bashPath,
+                arguments: [cleanupScriptURL.path, "/usr/bin/ssh"] + target.sshArguments,
+                environment: environment,
+                timeout: min(10, max(0.001, remaining))
+            )
+            let decoded = decodeLaunchResult(result)
+            guard decoded.exitCode == 0, decoded.category == .success else { return decoded }
+            if decoded.sanitizedCode == "listener_absent" {
+                return Self.success(code: lastKilled == 0 ? "listener_absent" : "listeners_released")
+            }
+            guard decoded.sanitizedCode == "listeners_killed" else {
+                return Self.failure(category: .unknown, code: "cleanup_result_unknown", exitCode: 4)
+            }
+            lastKilled += 1
+            try await Task.sleep(nanoseconds: 200_000_000)
+        }
+        return Self.failure(category: .transient, code: "cleanup_deadline", exitCode: 4)
+    }
+
     func checkCurrentState(tunnel: TunnelConfig, timeout: TimeInterval) async throws -> LaunchPreflightResult {
         guard SSHCommand.isSSH(tunnel.command) else {
             return LaunchPreflightResult(version: 1, stage: "complete", category: .success, retryHint: 0, sanitizedCode: "not_required", exitCode: 0)
@@ -302,6 +372,32 @@ extension ECSPreStartChecker: LaunchPreflightChecking, ECSIPDriftChecking {
             return LaunchPreflightResult(version: 1, stage: "result", category: .unknown, retryHint: 60, sanitizedCode: "invalid_result", exitCode: 4)
         }
         return decoded
+    }
+
+    private static func success(code: String) -> LaunchPreflightResult {
+        LaunchPreflightResult(
+            version: 1,
+            stage: "remoteCleanup",
+            category: .success,
+            retryHint: 0,
+            sanitizedCode: code,
+            exitCode: 0
+        )
+    }
+
+    private static func failure(
+        category: LaunchRecoveryCategory,
+        code: String,
+        exitCode: Int
+    ) -> LaunchPreflightResult {
+        LaunchPreflightResult(
+            version: 1,
+            stage: "remoteCleanup",
+            category: category,
+            retryHint: 60,
+            sanitizedCode: code,
+            exitCode: exitCode
+        )
     }
     private func launchInvocation(arguments: [String], timeout: TimeInterval) async throws -> ProcessResult {
         guard let scriptURL, FileManager.default.fileExists(atPath: scriptURL.path) else { throw ECSPreStartError.scriptUnavailable }

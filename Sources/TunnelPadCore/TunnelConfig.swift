@@ -42,6 +42,8 @@ public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
     public var probe: ProbeConfig?
     /// 随 App 启动自动拉起；旧配置缺失该字段时为 false，不参与启动恢复。
     public var autoStart: Bool
+    /// 无人值守恢复前强制结束远端 `-R` 端口的全部监听进程；高风险且默认关闭。
+    public var forceRemotePortCleanup: Bool
 
     public static let idPattern = "^[a-z0-9-]+$"
     public static let launchdLabelPrefix = "com.jafish.tunnelpad."
@@ -55,7 +57,8 @@ public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
         keepAlive: Bool = true,
         throttleInterval: Int = 10,
         probe: ProbeConfig? = nil,
-        autoStart: Bool = false
+        autoStart: Bool = false,
+        forceRemotePortCleanup: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -66,6 +69,7 @@ public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
         self.throttleInterval = throttleInterval
         self.probe = probe
         self.autoStart = autoStart
+        self.forceRemotePortCleanup = forceRemotePortCleanup
     }
 
     public var launchdLabel: String { Self.launchdLabelPrefix + id }
@@ -76,7 +80,7 @@ public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, remark, command, executor, keepAlive, throttleInterval, probe, autoStart
+        case id, name, remark, command, executor, keepAlive, throttleInterval, probe, autoStart, forceRemotePortCleanup
     }
 
     /// 手写配置允许省略带默认值的字段；缺 `remark` 时为空字符串，缺 `probe` 即不探测，
@@ -92,6 +96,7 @@ public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
         throttleInterval = try container.decodeIfPresent(Int.self, forKey: .throttleInterval) ?? 10
         probe = try container.decodeIfPresent(ProbeConfig.self, forKey: .probe)
         autoStart = try container.decodeIfPresent(Bool.self, forKey: .autoStart) ?? false
+        forceRemotePortCleanup = try container.decodeIfPresent(Bool.self, forKey: .forceRemotePortCleanup) ?? false
 
         guard Self.isValidID(id) else {
             throw DecodingError.dataCorruptedError(
