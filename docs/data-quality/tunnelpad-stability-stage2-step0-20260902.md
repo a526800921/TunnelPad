@@ -3,7 +3,7 @@
 - 日期：2026-09-02
 - 阶段：阶段 2
 - 基线类型：架构探索基线 + 缺陷安全边界
-- 关联计划：[TunnelPad 隧道稳定性与健康恢复](../plans/tunnelpad-stability.md)
+- 关联计划：[TunnelPad 隧道稳定性与健康恢复](../plans/20260830/tunnelpad-stability.md)
 - 当前结论：本 ECS 自动恢复切片的 Step 0 基线已固定并已完成实施；阶段 2 整体仍在实施中，启动/退出资源收敛切片另有独立 Step 0 与证据
 
 ## 目标与边界

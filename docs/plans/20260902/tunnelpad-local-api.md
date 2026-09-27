@@ -1,6 +1,6 @@
 # TunnelPad 本机 HTTP API 服务计划
 
-> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../PLAN_MAP.md#计划索引)为准。
+> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../../PLAN_MAP.md#计划索引)为准。
 
 
 ## 背景
@@ -9,7 +9,7 @@ TunnelPad v1 计划曾明确不提供 HTTP API；本计划是 v1 完成后的独
 
 ModelPad 已采用 SwiftNIO 嵌入式 Server、AppDelegate 生命周期管理和本机回环监听。TunnelPad 当前没有 HTTP Server，运行时生命周期由 TunnelManager 和 Rust Core 单一 owner 共同维护，因此本计划必须增加 API 适配边界，不能创建第二个 launchd 或 Rust 生命周期 owner。
 
-依赖计划为 [tunnelpad-stability](tunnelpad-stability.md)、[tunnelpad-rust-migration](tunnelpad-rust-migration.md)、[tunnelpad-log-streaming](tunnelpad-log-streaming.md) 和 [tunnelpad-core-hardening](tunnelpad-core-hardening.md)；它们只提供已完成或正在收敛的生命周期、日志和 Rust owner 边界，状态与推荐顺序以 PLAN_MAP.md 为准。
+依赖计划为 [tunnelpad-stability](../20260830/tunnelpad-stability.md)、[tunnelpad-rust-migration](../20260830/tunnelpad-rust-migration.md)、[tunnelpad-log-streaming](../20260830/tunnelpad-log-streaming.md) 和 [tunnelpad-core-hardening](tunnelpad-core-hardening.md)；它们只提供已完成或正在收敛的生命周期、日志和 Rust owner 边界，状态与推荐顺序以 PLAN_MAP.md 为准。
 
 ## 目标
 
@@ -234,12 +234,12 @@ GET /openapi.json 必须描述上述全部路由、参数、状态码、响应�
 | 字段 | 内容 |
 |---|---|
 | 准入状态 | 已完成 |
-| Step 0 | [阶段 2 Step 0 证据](../data-quality/tunnelpad-local-api-stage2-step0-20260902.md)：阶段 1 实现、回归、真实 Debug/Release App 和固定 9998 冲突基线齐备 |
+| Step 0 | [阶段 2 Step 0 证据](../../data-quality/tunnelpad-local-api-stage2-step0-20260902.md)：阶段 1 实现、回归、真实 Debug/Release App 和固定 9998 冲突基线齐备 |
 | 样本矩阵 | 阶段 0 A0–A9 与阶段 2 B0–B7 均已执行；阶段 1 API/日志专项测试和真实运行证据已落盘 |
 | 验证方式 | 随机端口 API contract tests、Swift/Rust 回归、真实 Debug/签名 Release App 固定 9998 启动/冲突/退出、反向引用和最终治理门禁 |
 | 失败/回滚边界 | 端口冲突不影响 App；API 代码可整体移除；不回滚 Rust owner、launchd plist、真实隧道或已有日志数据 |
 | 当前阻塞项 | 无 |
-| 最新独立准入复核 | [阶段 2 独立完成复核](../data-quality/tunnelpad-local-api-stage2-independent-completion-review-20260902.md)；结论为通过，达到待实施标准并完成收口 |
+| 最新独立准入复核 | [阶段 2 独立完成复核](../../data-quality/tunnelpad-local-api-stage2-independent-completion-review-20260902.md)；结论为通过，达到待实施标准并完成收口 |
 
 ### 实施步骤
 
@@ -269,7 +269,7 @@ GET /openapi.json 必须描述上述全部路由、参数、状态码、响应�
 | A4 | 启停成功 | fake backend 返回完成状态；调用 start/stop/restart | API 等待完成后返回 200 和最终摘要 | 提前 200、重复副作用或状态未更新 | 阶段 1 backend/契约测试 |
 | A5 | 启停冲突/未知 ID | 并发同 ID 请求；请求不存在 ID | 冲突为 409，未知 ID 为 404，无额外生命周期调用 | 返回成功、并行操作或错误码漂移 | 阶段 1 API contract 测试 |
 | A6 | 日志快照/清空 | fake LogSnapshot 覆盖 available/missing/error；调用 logs/clear | 返回纯文本快照；清空只影响日志且版本单调递增 | 泄露路径/原始错误、删除配置或停止 watcher | 阶段 1 日志/manager API 测试 |
-| A7 | 服务生命周期 | 真实 Debug/签名 Release App 启动、退出；第二个真实 Debug 实例占用 9998 | 正常自动启停；占用时第二个 App 继续运行且不换端口/重试 | App 启动失败、服务换端口、无限重试或退出残留 | [阶段 1 真实环境验收](../data-quality/tunnelpad-local-api-stage1-real-app-acceptance-20260902.md) |
+| A7 | 服务生命周期 | 真实 Debug/签名 Release App 启动、退出；第二个真实 Debug 实例占用 9998 | 正常自动启停；占用时第二个 App 继续运行且不换端口/重试 | App 启动失败、服务换端口、无限重试或退出残留 | [阶段 1 真实环境验收](../../data-quality/tunnelpad-local-api-stage1-real-app-acceptance-20260902.md) |
 | A8 | 既有行为回归 | cargo test --locked --manifest-path rust/Cargo.toml；xcodebuildmcp swift-package test --package-path . | Rust owner、稳定性、日志和 TunnelManager 回归通过 | 既有测试失败或真实资源被触碰 | 阶段 1/2 证据 |
 | A9 | 范围与治理 | plan-governance-cli check .、git diff --check、实现前后 detect_changes() | 变更只覆盖 API/适配/测试/文档，治理无新增 ERROR | 共享计划越界、敏感路径、未声明符号或治理漂移 | 阶段 1/2 证据 |
 
@@ -279,7 +279,7 @@ GET /openapi.json 必须描述上述全部路由、参数、状态码、响应�
 |---|---|---|---|---|---|
 | 2026-09-02 | 需求探索 | 用户确认回环地址、接口集合、同步启停、安全摘要、App 生命周期和端口冲突语义 | 本计划“用户确认的探索结论” | 通过 | Codex |
 | 2026-09-02 | 阶段 0 基线 | 确认 TunnelPad 没有 API Server，9998 无监听；ModelPad 参考和 TunnelManager 边界已记录；未修改代码 | 阶段 0 基线证据 | 通过（准入复核待完成） | Codex |
-| 2026-09-02 | 阶段 0 独立准入 | 复核需求、基线、9 路由契约、A0–A9 矩阵、失败/回滚边界和 impact；typed result、60 秒超时、原位清空 watcher 已冻结 | [独立准入复核](../data-quality/tunnelpad-local-api-stage0-independent-review-20260902.md) | 通过，达到待实施标准 | Codex（独立只读复核） |
+| 2026-09-02 | 阶段 0 独立准入 | 复核需求、基线、9 路由契约、A0–A9 矩阵、失败/回滚边界和 impact；typed result、60 秒超时、原位清空 watcher 已冻结 | [独立准入复核](../../data-quality/tunnelpad-local-api-stage0-independent-review-20260902.md) | 通过，达到待实施标准 | Codex（独立只读复核） |
 
 阶段证据只声明本计划范围内的文档/命令；不覆盖用户已有 Rust Core、PLAN_MAP.md 或 tunnelpad-core-hardening 变更。
 
@@ -290,10 +290,10 @@ GET /openapi.json 必须描述上述全部路由、参数、状态码、响应�
 | 2026-09-02 | 只读影响分析 | TunnelManager upstream impact 为 CRITICAL，130 个上游符号；确认 API 必须通过 backend 串行化 | GitNexus impact 输出；阶段 0 基线证据 | 通过 | Codex |
 | 2026-09-02 | 阶段 0 设计冻结 | 确定 typed operation result、60 秒 API 有界等待、原位清空日志并保留 watcher；不改变 Rust owner 或端口冲突语义 | 本计划“暂定假设与验证方式”；独立准入复核 | 通过 | Codex |
 | 2026-09-02 | 阶段 1 精确影响复核 | 刷新图谱后，TunnelAPIServer 为 CRITICAL/101 个上游；startAsync HIGH/8、stopAsync HIGH/7、restartAsync LOW/5、clearInPlace HIGH/4、clearLog LOW/1、LogEventStore.clear LOW/3；影响集中在 API、日志和 App/UI 调用方 | 阶段 1 实施证据；GitNexus upstream impact | 通过但保留高影响告警 | Codex |
-| 2026-09-02 | 阶段 1 实施与专项验证 | SwiftNIO Server、backend、AppDelegate 生命周期、typed operation result、原位日志清空和随机端口契约测试已实现；专项 4/4、日志 11/11、全量 134/134 通过 | [阶段 1 实施证据](../data-quality/tunnelpad-local-api-stage1-implementation-20260902.md) | 通过；真实 App 验收已补齐 | Codex |
-| 2026-09-02 | 阶段 1 真实环境验收 | 真实 Debug/签名 Release App 监听固定 127.0.0.1:9998；health、列表、详情、日志状态、OpenAPI、未知 ID、第二实例端口冲突和退出清理通过；未触碰真实隧道生命周期 | [阶段 1 真实环境验收](../data-quality/tunnelpad-local-api-stage1-real-app-acceptance-20260902.md) | 通过 | Codex |
-| 2026-09-02 | 阶段 2 Step 0 | 核对阶段 1 实现、API/日志/Rust/Swift 回归、Release 签名、真实接口、端口冲突、退出清理、失败边界和反向引用矩阵 | [阶段 2 Step 0](../data-quality/tunnelpad-local-api-stage2-step0-20260902.md) | 通过，达到待实施标准 | Codex（独立只读复核） |
-| 2026-09-02 | 阶段 2 独立完成复核 | 基于当前代码、134/134 Swift、Rust 66+1、Release 签名/启动、固定 9998 实测、治理和反向引用逐项复核；未发现计划外行为 | [阶段 2 独立完成复核](../data-quality/tunnelpad-local-api-stage2-independent-completion-review-20260902.md) | 通过，阶段 2 已完成 | Codex（独立只读复核） |
+| 2026-09-02 | 阶段 1 实施与专项验证 | SwiftNIO Server、backend、AppDelegate 生命周期、typed operation result、原位日志清空和随机端口契约测试已实现；专项 4/4、日志 11/11、全量 134/134 通过 | [阶段 1 实施证据](../../data-quality/tunnelpad-local-api-stage1-implementation-20260902.md) | 通过；真实 App 验收已补齐 | Codex |
+| 2026-09-02 | 阶段 1 真实环境验收 | 真实 Debug/签名 Release App 监听固定 127.0.0.1:9998；health、列表、详情、日志状态、OpenAPI、未知 ID、第二实例端口冲突和退出清理通过；未触碰真实隧道生命周期 | [阶段 1 真实环境验收](../../data-quality/tunnelpad-local-api-stage1-real-app-acceptance-20260902.md) | 通过 | Codex |
+| 2026-09-02 | 阶段 2 Step 0 | 核对阶段 1 实现、API/日志/Rust/Swift 回归、Release 签名、真实接口、端口冲突、退出清理、失败边界和反向引用矩阵 | [阶段 2 Step 0](../../data-quality/tunnelpad-local-api-stage2-step0-20260902.md) | 通过，达到待实施标准 | Codex（独立只读复核） |
+| 2026-09-02 | 阶段 2 独立完成复核 | 基于当前代码、134/134 Swift、Rust 66+1、Release 签名/启动、固定 9998 实测、治理和反向引用逐项复核；未发现计划外行为 | [阶段 2 独立完成复核](../../data-quality/tunnelpad-local-api-stage2-independent-completion-review-20260902.md) | 通过，阶段 2 已完成 | Codex（独立只读复核） |
 
 ### Attestation 说明
 
@@ -305,7 +305,7 @@ GET /openapi.json 必须描述上述全部路由、参数、状态码、响应�
 阶段 1：随机测试端口的 HTTP contract tests、fake backend/LogSnapshot、Swift 6 并发检查、Rust/Swift 回归、真实 Debug/签名 Release App 固定 9998 启动/冲突/退出验收；不调用真实用户 launchd、SSH、ECS 或标准日志路径。
 阶段 2：独立完成复核、API 全路由/安全字段反向核对、既有稳定性/日志生命周期回归、反向引用和最终治理门禁。
 
-阶段 1 实施结果见[阶段 1 实施证据](../data-quality/tunnelpad-local-api-stage1-implementation-20260902.md)，真实 Debug/签名 Release App 验收见[阶段 1 真实环境验收](../data-quality/tunnelpad-local-api-stage1-real-app-acceptance-20260902.md)，阶段 2 收口见[独立完成复核](../data-quality/tunnelpad-local-api-stage2-independent-completion-review-20260902.md)。
+阶段 1 实施结果见[阶段 1 实施证据](../../data-quality/tunnelpad-local-api-stage1-implementation-20260902.md)，真实 Debug/签名 Release App 验收见[阶段 1 真实环境验收](../../data-quality/tunnelpad-local-api-stage1-real-app-acceptance-20260902.md)，阶段 2 收口见[独立完成复核](../../data-quality/tunnelpad-local-api-stage2-independent-completion-review-20260902.md)。
 
 实现前必须再次执行：
 
@@ -338,7 +338,7 @@ git diff --check
 | 日期 | 2026-09-02 |
 | 阶段 | 阶段 2 |
 | 结论 | 通过，达到“待实施”标准并完成收口 |
-| 证据 | [阶段 2 Step 0](../data-quality/tunnelpad-local-api-stage2-step0-20260902.md)、[阶段 2 独立完成复核](../data-quality/tunnelpad-local-api-stage2-independent-completion-review-20260902.md)、阶段 1 实现/真实环境证据和本计划完成条件 |
+| 证据 | [阶段 2 Step 0](../../data-quality/tunnelpad-local-api-stage2-step0-20260902.md)、[阶段 2 独立完成复核](../../data-quality/tunnelpad-local-api-stage2-independent-completion-review-20260902.md)、阶段 1 实现/真实环境证据和本计划完成条件 |
 | 复核者 | Codex（独立只读复核） |
 
 ## 独立复核记录
@@ -347,10 +347,10 @@ git diff --check
 |---|---|---|---|---|---|
 | 2026-09-02 | 需求探索确认 | 阶段 0 | 通过：用户确认回环监听、第一阶段接口、安全摘要、同步启停、App 生命周期和 ModelPad 端口冲突语义 | 本计划“用户确认的探索结论” | Codex（需求探索轮次） |
 | 2026-09-02 | 阶段 0 独立准入 | 阶段 0 | 待复核；当前不得进入实现 | 阶段 0 基线证据、样本矩阵、GitNexus impact | 待补充 |
-| 2026-09-02 | 阶段 0 独立准入复核 | 阶段 0 → 阶段 1 | 通过，达到“待实施”标准；阶段 1 可进入实现 | [独立准入复核](../data-quality/tunnelpad-local-api-stage0-independent-review-20260902.md) | Codex（独立只读复核） |
-| 2026-09-02 | 阶段准入复核 | 阶段 1 | 通过，达到“待实施”标准 | [阶段 0 独立准入复核](../data-quality/tunnelpad-local-api-stage0-independent-review-20260902.md) | Codex（独立只读复核） |
-| 2026-09-02 | 阶段 2 Step 0 独立准入复核 | 阶段 2 | 通过，达到“待实施”标准；阶段 2 可进入最终收口 | [阶段 2 Step 0](../data-quality/tunnelpad-local-api-stage2-step0-20260902.md) | Codex（独立只读复核） |
-| 2026-09-02 | 阶段 2 独立完成复核 | 阶段 2 | 通过，已完成；无计划外行为变化 | [阶段 2 独立完成复核](../data-quality/tunnelpad-local-api-stage2-independent-completion-review-20260902.md) | Codex（独立只读复核） |
+| 2026-09-02 | 阶段 0 独立准入复核 | 阶段 0 → 阶段 1 | 通过，达到“待实施”标准；阶段 1 可进入实现 | [独立准入复核](../../data-quality/tunnelpad-local-api-stage0-independent-review-20260902.md) | Codex（独立只读复核） |
+| 2026-09-02 | 阶段准入复核 | 阶段 1 | 通过，达到“待实施”标准 | [阶段 0 独立准入复核](../../data-quality/tunnelpad-local-api-stage0-independent-review-20260902.md) | Codex（独立只读复核） |
+| 2026-09-02 | 阶段 2 Step 0 独立准入复核 | 阶段 2 | 通过，达到“待实施”标准；阶段 2 可进入最终收口 | [阶段 2 Step 0](../../data-quality/tunnelpad-local-api-stage2-step0-20260902.md) | Codex（独立只读复核） |
+| 2026-09-02 | 阶段 2 独立完成复核 | 阶段 2 | 通过，已完成；无计划外行为变化 | [阶段 2 独立完成复核](../../data-quality/tunnelpad-local-api-stage2-independent-completion-review-20260902.md) | Codex（独立只读复核） |
 
 ## 风险和回滚
 

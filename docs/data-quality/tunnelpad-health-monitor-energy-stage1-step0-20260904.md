@@ -1,7 +1,7 @@
 # TunnelPad 后台健康监测能耗优化：阶段 1 Step 0
 
 - 日期：2026-09-04
-- 关联计划：[TunnelPad 后台健康监测能耗优化](../plans/tunnelpad-health-monitor-energy.md)
+- 关联计划：[TunnelPad 后台健康监测能耗优化](../plans/20260904/tunnelpad-health-monitor-energy.md)
 - 前置基线：[阶段 0 基线](tunnelpad-health-monitor-energy-stage0-20260903.md)
 - 实施证据：[阶段 1 实施证据](tunnelpad-health-monitor-energy-stage1-implementation-20260904.md)
 - 基线类型：性能调用计数 + 健康恢复契约兼容验证

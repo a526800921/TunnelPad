@@ -1,8 +1,8 @@
 # 计划：TunnelPad 日志低写放大与流式保留
 
-> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../PLAN_MAP.md#计划索引)为准。
+> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../../PLAN_MAP.md#计划索引)为准。
 
-- 前置：[TunnelPad 日志事件流与面板生命周期计划](tunnelpad-log-streaming.md)、[TunnelPad 日志保留与能耗回归修复计划](tunnelpad-log-retention-energy-regression.md)和[TunnelPad Rust Core 迁移计划](tunnelpad-rust-migration.md)已完成；本计划复用既有日志路径、launchd 生命周期和 2000 行裁剪契约，并承接真实运行中新发现的磁盘写放大问题。
+- 前置：[TunnelPad 日志事件流与面板生命周期计划](../20260830/tunnelpad-log-streaming.md)、[TunnelPad 日志保留与能耗回归修复计划](tunnelpad-log-retention-energy-regression.md)和[TunnelPad Rust Core 迁移计划](../20260830/tunnelpad-rust-migration.md)已完成；本计划复用既有日志路径、launchd 生命周期和 2000 行裁剪契约，并承接真实运行中新发现的磁盘写放大问题。
 
 ## 背景
 
@@ -105,12 +105,12 @@
 | 字段 | 内容 |
 |---|---|
 | 准入状态 | 已完成 |
-| Step 0 | [阶段 2 Step 0](../data-quality/tunnelpad-log-write-amplification-stage2-step0-20260905.md)：最新 Release App、两个真实隧道、静默配置和 40 秒现场窗口已复核 |
+| Step 0 | [阶段 2 Step 0](../../data-quality/tunnelpad-log-write-amplification-stage2-step0-20260905.md)：最新 Release App、两个真实隧道、静默配置和 40 秒现场窗口已复核 |
 | 样本矩阵 | 下表 1–7 固定代码/真实基线；阶段 2 A/B/C 固定 30 分钟静默窗口、Activity Monitor 读数和退出清理 |
 | 验证方式 | 阶段 1 Swift/Rust/Release 回归；阶段 2 真实 App 窗口、Activity Monitor、日志元数据、本地 API、隧道状态和退出清理 |
 | 失败/回滚边界 | 锁失败、文件变化、压缩异常时保留原文件并延后重试；真实验收失败时停止扩大范围，只恢复本地 App/本地代码，不改 ECS、凭证或非目标隧道 |
 | 当前阻塞项 | 无 |
-| 最新独立准入复核 | 通过；[阶段 2 独立完成复核](../data-quality/tunnelpad-log-write-amplification-stage2-independent-completion-review-20260905.md)确认阶段 2 完成条件、真实窗口和退出清理均通过 |
+| 最新独立准入复核 | 通过；[阶段 2 独立完成复核](../../data-quality/tunnelpad-log-write-amplification-stage2-independent-completion-review-20260905.md)确认阶段 2 完成条件、真实窗口和退出清理均通过 |
 
 ### 实施步骤
 
@@ -143,12 +143,12 @@
 | 日期 | 类型 | 动作/结果 | 证据 | 状态 | 记录者 |
 |---|---|---|---|---|---|
 | 2026-09-05 | 计划建立/需求探索 | 用户确认接受 512 KiB 高水位和批量压缩，并确认正常运行关闭独立 `-v`、故障排查时按需打开；完成流式追加、前缀删除和 launchd 文件身份取舍说明 | 本计划需求探索；真实 Release App 只读复验 | 通过；阶段 0 完成 | Codex |
-| 2026-09-05 | 阶段 0 独立准入复核 | 固定真实日志大小/mtime、配置详细日志开关、launchd 文件身份和批量压缩边界；确认阶段 1 可实施 | [阶段 0 独立准入复核](../data-quality/tunnelpad-log-write-amplification-stage0-independent-review-20260905.md) | 通过；阶段 1 实施中 | Codex（独立只读复核） |
+| 2026-09-05 | 阶段 0 独立准入复核 | 固定真实日志大小/mtime、配置详细日志开关、launchd 文件身份和批量压缩边界；确认阶段 1 可实施 | [阶段 0 独立准入复核](../../data-quality/tunnelpad-log-write-amplification-stage0-independent-review-20260905.md) | 通过；阶段 1 实施中 | Codex（独立只读复核） |
 | 2026-09-05 | 阶段 1 实施前影响分析 | `trimIfNeeded` 为 CRITICAL，直接调用者 1 个，影响 16 个符号、6 条流程、3 个模块；`refreshState` 为 CRITICAL，直接调用者 5 个，影响 18 个符号、6 条流程、3 个模块；SSH 详细日志和 launchd plist 路径为 LOW | GitNexus upstream impact；目标为 `LogFileRetention.trimIfNeeded`、`LogEventStore.refreshState`、`SSHCommand.removingVerboseFlag`、`LaunchdPlistRenderer.plistDictionary` | 通过；范围限定为日志与配置兼容回归 | Codex |
-| 2026-09-05 | 阶段 1 实施与回归 | 删除文件变化时无条件裁剪，增加 512 KiB/64 KiB 高水位状态，完成静默配置迁移、专项/全量测试、Rust 回归、Release 构建和打包 | [阶段 1 实施证据](../data-quality/tunnelpad-log-write-amplification-stage1-implementation-20260905.md) | 通过；阶段 1 完成 | Codex |
-| 2026-09-05 | 阶段 2 Step 0 与独立准入 | 最新 Release App 真实启动、两个隧道静默运行、API/探针/日志短时窗口及详细日志开关回归通过；阶段 2 长期窗口准入通过 | [阶段 2 Step 0](../data-quality/tunnelpad-log-write-amplification-stage2-step0-20260905.md)；[阶段 2 独立准入复核](../data-quality/tunnelpad-log-write-amplification-stage2-independent-review-20260905.md) | 通过；阶段 2 实施中 | Codex（独立准入复核） |
-| 2026-09-05 | 阶段 2 真实 Release 实施 | 30 分钟/31 样本真实静默窗口、Activity Monitor CPU/能耗/磁盘、日志元数据、API/隧道状态和退出清理通过；随后恢复最新 App 与两个隧道 | [阶段 2 真实 Release 实施证据](../data-quality/tunnelpad-log-write-amplification-stage2-implementation-20260905.md) | 通过；阶段 2 完成 | Codex |
-| 2026-09-05 | 阶段 2 独立完成复核 | 对完成条件、当前仓库验证、真实窗口、退出清理、范围和治理反向引用独立核对通过；GitNexus `detect_changes --repo TunnelPad --scope unstaged` 为 CRITICAL，影响 24 条日志相关流程、74 个符号，与已记录的共享日志枢纽影响一致 | [阶段 2 独立完成复核](../data-quality/tunnelpad-log-write-amplification-stage2-independent-completion-review-20260905.md) | 通过；专项计划完成 | Codex（独立完成复核） |
+| 2026-09-05 | 阶段 1 实施与回归 | 删除文件变化时无条件裁剪，增加 512 KiB/64 KiB 高水位状态，完成静默配置迁移、专项/全量测试、Rust 回归、Release 构建和打包 | [阶段 1 实施证据](../../data-quality/tunnelpad-log-write-amplification-stage1-implementation-20260905.md) | 通过；阶段 1 完成 | Codex |
+| 2026-09-05 | 阶段 2 Step 0 与独立准入 | 最新 Release App 真实启动、两个隧道静默运行、API/探针/日志短时窗口及详细日志开关回归通过；阶段 2 长期窗口准入通过 | [阶段 2 Step 0](../../data-quality/tunnelpad-log-write-amplification-stage2-step0-20260905.md)；[阶段 2 独立准入复核](../../data-quality/tunnelpad-log-write-amplification-stage2-independent-review-20260905.md) | 通过；阶段 2 实施中 | Codex（独立准入复核） |
+| 2026-09-05 | 阶段 2 真实 Release 实施 | 30 分钟/31 样本真实静默窗口、Activity Monitor CPU/能耗/磁盘、日志元数据、API/隧道状态和退出清理通过；随后恢复最新 App 与两个隧道 | [阶段 2 真实 Release 实施证据](../../data-quality/tunnelpad-log-write-amplification-stage2-implementation-20260905.md) | 通过；阶段 2 完成 | Codex |
+| 2026-09-05 | 阶段 2 独立完成复核 | 对完成条件、当前仓库验证、真实窗口、退出清理、范围和治理反向引用独立核对通过；GitNexus `detect_changes --repo TunnelPad --scope unstaged` 为 CRITICAL，影响 24 条日志相关流程、74 个符号，与已记录的共享日志枢纽影响一致 | [阶段 2 独立完成复核](../../data-quality/tunnelpad-log-write-amplification-stage2-independent-completion-review-20260905.md) | 通过；专项计划完成 | Codex（独立完成复核） |
 
 ## 验证方式
 
@@ -158,7 +158,7 @@
 
 ## 测试覆盖率
 
-阶段 0 已完成真实基线复核。阶段 1 已覆盖正常静默与详细日志开关、未达阈值追加、达到阈值压缩、压缩后最近 2000 行、LF/CRLF/混合换行、文件替换、锁失败、重开和多隧道隔离；专项 16/16、Swift 全量 145/145、Rust 76 单元 + 1 differential、Release 构建和打包均通过。阶段 2 已完成 30 分钟/31 样本真实窗口、Activity Monitor 磁盘/CPU/能耗、日志元数据、API、隧道状态和退出清理；测试覆盖率证据见[阶段 1 实施证据](../data-quality/tunnelpad-log-write-amplification-stage1-implementation-20260905.md)、[阶段 2 真实 Release 实施证据](../data-quality/tunnelpad-log-write-amplification-stage2-implementation-20260905.md)和[阶段 2 独立完成复核](../data-quality/tunnelpad-log-write-amplification-stage2-independent-completion-review-20260905.md)。
+阶段 0 已完成真实基线复核。阶段 1 已覆盖正常静默与详细日志开关、未达阈值追加、达到阈值压缩、压缩后最近 2000 行、LF/CRLF/混合换行、文件替换、锁失败、重开和多隧道隔离；专项 16/16、Swift 全量 145/145、Rust 76 单元 + 1 differential、Release 构建和打包均通过。阶段 2 已完成 30 分钟/31 样本真实窗口、Activity Monitor 磁盘/CPU/能耗、日志元数据、API、隧道状态和退出清理；测试覆盖率证据见[阶段 1 实施证据](../../data-quality/tunnelpad-log-write-amplification-stage1-implementation-20260905.md)、[阶段 2 真实 Release 实施证据](../../data-quality/tunnelpad-log-write-amplification-stage2-implementation-20260905.md)和[阶段 2 独立完成复核](../../data-quality/tunnelpad-log-write-amplification-stage2-independent-completion-review-20260905.md)。
 
 ## 完成条件
 
@@ -177,7 +177,7 @@
 | 日期 | 2026-09-05 |
 | 阶段 | 阶段 2 |
 | 结论 | 通过；阶段 2 完成，专项计划达到关闭条件 |
-| 证据 | [阶段 2 独立完成复核](../data-quality/tunnelpad-log-write-amplification-stage2-independent-completion-review-20260905.md)确认真实窗口、退出清理、完成条件、范围和治理反向引用均通过 |
+| 证据 | [阶段 2 独立完成复核](../../data-quality/tunnelpad-log-write-amplification-stage2-independent-completion-review-20260905.md)确认真实窗口、退出清理、完成条件、范围和治理反向引用均通过 |
 | 复核者 | Codex（独立完成复核） |
 
 ## 独立复核记录
@@ -185,10 +185,10 @@
 | 日期 | 类型 | 阶段 | 结论 | 证据 | 复核者 |
 |---|---|---|---|---|---|
 | 2026-09-05 | 计划建立后的需求探索登记 | 阶段 0 | 待复核；仅冻结候选方向，不授予实施准入 | 本计划需求探索与 Step 0 | 尚未进行 |
-| 2026-09-05 | 阶段 0 独立准入复核 | 阶段 0 | 通过；阶段 0 完成，阶段 1 达到 `待实施` 标准 | [阶段 0 独立准入复核](../data-quality/tunnelpad-log-write-amplification-stage0-independent-review-20260905.md) | Codex（独立只读复核） |
-| 2026-09-05 | 阶段 1 实施准入登记 | 阶段 1 | 通过；阶段 1 达到 `待实施` 标准，进入实施 | [阶段 0 独立准入复核](../data-quality/tunnelpad-log-write-amplification-stage0-independent-review-20260905.md) | Codex（基于独立准入证据） |
-| 2026-09-05 | 阶段 2 独立准入复核 | 阶段 2 | 通过；阶段 2 达到 `待实施` 标准，允许开始真实 Release 长期回归 | [阶段 2 独立准入复核](../data-quality/tunnelpad-log-write-amplification-stage2-independent-review-20260905.md) | Codex（独立只读复核） |
-| 2026-09-05 | 阶段 2 独立完成复核 | 阶段 2 | 通过；阶段 2 完成，专项计划达到关闭条件 | [阶段 2 独立完成复核](../data-quality/tunnelpad-log-write-amplification-stage2-independent-completion-review-20260905.md) | Codex（独立完成复核） |
+| 2026-09-05 | 阶段 0 独立准入复核 | 阶段 0 | 通过；阶段 0 完成，阶段 1 达到 `待实施` 标准 | [阶段 0 独立准入复核](../../data-quality/tunnelpad-log-write-amplification-stage0-independent-review-20260905.md) | Codex（独立只读复核） |
+| 2026-09-05 | 阶段 1 实施准入登记 | 阶段 1 | 通过；阶段 1 达到 `待实施` 标准，进入实施 | [阶段 0 独立准入复核](../../data-quality/tunnelpad-log-write-amplification-stage0-independent-review-20260905.md) | Codex（基于独立准入证据） |
+| 2026-09-05 | 阶段 2 独立准入复核 | 阶段 2 | 通过；阶段 2 达到 `待实施` 标准，允许开始真实 Release 长期回归 | [阶段 2 独立准入复核](../../data-quality/tunnelpad-log-write-amplification-stage2-independent-review-20260905.md) | Codex（独立只读复核） |
+| 2026-09-05 | 阶段 2 独立完成复核 | 阶段 2 | 通过；阶段 2 完成，专项计划达到关闭条件 | [阶段 2 独立完成复核](../../data-quality/tunnelpad-log-write-amplification-stage2-independent-completion-review-20260905.md) | Codex（独立完成复核） |
 
 ## 未决问题
 
@@ -208,7 +208,7 @@
 
 ## 关联 ADR、迁移、spec 或 issue
 
-- [ADR-0003：日志事件流、缓存和文件保留边界](../adr/0003-log-event-stream-and-retention.md)
-- [TunnelPad 日志事件流与面板生命周期计划](tunnelpad-log-streaming.md)
+- [ADR-0003：日志事件流、缓存和文件保留边界](../../adr/0003-log-event-stream-and-retention.md)
+- [TunnelPad 日志事件流与面板生命周期计划](../20260830/tunnelpad-log-streaming.md)
 - [TunnelPad 日志保留与能耗回归修复计划](tunnelpad-log-retention-energy-regression.md)
-- [隔夜复验与诊断](../data-quality/tunnelpad-health-monitor-energy-overnight-revalidation-20260905.md)
+- [隔夜复验与诊断](../../data-quality/tunnelpad-health-monitor-energy-overnight-revalidation-20260905.md)

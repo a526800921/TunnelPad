@@ -1,7 +1,7 @@
 # TunnelPad 稳定性阶段 3 Step 0 证据
 
 - 日期：2026-09-02
-- 计划：[TunnelPad 隧道稳定性与健康恢复](../plans/tunnelpad-stability.md)
+- 计划：[TunnelPad 隧道稳定性与健康恢复](../plans/20260830/tunnelpad-stability.md)
 - 阶段：阶段 3
 - 基线类型：阶段 2 独立完成复核后的发布产物基线 + 隔离 demo/应用门禁边界
 - 当前结论：Step 0、独立准入和最终发布门禁均已完成；阶段 3 已关闭

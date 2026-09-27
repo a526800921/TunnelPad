@@ -3,7 +3,7 @@
 - 日期：2026-09-02
 - 阶段：阶段 1
 - 复核者：Codex（独立只读复核）
-- 关联计划：[TunnelPad 隧道稳定性与健康恢复](../plans/tunnelpad-stability.md)
+- 关联计划：[TunnelPad 隧道稳定性与健康恢复](../plans/20260830/tunnelpad-stability.md)
 - Step 0 证据：[阶段 1 Step 0 证据](tunnelpad-stability-stage1-step0-20260902.md)
 - 上一轮复核：[阶段 1 独立准入复核](tunnelpad-stability-stage1-independent-review-20260902.md)
 - 结论：达到“待实施标准”。
@@ -24,7 +24,7 @@
 | 失败/回滚/安全边界 | 通过 | 失败、来源不确定、代次不一致和跨隧道影响均 fail-closed；实现按独立提交回滚；不删除真实 plist、不启停真实隧道、不修改远端安全组或凭证。 |
 | Rust owner、ADR 与迁移边界 | 通过 | ADR-0001 与 owner 切换迁移明确 Rust Core 是配置、生命周期、运行时状态、操作代次和取消的唯一 owner；阶段 1 不得新增 Swift 第二套恢复协调器，健康恢复必须复用该边界。 |
 | 已完成日志计划的共享边界 | 通过 | 日志计划阶段 0–3 已在 `08d2ac5` 完成；ADR-0003 保持日志采集、缓存和 UI 订阅边界。阶段 1 修改 `TunnelManager`、`TunnelRuntimeState`、主面板或共享测试目录时，必须单一编辑窗口、串行合入，不覆盖日志计划验收行为。 |
-| 当前阶段无准入阻塞 | 通过 | 整改后的专项计划明确“当前阻塞项：无”，并把生产状态机、launchd/config 接入测试和完成复核归类为通过准入后的待实施工作。[专项计划](../plans/tunnelpad-stability.md:315-321) |
+| 当前阶段无准入阻塞 | 通过 | 整改后的专项计划明确“当前阻塞项：无”，并把生产状态机、launchd/config 接入测试和完成复核归类为通过准入后的待实施工作。[专项计划](../plans/20260830/tunnelpad-stability.md:315-321) |
 | `PLAN_MAP` 已同步阶段 1 Step 0 | 通过 | 当前索引已登记阶段 1、Step 0 证据和上一轮复核，状态仍保持“设计中/阶段 1”，与本轮复核前的待审状态一致。[PLAN_MAP](../PLAN_MAP.md:27-30) |
 | 严格治理门禁 | 通过 | 当前执行 `plan-governance-cli check . --strict-readiness`、`plan-governance-cli graph validate .` 和 `git diff --check` 均通过；这些检查与本轮代码/文档核对共同构成准入证据。 |
 

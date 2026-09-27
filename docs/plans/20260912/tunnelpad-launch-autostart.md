@@ -89,9 +89,9 @@
 |---|---|
 | 准入状态 | 已完成（用户验收通过） |
 | 复核策略 | 风险分流 |
-| Step 0 | [阶段 0 基线证据](../data-quality/tunnelpad-launch-autostart-stage0-step0-20260912.md) |
+| Step 0 | [阶段 0 基线证据](../../data-quality/tunnelpad-launch-autostart-stage0-step0-20260912.md) |
 | 样本矩阵 | C0–C4 契约样本 + R1–R6 竞态清单（同上 Step 0 链接） |
-| 验证方式 | [阶段 1–3 实施证据](../data-quality/tunnelpad-launch-autostart-stage1-3-implementation-20260912.md) |
+| 验证方式 | [阶段 1–3 实施证据](../../data-quality/tunnelpad-launch-autostart-stage1-3-implementation-20260912.md) |
 | 失败/回滚边界 | 见[风险和回滚](#风险和回滚) |
 | 当前阻塞项 | 无 |
 | 最新阶段复核 | [最新阶段复核](#最新阶段复核) |
@@ -105,18 +105,18 @@
 
 ### Step 0 证据
 
-[阶段 0 基线证据](../data-quality/tunnelpad-launch-autostart-stage0-step0-20260912.md)：运行观察（App 启动不拉起隧道、无登录项代码）、C0–C4 样本形状、R1–R6 竞态清单，2026-09-12 自验通过。
+[阶段 0 基线证据](../../data-quality/tunnelpad-launch-autostart-stage0-step0-20260912.md)：运行观察（App 启动不拉起隧道、无登录项代码）、C0–C4 样本形状、R1–R6 竞态清单，2026-09-12 自验通过。
 
 ### 阶段证据
 
 | 日期 | 类型 | 动作/结果 | 证据 | 状态 | 记录者 |
 |---|---|---|---|---|---|
-| 2026-09-12 | 阶段 0 Step 0 基线 | 运行观察（启动不拉起隧道、无登录项代码）、C0–C4 样本形状、R1–R6 竞态清单固定 | [阶段 0 基线证据](../data-quality/tunnelpad-launch-autostart-stage0-step0-20260912.md) | 通过；阶段 0 完成 | ZCode（实施者） |
-| 2026-09-12 | 阶段 1 实施 | autoStart 双侧契约、apple_json 字节、差分 fixture、表单开关；Swift/Rust/差分全绿 | [阶段 1–3 实施证据](../data-quality/tunnelpad-launch-autostart-stage1-3-implementation-20260912.md) | 通过；阶段 1 完成 | ZCode（实施者） |
-| 2026-09-12 | 阶段 1 独立复核 | 8/8 通过；唯一信息性疑问为既有 keepAlive 同形的 null 不对称 | [阶段 1 独立复核](../data-quality/tunnelpad-launch-autostart-stage1-independent-review-20260912.md) | 通过 | 独立只读复核 |
-| 2026-09-12 | 阶段 2 实施 | 登录项状态机与菜单开关；映射单测通过，真实注册归用户验收 | [阶段 1–3 实施证据](../data-quality/tunnelpad-launch-autostart-stage1-3-implementation-20260912.md) | 通过；阶段 2 完成（自验） | ZCode（实施者） |
-| 2026-09-12 | 阶段 3 实施 | 启动恢复入口与挂接；Swift 150/150，恢复专项 11 次零失败 | [阶段 1–3 实施证据](../data-quality/tunnelpad-launch-autostart-stage1-3-implementation-20260912.md) | 通过；阶段 3 技术完成 | ZCode（实施者） |
-| 2026-09-12 | 阶段 3 独立复核 | R1–R6 及六项清单通过，无必须修复项，3 项轻微观察 | [阶段 3 独立复核](../data-quality/tunnelpad-launch-autostart-stage3-independent-review-20260912.md) | 通过（PASS，无必须修复项） | 独立只读复核 |
+| 2026-09-12 | 阶段 0 Step 0 基线 | 运行观察（启动不拉起隧道、无登录项代码）、C0–C4 样本形状、R1–R6 竞态清单固定 | [阶段 0 基线证据](../../data-quality/tunnelpad-launch-autostart-stage0-step0-20260912.md) | 通过；阶段 0 完成 | ZCode（实施者） |
+| 2026-09-12 | 阶段 1 实施 | autoStart 双侧契约、apple_json 字节、差分 fixture、表单开关；Swift/Rust/差分全绿 | [阶段 1–3 实施证据](../../data-quality/tunnelpad-launch-autostart-stage1-3-implementation-20260912.md) | 通过；阶段 1 完成 | ZCode（实施者） |
+| 2026-09-12 | 阶段 1 独立复核 | 8/8 通过；唯一信息性疑问为既有 keepAlive 同形的 null 不对称 | [阶段 1 独立复核](../../data-quality/tunnelpad-launch-autostart-stage1-independent-review-20260912.md) | 通过 | 独立只读复核 |
+| 2026-09-12 | 阶段 2 实施 | 登录项状态机与菜单开关；映射单测通过，真实注册归用户验收 | [阶段 1–3 实施证据](../../data-quality/tunnelpad-launch-autostart-stage1-3-implementation-20260912.md) | 通过；阶段 2 完成（自验） | ZCode（实施者） |
+| 2026-09-12 | 阶段 3 实施 | 启动恢复入口与挂接；Swift 150/150，恢复专项 11 次零失败 | [阶段 1–3 实施证据](../../data-quality/tunnelpad-launch-autostart-stage1-3-implementation-20260912.md) | 通过；阶段 3 技术完成 | ZCode（实施者） |
+| 2026-09-12 | 阶段 3 独立复核 | R1–R6 及六项清单通过，无必须修复项，3 项轻微观察 | [阶段 3 独立复核](../../data-quality/tunnelpad-launch-autostart-stage3-independent-review-20260912.md) | 通过（PASS，无必须修复项） | 独立只读复核 |
 
 ### 最近实施/验证记录
 
@@ -174,17 +174,17 @@
 | 风险 | 高影响 |
 | 风险依据 | 生命周期共享逻辑：启动恢复与健康监测/状态发现并发，退出即停语义交互 |
 | 结论 | 通过（PASS，无必须修复项） |
-| 证据 | [阶段 3 独立复核](../data-quality/tunnelpad-launch-autostart-stage3-independent-review-20260912.md) |
+| 证据 | [阶段 3 独立复核](../../data-quality/tunnelpad-launch-autostart-stage3-independent-review-20260912.md) |
 | 复核者 | 独立只读复核 |
 
 ## 阶段复核记录
 
 | 日期 | 类型 | 阶段 | 方式 | 风险 | 结论 | 证据 | 复核者 |
 |---|---|---|---|---|---|---|---|
-| 2026-09-12 | 阶段完成复核 | 阶段 0 | 自验 | 低风险 | 通过 | [阶段 0 基线证据](../data-quality/tunnelpad-launch-autostart-stage0-step0-20260912.md) | ZCode（实施者） |
-| 2026-09-12 | 阶段完成复核 | 阶段 1 | 独立 | 高影响 | 通过（8/8） | [阶段 1 独立复核](../data-quality/tunnelpad-launch-autostart-stage1-independent-review-20260912.md) | 独立只读复核 |
-| 2026-09-12 | 阶段完成复核 | 阶段 2 | 自验 | 低风险 | 通过（真实注册归用户验收） | [阶段 1–3 实施证据](../data-quality/tunnelpad-launch-autostart-stage1-3-implementation-20260912.md) | ZCode（实施者） |
-| 2026-09-12 | 阶段完成复核 | 阶段 3 | 独立 | 高影响 | 通过（PASS，无必须修复项） | [阶段 3 独立复核](../data-quality/tunnelpad-launch-autostart-stage3-independent-review-20260912.md) | 独立只读复核 |
+| 2026-09-12 | 阶段完成复核 | 阶段 0 | 自验 | 低风险 | 通过 | [阶段 0 基线证据](../../data-quality/tunnelpad-launch-autostart-stage0-step0-20260912.md) | ZCode（实施者） |
+| 2026-09-12 | 阶段完成复核 | 阶段 1 | 独立 | 高影响 | 通过（8/8） | [阶段 1 独立复核](../../data-quality/tunnelpad-launch-autostart-stage1-independent-review-20260912.md) | 独立只读复核 |
+| 2026-09-12 | 阶段完成复核 | 阶段 2 | 自验 | 低风险 | 通过（真实注册归用户验收） | [阶段 1–3 实施证据](../../data-quality/tunnelpad-launch-autostart-stage1-3-implementation-20260912.md) | ZCode（实施者） |
+| 2026-09-12 | 阶段完成复核 | 阶段 3 | 独立 | 高影响 | 通过（PASS，无必须修复项） | [阶段 3 独立复核](../../data-quality/tunnelpad-launch-autostart-stage3-independent-review-20260912.md) | 独立只读复核 |
 
 ## 未决问题
 
@@ -203,8 +203,8 @@
 
 ## 关联 ADR、迁移、spec 或 issue
 
-- [ADR-0001 Rust Core 单一 owner](../adr/0001-rust-core-single-owner.md)（配置事实源边界）
-- [TunnelPad Rust Core 迁移](tunnelpad-rust-migration.md)（配置 owner 职责与 schema 演进方式）
-- [TunnelPad 隧道稳定性与健康恢复](tunnelpad-stability.md)（启动首轮状态发现、busy 保护、CfgR 不变量来源）
-- [ECS 动态 SSH 公网 IP 同步](ecs-dynamic-ssh-ip.md)（启动前置同步 fail-closed 边界）
-- [TunnelPad 后台健康监测能耗优化](tunnelpad-health-monitor-energy.md)（不做启动期重试循环的能耗依据）
+- [ADR-0001 Rust Core 单一 owner](../../adr/0001-rust-core-single-owner.md)（配置事实源边界）
+- [TunnelPad Rust Core 迁移](../20260830/tunnelpad-rust-migration.md)（配置 owner 职责与 schema 演进方式）
+- [TunnelPad 隧道稳定性与健康恢复](../20260830/tunnelpad-stability.md)（启动首轮状态发现、busy 保护、CfgR 不变量来源）
+- [ECS 动态 SSH 公网 IP 同步](../20260829/ecs-dynamic-ssh-ip.md)（启动前置同步 fail-closed 边界）
+- [TunnelPad 后台健康监测能耗优化](../20260904/tunnelpad-health-monitor-energy.md)（不做启动期重试循环的能耗依据）

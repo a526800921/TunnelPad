@@ -4,7 +4,7 @@
 - 阶段：阶段 2
 - 类型：架构探索与启动边界现状快照
 - 结论：Rust Core 阶段 5 已完成并关闭；阶段 2 已在不改变 Rust owner、`config.json` version=1 和 launchd 语义的前提下冻结 SSH 启动前同步契约，并通过独立准入复核，进入实现。真实 App 端到端验收另行作为完成门禁，不能由本基线或 fake fixture 代替。
-- 关联计划：[ECS 动态 SSH 公网 IP 同步](../plans/ecs-dynamic-ssh-ip.md)
+- 关联计划：[ECS 动态 SSH 公网 IP 同步](../plans/20260829/ecs-dynamic-ssh-ip.md)
 
 ## 基线命令与结果
 

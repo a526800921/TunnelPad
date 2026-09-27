@@ -1,6 +1,6 @@
 # 计划：TunnelPad 代码质量重构
 
-> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../PLAN_MAP.md#计划索引)为准。
+> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../../PLAN_MAP.md#计划索引)为准。
 
 - 前置：`tunnelpad-v1` 与 `tunnelpad-ui-refinements` 均已完成；本计划阶段 0 仅固定重构基线与兼容边界
 
@@ -133,7 +133,7 @@ TunnelPad v1 与界面优化已经形成可运行功能，但当前工作树中�
 
 类型：架构探索的现状快照与风险实验准备。
 
-基线信息：当前 HEAD 由 `git rev-parse HEAD` 取得；工作树非洁净，必须同时记录 `git status --short` 与 `git diff --stat`。当前审计已确认 63 个 Core 测试方法、`TunnelManager`/`AppProcessExecutor`/主面板/双表单为主要重构热点；完整证据见 [阶段 0 基线证据](../data-quality/tunnelpad-code-quality-refactor-stage0-20260830.md)。
+基线信息：当前 HEAD 由 `git rev-parse HEAD` 取得；工作树非洁净，必须同时记录 `git status --short` 与 `git diff --stat`。当前审计已确认 63 个 Core 测试方法、`TunnelManager`/`AppProcessExecutor`/主面板/双表单为主要重构热点；完整证据见 [阶段 0 基线证据](../../data-quality/tunnelpad-code-quality-refactor-stage0-20260830.md)。
 
 ### 样本矩阵（阶段 0）
 
@@ -158,7 +158,7 @@ TunnelPad v1 与界面优化已经形成可运行功能，但当前工作树中�
 
 | 日期 | 类型 | 动作/结果 | 证据 | 状态 | 记录者 |
 |---|---|---|---|---|---|
-| 2026-08-30 | 设计 | 完成只读代码质量审计并新建本计划；确认重构热点与主要竞态风险 | [阶段 0 基线证据](../data-quality/tunnelpad-code-quality-refactor-stage0-20260830.md) | 完成 | Codex |
+| 2026-08-30 | 设计 | 完成只读代码质量审计并新建本计划；确认重构热点与主要竞态风险 | [阶段 0 基线证据](../../data-quality/tunnelpad-code-quality-refactor-stage0-20260830.md) | 完成 | Codex |
 
 ### 阶段准入摘要
 
@@ -197,8 +197,8 @@ TunnelPad v1 与界面优化已经形成可运行功能，但当前工作树中�
 | # | 输入/基线 | 可执行命令或操作 | 预期结果 | 失败判定 | 输出位置 |
 |---|---|---|---|---|---|
 | 1 | 阶段 0 风险热点 | 静态核对 `TunnelManager`、`AppProcessExecutor`、`ProbeService`、`ProcessRunner` 调用图 | 明确抽象边界与直接调用方 | 出现未纳入边界的同步阻塞或状态写入 | 阶段 1 证据文档 |
-| 2 | async/await 原型 | `swift test --filter RefactorBoundaryTests` | 取消后无迟到探针结果、状态聚合可串行更新、异步入口文案保持兼容 | 任务继续写回旧状态或吞错 | [阶段 1 实施证据](../data-quality/tunnelpad-code-quality-refactor-stage1-20260830.md) |
-| 3 | 兼容 API | `swift test` 与既有 TunnelManager 测试 | 73 个既有/新增测试全过，异步入口、删除和 keepAlive 竞态有契约覆盖 | 既有行为或契约测试失败 | [阶段 1 实施证据](../data-quality/tunnelpad-code-quality-refactor-stage1-20260830.md) |
+| 2 | async/await 原型 | `swift test --filter RefactorBoundaryTests` | 取消后无迟到探针结果、状态聚合可串行更新、异步入口文案保持兼容 | 任务继续写回旧状态或吞错 | [阶段 1 实施证据](../../data-quality/tunnelpad-code-quality-refactor-stage1-20260830.md) |
+| 3 | 兼容 API | `swift test` 与既有 TunnelManager 测试 | 73 个既有/新增测试全过，异步入口、删除和 keepAlive 竞态有契约覆盖 | 既有行为或契约测试失败 | [阶段 1 实施证据](../../data-quality/tunnelpad-code-quality-refactor-stage1-20260830.md) |
 | 4 | 计划治理 | `plan-governance-cli check . --strict-readiness`、`git diff --check` | 当前计划结构完整且无本计划 ERROR | 任一治理错误或计划漂移 | 阶段 1 证据文档 |
 
 ### 验证方式（阶段 1）
@@ -228,7 +228,7 @@ TunnelPad v1 与界面优化已经形成可运行功能，但当前工作树中�
 - 已完成 repository、执行器能力、运行时状态和生命周期结果边界；同步门面 API 保留，新增 async 入口供 UI 使用。
 - 已完成探针 actor/generation、状态刷新 generation、keepAlive 延迟重启失效保护，以及窗口隐藏时暂停状态/日志轮询。
 - 已完成新建/编辑表单共享状态、命令解析、探针校验和 SSH 详细日志开关逻辑。
-- 详细命令、73 项测试、构建、治理检查和 GitNexus 影响分析见[阶段 1 实施证据](../data-quality/tunnelpad-code-quality-refactor-stage1-20260830.md)。
+- 详细命令、73 项测试、构建、治理检查和 GitNexus 影响分析见[阶段 1 实施证据](../../data-quality/tunnelpad-code-quality-refactor-stage1-20260830.md)。
 - 这些结果是实施者验证；阶段 1 已完成，阶段 2–3 的实现与受控应用冒烟已补齐，阶段 4 仍负责发布前收口和用户可控的真实隧道验收。
 
 ## 阶段 2
@@ -399,9 +399,9 @@ TunnelPad v1 与界面优化已经形成可运行功能，但当前工作树中�
 
 ## 完成证据
 
-- Step 0 基线：[阶段 0 基线证据](../data-quality/tunnelpad-code-quality-refactor-stage0-20260830.md)。
-- 阶段 1 实施：[阶段 1 实施证据](../data-quality/tunnelpad-code-quality-refactor-stage1-20260830.md)。
-- 阶段 2–4 实施与硬化：[阶段 2–4 实施证据](../data-quality/tunnelpad-code-quality-refactor-stage2-4-20260830.md)。
+- Step 0 基线：[阶段 0 基线证据](../../data-quality/tunnelpad-code-quality-refactor-stage0-20260830.md)。
+- 阶段 1 实施：[阶段 1 实施证据](../../data-quality/tunnelpad-code-quality-refactor-stage1-20260830.md)。
+- 阶段 2–4 实施与硬化：[阶段 2–4 实施证据](../../data-quality/tunnelpad-code-quality-refactor-stage2-4-20260830.md)。
 - 可复现验证：`swift test`、`swift build`、`swift build -c release`、`plan-governance-cli check . --strict-readiness`、`git diff --check`，以及隔离 app demo 生命周期测试和 AX 应用冒烟均已通过。
 
 ## 测试覆盖率
@@ -419,6 +419,6 @@ TunnelPad v1 与界面优化已经形成可运行功能，但当前工作树中�
 
 ## 关联 ADR、迁移、spec 或 issue
 
-- [TunnelPad v1](tunnelpad-v1.md)：现有执行器、配置、迁移和退出语义的背景事实源。
-- [TunnelPad 界面优化](tunnelpad-ui-refinements.md)：当前 UI 变更及菜单栏阶段 4 的事实源；本计划不替代它。
+- [TunnelPad v1](../20260829/tunnelpad-v1.md)：现有执行器、配置、迁移和退出语义的背景事实源。
+- [TunnelPad 界面优化](../20260829/tunnelpad-ui-refinements.md)：当前 UI 变更及菜单栏阶段 4 的事实源；本计划不替代它。
 - 暂无独立 ADR 或 migration；若重构改变公共契约或兼容策略，再新增对应文档。

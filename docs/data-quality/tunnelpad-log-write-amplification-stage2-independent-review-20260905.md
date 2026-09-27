@@ -3,7 +3,7 @@
 - 日期：2026-09-05
 - 阶段：阶段 2
 - 结论：通过；阶段 2 达到 `待实施` 标准，允许开始真实 Release 长期回归
-- 关联计划：[TunnelPad 日志低写放大与流式保留](../plans/tunnelpad-log-write-amplification.md)
+- 关联计划：[TunnelPad 日志低写放大与流式保留](../plans/20260905/tunnelpad-log-write-amplification.md)
 - 复核范围：仅复核阶段 2 的实施准入，不提前判定阶段 2 或专项计划完成
 
 ## 复核结论

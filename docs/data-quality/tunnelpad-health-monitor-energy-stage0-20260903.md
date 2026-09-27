@@ -2,7 +2,7 @@
 
 - 日期：2026-09-03
 - 类型：性能缺陷现状快照 + 恢复语义兼容探索
-- 关联计划：[TunnelPad 后台健康监测能耗优化](../plans/tunnelpad-health-monitor-energy.md)
+- 关联计划：[TunnelPad 后台健康监测能耗优化](../plans/20260904/tunnelpad-health-monitor-energy.md)
 - 结论：已复现固定约 10 秒 CPU 峰值，并与后台健康循环的完整状态快照调用链对应；本文件不是阶段准入或实施完成结论。
 
 ## 观察边界

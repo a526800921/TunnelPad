@@ -3,7 +3,7 @@
 - 日期：2026-09-02
 - 阶段：阶段 3
 - 复核者：Codex（独立只读复核）
-- 关联计划：[TunnelPad 隧道稳定性与健康恢复](../plans/tunnelpad-stability.md)
+- 关联计划：[TunnelPad 隧道稳定性与健康恢复](../plans/20260830/tunnelpad-stability.md)
 - Step 0 证据：[阶段 3 Step 0](tunnelpad-stability-stage3-step0-20260902.md)
 - 前置完成复核：[阶段 2 总体独立完成复核](tunnelpad-stability-stage2-independent-completion-review-20260902.md)
 - 结论：通过，阶段 3 达到“待实施”标准

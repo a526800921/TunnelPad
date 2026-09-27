@@ -1,7 +1,7 @@
 # TunnelPad Rust 迁移阶段 3 证据
 
 日期：2026-08-30
-计划：[tunnelpad-rust-migration.md](../plans/tunnelpad-rust-migration.md)
+计划：[tunnelpad-rust-migration.md](../plans/20260830/tunnelpad-rust-migration.md)
 基线：阶段 2 完成提交 `e599a58`；阶段 3 实施工作树起点为 `c2e11b5`
 
 ## 当前结论

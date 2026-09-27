@@ -1,7 +1,7 @@
 # TunnelPad 稳定性计划阶段 1 Step 0 证据
 
 - 日期：2026-09-02
-- 关联计划：[TunnelPad 隧道稳定性与健康恢复](../plans/tunnelpad-stability.md)
+- 关联计划：[TunnelPad 隧道稳定性与健康恢复](../plans/20260830/tunnelpad-stability.md)
 - 前置：[阶段 0 基线证据](tunnelpad-stability-stage0-20260901.md)；[阶段 0 独立准入复核](tunnelpad-stability-stage0-independent-review-contract-fixtures-20260901.md)
 - 基线类型：生产实现现状快照 + 高影响调用图复核 + 隔离故障注入矩阵
 - 结论：阶段 1 Step 0 已完成设计和基线登记；独立准入复核已通过。本文是实施前基线快照，生产实现结果另见[阶段 1 实施证据](tunnelpad-stability-stage1-implementation-20260902.md)。

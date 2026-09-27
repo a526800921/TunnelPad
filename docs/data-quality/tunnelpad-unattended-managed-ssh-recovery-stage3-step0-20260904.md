@@ -2,7 +2,7 @@
 
 - 日期：2026-09-04
 - 阶段：阶段 3
-- 计划：[TunnelPad 无人值守受管 SSH 收敛恢复](../plans/tunnelpad-unattended-managed-ssh-recovery.md)
+- 计划：[TunnelPad 无人值守受管 SSH 收敛恢复](../plans/20260904/tunnelpad-unattended-managed-ssh-recovery.md)
 - 前置：[阶段 2 独立完成复核](tunnelpad-unattended-managed-ssh-recovery-stage2-independent-completion-review-20260904.md)
 - 基线类型：真实 Release App、真实受管 launchd 隧道、真实 HTTP 探针和 ECS 只读前置的现场快照；故障注入前固定目标身份和回滚动作
 

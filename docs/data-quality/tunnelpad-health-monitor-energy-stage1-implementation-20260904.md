@@ -1,7 +1,7 @@
 # TunnelPad 后台健康监测能耗优化：阶段 1 实施证据
 
 - 日期：2026-09-04
-- 关联计划：[TunnelPad 后台健康监测能耗优化](../plans/tunnelpad-health-monitor-energy.md)
+- 关联计划：[TunnelPad 后台健康监测能耗优化](../plans/20260904/tunnelpad-health-monitor-energy.md)
 - 前置基线：[阶段 0 基线](tunnelpad-health-monitor-energy-stage0-20260903.md)
 - 当前状态：阶段 1 候选实现已完成隔离验证；阶段 2 真实能耗验收和全计划独立完成复核仍未完成
 

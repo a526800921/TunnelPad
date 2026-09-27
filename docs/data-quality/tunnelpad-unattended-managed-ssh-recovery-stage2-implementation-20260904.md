@@ -2,7 +2,7 @@
 
 - 日期：2026-09-04
 - 阶段：阶段 2
-- 计划：[TunnelPad 无人值守受管 SSH 收敛恢复](../plans/tunnelpad-unattended-managed-ssh-recovery.md)
+- 计划：[TunnelPad 无人值守受管 SSH 收敛恢复](../plans/20260904/tunnelpad-unattended-managed-ssh-recovery.md)
 - Step 0：[阶段 2 Step 0](tunnelpad-unattended-managed-ssh-recovery-stage2-step0-20260904.md)
 - 结论：Release/FFI/隔离 App 验证完成；不包含真实进程信号或真实活动隧道故障注入
 

@@ -1,7 +1,7 @@
 # TunnelPad 稳定性阶段 2 跨层状态一致性切片 Step 0
 
 - 日期：2026-09-02
-- 计划：[TunnelPad 隧道稳定性与健康恢复](../plans/tunnelpad-stability.md)
+- 计划：[TunnelPad 隧道稳定性与健康恢复](../plans/20260830/tunnelpad-stability.md)
 - 阶段：阶段 2
 - 切片：探针恢复、Rust 状态快照、生命周期操作与 UI 状态的迟到结果治理
 - Step 0 类型：架构探索基线 + 迟到结果故障注入

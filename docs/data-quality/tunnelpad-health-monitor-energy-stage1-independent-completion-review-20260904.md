@@ -1,7 +1,7 @@
 # TunnelPad 后台健康监测能耗优化：阶段 1 独立完成复核
 
 - 日期：2026-09-04
-- 关联计划：[TunnelPad 后台健康监测能耗优化](../plans/tunnelpad-health-monitor-energy.md)
+- 关联计划：[TunnelPad 后台健康监测能耗优化](../plans/20260904/tunnelpad-health-monitor-energy.md)
 - 复核类型：基于当前仓库、可复现命令和反向引用的独立只读完成复核
 
 ## 复核结论

@@ -1,10 +1,10 @@
 # 计划：TunnelPad 日志事件流与面板生命周期
 
-> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../PLAN_MAP.md#计划索引)为准。
+> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../../PLAN_MAP.md#计划索引)为准。
 
 - 前置：`tunnelpad-v1`、`tunnelpad-code-quality-refactor` 和 `tunnelpad-rust-migration` 阶段 5 已完成并关闭；阶段 0–3 均已独立复核并完成，日志事件流与面板生命周期计划已收口
 
-本计划独立处理 TunnelPad 的日志采集、内存缓存、追加事件和面板生命周期，不并入隧道探针健康恢复计划。阶段 0 已与稳定性计划阶段 0 并行完成基线和准入设计；Rust Core 迁移阶段 5 已完成并关闭，本计划阶段 1 已通过自身独立准入并完成 Core 实现，不与 Rust Core owner 并行修改共享执行器。日志计划阶段 0–3 已完成；稳定性计划的现行状态见[计划索引](../PLAN_MAP.md#计划索引)，双方后续若触及 `TunnelManager`、`TunnelRuntimeState`、主面板和共享测试目录，仍必须使用单一编辑窗口串行。当前实现范围先按 `launchd` owner 设计，未来 `app` 执行器重新开发后再补充对应日志采集范围。
+本计划独立处理 TunnelPad 的日志采集、内存缓存、追加事件和面板生命周期，不并入隧道探针健康恢复计划。阶段 0 已与稳定性计划阶段 0 并行完成基线和准入设计；Rust Core 迁移阶段 5 已完成并关闭，本计划阶段 1 已通过自身独立准入并完成 Core 实现，不与 Rust Core owner 并行修改共享执行器。日志计划阶段 0–3 已完成；稳定性计划的现行状态见[计划索引](../../PLAN_MAP.md#计划索引)，双方后续若触及 `TunnelManager`、`TunnelRuntimeState`、主面板和共享测试目录，仍必须使用单一编辑窗口串行。当前实现范围先按 `launchd` owner 设计，未来 `app` 执行器重新开发后再补充对应日志采集范围。
 
 ## 背景
 
@@ -39,13 +39,13 @@
 
 ### 已确认事实
 
-- 当前 `LogView` 在主窗口可见时每 2 秒执行 `load()`，读取日志文件末 500 行；只有完整文本或文件存在状态变化时才写入 `@State`。[LogView.swift](../../Sources/tunnelpad/LogView.swift)
-- 当前 `LogView` 使用 AppKit `NSTextView`，文本变化后由 `scrollToEndOfDocument` 实现自动滚动；自动滚动开关关闭时不主动滚动。[LogView.swift](../../Sources/tunnelpad/LogView.swift)
-- 阶段 5 删除前，v1 的 `app` 执行器曾使用 `FileHandle` 将 stdout/stderr 追加到日志文件；该历史语义保留在 [TunnelPad v1 计划](tunnelpad-v1.md#app-执行器语义)，不再作为当前源码路径。
-- 当前 `launchd` plist 把 stdout/stderr 指向同一日志文件，日志由 launchd 子进程直接写入。[LaunchdPlistRenderer.swift](../../Sources/TunnelPadCore/LaunchdPlistRenderer.swift)
-- 当前日志文件路径由 `TunnelPaths.logURL` 派生，已有退出、删除和日志清理语义；本计划不改变该路径。[TunnelPaths.swift](../../Sources/TunnelPadCore/TunnelPaths.swift)
+- 当前 `LogView` 在主窗口可见时每 2 秒执行 `load()`，读取日志文件末 500 行；只有完整文本或文件存在状态变化时才写入 `@State`。[LogView.swift](../../../Sources/tunnelpad/LogView.swift)
+- 当前 `LogView` 使用 AppKit `NSTextView`，文本变化后由 `scrollToEndOfDocument` 实现自动滚动；自动滚动开关关闭时不主动滚动。[LogView.swift](../../../Sources/tunnelpad/LogView.swift)
+- 阶段 5 删除前，v1 的 `app` 执行器曾使用 `FileHandle` 将 stdout/stderr 追加到日志文件；该历史语义保留在 [TunnelPad v1 计划](../20260829/tunnelpad-v1.md#app-执行器语义)，不再作为当前源码路径。
+- 当前 `launchd` plist 把 stdout/stderr 指向同一日志文件，日志由 launchd 子进程直接写入。[LaunchdPlistRenderer.swift](../../../Sources/TunnelPadCore/LaunchdPlistRenderer.swift)
+- 当前日志文件路径由 `TunnelPaths.logURL` 派生，已有退出、删除和日志清理语义；本计划不改变该路径。[TunnelPaths.swift](../../../Sources/TunnelPadCore/TunnelPaths.swift)
 - 用户于 2026-08-30 确认：每条隧道的本地持久日志文件最多保留最近 2000 行；超过上限淘汰更旧记录，不新增配置项。该上限与进程内内存缓存容量分开定义。
-- v1 已冻结“显示日志文件末 500 行、2 秒自动刷新”的旧行为；本计划是经确认的行为增强，不把新实现伪装成 v1 原有事实。[TunnelPad v1 计划](tunnelpad-v1.md)
+- v1 已冻结“显示日志文件末 500 行、2 秒自动刷新”的旧行为；本计划是经确认的行为增强，不把新实现伪装成 v1 原有事实。[TunnelPad v1 计划](../20260829/tunnelpad-v1.md)
 - Rust Core 迁移计划要求首轮保持日志行为 parity；阶段 5 完成后，本计划实现阶段继续以 Rust `launchd` owner 的已冻结契约为边界。[TunnelPad Rust Core 迁移](tunnelpad-rust-migration.md)
 
 ### 暂定假设与验证方式
@@ -160,7 +160,7 @@
 | 当前阻塞项 | 无 |
 | 最新独立准入复核 | 2026-09-01 通过：阶段 3 已完成标准；Rust/Swift 回归、Release 构建、隔离 App 验收、治理检查和反向引用均已具备证据 |
 
-阻塞说明：日志阶段 0–3 已完成；共享模块的历史 CRITICAL impact 及串行编辑边界保留，稳定性计划的当前状态见[计划索引](../PLAN_MAP.md#计划索引)。
+阻塞说明：日志阶段 0–3 已完成；共享模块的历史 CRITICAL impact 及串行编辑边界保留，稳定性计划的当前状态见[计划索引](../../PLAN_MAP.md#计划索引)。
 
 ### 实施步骤
 
@@ -172,9 +172,9 @@
 
 ### Step 0 证据
 
-基线类型：行为迁移现状快照 + 隔离文件 fixture。阶段 0 已证明当前 `LogView` 依赖 2 秒 Timer 和 `LogTail` 末 500 行读取，当前 `launchd` 通过同一日志文件承载 stdout/stderr，且当前物理文件没有 2000 行裁剪。`LogStage0BaselineTests` 专项 6/6、阶段 0 复核时 Swift Package 全量 89/89 通过，运行只使用临时目录；证据见[阶段 0 基线证据](../data-quality/tunnelpad-log-streaming-stage0-20260831.md)。
+基线类型：行为迁移现状快照 + 隔离文件 fixture。阶段 0 已证明当前 `LogView` 依赖 2 秒 Timer 和 `LogTail` 末 500 行读取，当前 `launchd` 通过同一日志文件承载 stdout/stderr，且当前物理文件没有 2000 行裁剪。`LogStage0BaselineTests` 专项 6/6、阶段 0 复核时 Swift Package 全量 89/89 通过，运行只使用临时目录；证据见[阶段 0 基线证据](../../data-quality/tunnelpad-log-streaming-stage0-20260831.md)。
 
-阶段 1 在该基线上冻结实现契约：每隧道内存缓存最多 500 条，单行最多 8000 字符；本地文件最多保留最近 2000 行；事件携带 tunnel ID、单调版本和完整快照；文件变化由后台采集器驱动，UI 不使用 Timer。阶段 1 实现专属 fixture 已验证分片 UTF-8、追加/截断/替换、缓存/文件上限、版本连续性、读取错误和多隧道隔离，不依赖真实隧道或真实日志文件。阶段 2 的生命周期与表示层证据见[阶段 2 Step 0 证据](../data-quality/tunnelpad-log-streaming-stage2-step0-20260901.md)。
+阶段 1 在该基线上冻结实现契约：每隧道内存缓存最多 500 条，单行最多 8000 字符；本地文件最多保留最近 2000 行；事件携带 tunnel ID、单调版本和完整快照；文件变化由后台采集器驱动，UI 不使用 Timer。阶段 1 实现专属 fixture 已验证分片 UTF-8、追加/截断/替换、缓存/文件上限、版本连续性、读取错误和多隧道隔离，不依赖真实隧道或真实日志文件。阶段 2 的生命周期与表示层证据见[阶段 2 Step 0 证据](../../data-quality/tunnelpad-log-streaming-stage2-step0-20260901.md)。
 
 ### 样本矩阵
 
@@ -199,18 +199,18 @@
 | 2026-09-01 | 阶段 1 实现 | 完成 `LogEventStore`：launchd 文件 watcher、分片 UTF-8、每隧道 500 条缓存、单行 8000 字符、文件最近 2000 行安全裁剪、版本化事件、错误/替换/重开恢复 | `Sources/TunnelPadCore/LogEventStore.swift`；`Tests/TunnelPadCoreTests/LogEventStoreTests.swift`；阶段 1 Step 0 证据 | 通过 | Codex |
 | 2026-09-01 | 阶段 1 回归 | `LogEventStoreTests` 10/10、Swift Package 全量 101/101 通过；测试只使用临时目录，未触碰真实隧道、launchd 或日志路径；补充锁占用延后裁剪 fixture | 阶段 1 Step 0 证据；阶段 2 Step 0 证据；测试输出 | 通过 | Codex |
 | 2026-09-01 | 阶段 2 实现 | `LogView` 改为按窗口可见性和隧道 ID 订阅 session；关闭取消订阅，重开先接快照，版本/隧道 guard 过滤迟到事件，保留自动滚动开关；manager 生命周期接入 log store | `Sources/tunnelpad/LogView.swift`；`Sources/TunnelPadCore/TunnelManager.swift`；阶段 2 Step 0 证据 | 通过 | Codex |
-| 2026-09-01 | 阶段 2 受控应用验收 | 隔离 debug App 观察 A 追加、B 切换、窗口关闭/重开、自动滚动关闭后的回看位置；发现并修复 WindowGroup 重开未恢复 `isMainWindowVisible` 的生命周期缺口；隔离 Release App 启动/签名/Info.plist 校验通过 | [阶段 2 Step 0 证据](../data-quality/tunnelpad-log-streaming-stage2-step0-20260901.md)；`Sources/tunnelpad/AppDelegate.swift`；`Sources/tunnelpad/MainPanelView.swift` | 通过 | Codex |
-| 2026-09-01 | 阶段 3 Step 0 与回归 | Rust 50+1 差分、Swift 101/101、Rust/Swift Release 构建、隔离 Release App 和发布门禁矩阵完成 | [阶段 3 Step 0 证据](../data-quality/tunnelpad-log-streaming-stage3-step0-20260901.md) | 通过 | Codex |
+| 2026-09-01 | 阶段 2 受控应用验收 | 隔离 debug App 观察 A 追加、B 切换、窗口关闭/重开、自动滚动关闭后的回看位置；发现并修复 WindowGroup 重开未恢复 `isMainWindowVisible` 的生命周期缺口；隔离 Release App 启动/签名/Info.plist 校验通过 | [阶段 2 Step 0 证据](../../data-quality/tunnelpad-log-streaming-stage2-step0-20260901.md)；`Sources/tunnelpad/AppDelegate.swift`；`Sources/tunnelpad/MainPanelView.swift` | 通过 | Codex |
+| 2026-09-01 | 阶段 3 Step 0 与回归 | Rust 50+1 差分、Swift 101/101、Rust/Swift Release 构建、隔离 Release App 和发布门禁矩阵完成 | [阶段 3 Step 0 证据](../../data-quality/tunnelpad-log-streaming-stage3-step0-20260901.md) | 通过 | Codex |
 
 ### 最近实施/验证记录
 
 | 日期 | 类型 | 动作/结果 | 证据 | 状态 | 记录者 |
 |---|---|---|---|---|---|
 | 2026-08-30 | 只读架构核对 | 查证当前 `LogView` 2 秒文件轮询、app/launchd 文件日志落点和无统一追加事件；未修改代码 | 当前源码与 GitNexus 探索结果 | 通过 | Codex |
-| 2026-08-31 | 阶段 0 基线核验 | 固定 HEAD、既有并行工作树变更边界、`LogView` Timer/末 500 行读取、launchd stdout/stderr 路由、Rust owner 和日志路径；未修改 Swift/Rust、配置或真实日志 | [阶段 0 基线证据](../data-quality/tunnelpad-log-streaming-stage0-20260831.md) | 通过（最小复现尚待执行） | Codex |
-| 2026-09-01 | 阶段 0 现状最小复现 | 新增隔离日志基线 fixture；专项 6/6、当前 Swift Package 全量 91/91 通过；追加、关闭重开、文件替换、UTF-8 无换行尾部、2000 行物理文件现状和 launchd 双流路径均已记录；未修改生产日志实现 | [阶段 0 基线证据](../data-quality/tunnelpad-log-streaming-stage0-20260831.md)；`Tests/TunnelPadCoreTests/LogStage0BaselineTests.swift` | 通过（阶段 0 已完成） | Codex |
+| 2026-08-31 | 阶段 0 基线核验 | 固定 HEAD、既有并行工作树变更边界、`LogView` Timer/末 500 行读取、launchd stdout/stderr 路由、Rust owner 和日志路径；未修改 Swift/Rust、配置或真实日志 | [阶段 0 基线证据](../../data-quality/tunnelpad-log-streaming-stage0-20260831.md) | 通过（最小复现尚待执行） | Codex |
+| 2026-09-01 | 阶段 0 现状最小复现 | 新增隔离日志基线 fixture；专项 6/6、当前 Swift Package 全量 91/91 通过；追加、关闭重开、文件替换、UTF-8 无换行尾部、2000 行物理文件现状和 launchd 双流路径均已记录；未修改生产日志实现 | [阶段 0 基线证据](../../data-quality/tunnelpad-log-streaming-stage0-20260831.md)；`Tests/TunnelPadCoreTests/LogStage0BaselineTests.swift` | 通过（阶段 0 已完成） | Codex |
 | 2026-09-01 | 阶段 0 独立准入复核 | 逐项核对目标、非目标、Step 0、样本矩阵、验证/回滚边界、Rust owner 与共享文件串行边界；确认阶段 0 关闭，阶段 1 进入待实施；500 条内存缓存上限已获用户确认 | 阶段 0 基线证据、6/6 隔离测试、全量 89/89 测试、GitNexus 影响结果、治理严格检查 | 通过（阶段 1 可开始；阶段 1 行为 fixture 仍需实际执行） | Codex（独立准入复核轮次） |
-| 2026-09-01 | 阶段 2 Step 0 | 核对 LogView 生命周期契约、Core 重开/多隧道 fixture、自动滚动分支和无 Timer 静态门禁；未将源码核对当作受控应用完成证据 | [阶段 2 Step 0 证据](../data-quality/tunnelpad-log-streaming-stage2-step0-20260901.md) | 通过（可继续受控应用冒烟） | Codex |
+| 2026-09-01 | 阶段 2 Step 0 | 核对 LogView 生命周期契约、Core 重开/多隧道 fixture、自动滚动分支和无 Timer 静态门禁；未将源码核对当作受控应用完成证据 | [阶段 2 Step 0 证据](../../data-quality/tunnelpad-log-streaming-stage2-step0-20260901.md) | 通过（可继续受控应用冒烟） | Codex |
 
 阶段证据只声明仓库内相对路径；最近实施/验证记录采用追加式记录，不能替代独立准入复核。
 
@@ -260,9 +260,9 @@
 | 日期 | 类型 | 阶段 | 结论 | 证据 | 复核者 |
 |---|---|---|---|---|---|
 | 2026-09-01 | 准入复核 | 阶段 1 | 通过；达到待实施标准 | 阶段 0 基线证据；专项 6/6 与当前全量 91/91 测试（阶段 0 复核时 89/89）；阶段 1 Step 0 契约证据；GitNexus 影响分析；`plan-governance-cli check . --strict-readiness` | Codex（独立准入复核轮次） |
-| 2026-09-01 | 实施/完成复核 | 阶段 2 | 通过；已完成 | `LogEventStoreTests` 10/10；Swift Package 全量 101/101；LogView 生命周期/自动滚动/无 Timer 静态契约；隔离 debug App 追加、关闭/重开、切换和滚动位置冒烟；[阶段 2 Step 0 证据](../data-quality/tunnelpad-log-streaming-stage2-step0-20260901.md) | Codex（阶段 2 独立完成复核轮次） |
-| 2026-09-01 | 准入复核 | 阶段 3 | 通过；达到待实施标准，尚未完成 | Rust 50+1 差分；Swift 101/101；Rust/Swift Release 构建；隔离 Release App 签名、Info.plist、启动和文件恢复；[阶段 3 Step 0 证据](../data-quality/tunnelpad-log-streaming-stage3-step0-20260901.md) | Codex（阶段 3 Step 0 复核轮次） |
-| 2026-09-01 | 实施/完成复核 | 阶段 3 | 通过；已完成 | Rust 50+1 差分；Swift 101/101（含锁失败重试）；Rust/Swift Release 构建；隔离 debug/Release App AX 冒烟；`codesign --verify --deep --strict`、`plutil -lint`、`plan-governance-cli check . --strict-readiness`、Graph validate、`git diff --check` 和反向引用核对；[阶段 3 Step 0 证据](../data-quality/tunnelpad-log-streaming-stage3-step0-20260901.md) | Codex（阶段 3 独立完成复核轮次） |
+| 2026-09-01 | 实施/完成复核 | 阶段 2 | 通过；已完成 | `LogEventStoreTests` 10/10；Swift Package 全量 101/101；LogView 生命周期/自动滚动/无 Timer 静态契约；隔离 debug App 追加、关闭/重开、切换和滚动位置冒烟；[阶段 2 Step 0 证据](../../data-quality/tunnelpad-log-streaming-stage2-step0-20260901.md) | Codex（阶段 2 独立完成复核轮次） |
+| 2026-09-01 | 准入复核 | 阶段 3 | 通过；达到待实施标准，尚未完成 | Rust 50+1 差分；Swift 101/101；Rust/Swift Release 构建；隔离 Release App 签名、Info.plist、启动和文件恢复；[阶段 3 Step 0 证据](../../data-quality/tunnelpad-log-streaming-stage3-step0-20260901.md) | Codex（阶段 3 Step 0 复核轮次） |
+| 2026-09-01 | 实施/完成复核 | 阶段 3 | 通过；已完成 | Rust 50+1 差分；Swift 101/101（含锁失败重试）；Rust/Swift Release 构建；隔离 debug/Release App AX 冒烟；`codesign --verify --deep --strict`、`plutil -lint`、`plan-governance-cli check . --strict-readiness`、Graph validate、`git diff --check` 和反向引用核对；[阶段 3 Step 0 证据](../../data-quality/tunnelpad-log-streaming-stage3-step0-20260901.md) | Codex（阶段 3 独立完成复核轮次） |
 
 ## 未决问题
 
@@ -285,10 +285,10 @@
 
 ## 关联 ADR、迁移、spec 或 issue
 
-- [TunnelPad v1 隧道管理应用](tunnelpad-v1.md)
+- [TunnelPad v1 隧道管理应用](../20260829/tunnelpad-v1.md)
 - [TunnelPad 代码质量重构](tunnelpad-code-quality-refactor.md)
 - [TunnelPad Rust Core 迁移](tunnelpad-rust-migration.md)
 - [TunnelPad 隧道稳定性与健康恢复](tunnelpad-stability.md)
-- [v1 阶段 2 功能与验收记录](../data-quality/tunnelpad-v1-stage2-features-20260829.md)
-- [阶段 0 基线证据](../data-quality/tunnelpad-log-streaming-stage0-20260831.md)
-- [ADR-0003：日志事件流、缓存和文件保留边界](../adr/0003-log-event-stream-and-retention.md)
+- [v1 阶段 2 功能与验收记录](../../data-quality/tunnelpad-v1-stage2-features-20260829.md)
+- [阶段 0 基线证据](../../data-quality/tunnelpad-log-streaming-stage0-20260831.md)
+- [ADR-0003：日志事件流、缓存和文件保留边界](../../adr/0003-log-event-stream-and-retention.md)

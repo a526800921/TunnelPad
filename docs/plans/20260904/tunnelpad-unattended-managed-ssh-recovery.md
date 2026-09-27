@@ -1,8 +1,8 @@
 # 计划：TunnelPad 无人值守受管 SSH 收敛恢复
 
-> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../PLAN_MAP.md#计划索引)为准。
+> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../../PLAN_MAP.md#计划索引)为准。
 
-- 前置：[TunnelPad 隧道稳定性与健康恢复](tunnelpad-stability.md)、[TunnelPad Rust Core 迁移](tunnelpad-rust-migration.md) 已完成；此前阶段 2 的[真实 App 验收](../data-quality/tunnelpad-health-monitor-energy-stage2-real-app-acceptance-20260904.md)仅作为本计划的背景证据，不构成前置依赖。共享 Rust 生命周期文件必须串行编辑。
+- 前置：[TunnelPad 隧道稳定性与健康恢复](../20260830/tunnelpad-stability.md)、[TunnelPad Rust Core 迁移](../20260830/tunnelpad-rust-migration.md) 已完成；此前阶段 2 的[真实 App 验收](../../data-quality/tunnelpad-health-monitor-energy-stage2-real-app-acceptance-20260904.md)仅作为本计划的背景证据，不构成前置依赖。共享 Rust 生命周期文件必须串行编辑。
 
 ## 需求探索
 
@@ -105,12 +105,12 @@
 | 字段 | 内容 |
 |---|---|
 | 准入状态 | 已完成 |
-| Step 0 | [阶段 3 Step 0](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-step0-20260904.md)已建立。 |
-| 样本矩阵 | [阶段 3 Step 0](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-step0-20260904.md)；覆盖实时 Release App、目标/非目标身份、ECS 只读前置、`SIGSTOP`、无人工观察、恢复、清理和治理。 |
+| Step 0 | [阶段 3 Step 0](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-step0-20260904.md)已建立。 |
+| 样本矩阵 | [阶段 3 Step 0](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-step0-20260904.md)；覆盖实时 Release App、目标/非目标身份、ECS 只读前置、`SIGSTOP`、无人工观察、恢复、清理和治理。 |
 | 验证方式 | 执行前实时身份核验；用户授权的单次 `SIGSTOP`；只读轮询目标 label/PID/HTTP 探针；Rust/Swift/差分回归、GitNexus `detect_changes()` 和严格治理检查。 |
 | 失败/回滚边界 | 身份未知/变化、状态异常、取消、ECS 前置失败或超时均 fail-closed；仅恢复目标隧道，不处理 `reverse-ssh`，不删除配置/凭证/远端规则。 |
 | 当前阻塞项 | 无 |
-| 最新独立准入复核 | [阶段 3 独立完成复核](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-independent-completion-review-20260904.md)已通过；阶段 3 已完成。历史准入记录仍保留在下方。 |
+| 最新独立准入复核 | [阶段 3 独立完成复核](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-independent-completion-review-20260904.md)已通过；阶段 3 已完成。历史准入记录仍保留在下方。 |
 
 阻塞说明：历史失败原因已修复，阶段 3 真实无人值守闭环和独立完成复核均已通过。
 
@@ -127,21 +127,21 @@
 
 ### 样本矩阵
 
-阶段 3 样本矩阵见[阶段 3 Step 0](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-step0-20260904.md)；阶段 1/2 历史实施证据见对应阶段文档。
+阶段 3 样本矩阵见[阶段 3 Step 0](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-step0-20260904.md)；阶段 1/2 历史实施证据见对应阶段文档。
 
 ### 阶段证据
 
-阶段 2 实施与完成证据见[阶段 2 实施证据](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage2-implementation-20260904.md)和[阶段 2 独立完成复核](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage2-independent-completion-review-20260904.md)；阶段 3 首次修复尝试见[失败记录](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-failure-20260904.md)，最终实施和真实验收见[阶段 3 实施证据](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-implementation-20260904.md)，独立完成结论见[阶段 3 独立完成复核](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-independent-completion-review-20260904.md)。
+阶段 2 实施与完成证据见[阶段 2 实施证据](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage2-implementation-20260904.md)和[阶段 2 独立完成复核](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage2-independent-completion-review-20260904.md)；阶段 3 首次修复尝试见[失败记录](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-failure-20260904.md)，最终实施和真实验收见[阶段 3 实施证据](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-implementation-20260904.md)，独立完成结论见[阶段 3 独立完成复核](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-independent-completion-review-20260904.md)。
 
 ### 验证方式
 
-- 阶段 1：已完成 Rust/Swift/差分回归、`git diff --check`、GitNexus `detect_changes()` 和严格治理检查；证据见[阶段 1 实施证据](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage1-implementation-20260904.md)。
+- 阶段 1：已完成 Rust/Swift/差分回归、`git diff --check`、GitNexus `detect_changes()` 和严格治理检查；证据见[阶段 1 实施证据](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage1-implementation-20260904.md)。
 - 阶段 2：已完成 Release 构建/签名/启动退出、Rust/Swift/差分回归、FFI 兼容性、自动冷却隔离验证、`git diff --check`、GitNexus `detect_changes()` 和严格治理检查。
 - 阶段 3：已由程序完成启动后稳定 `running + PID` 确认，并使用真实 Release App 对执行前已核验的受管 PID 做一次不人工释放的无人值守故障注入；目标恢复、非目标隔离、回归、Release 和治理证据均已复核。
 
 ### 测试覆盖率
 
-测试通过：阶段 1/2 的实施与验证见对应证据；阶段 3 最终 Rust 为 76 项单元测试、差分 1 项，Swift 为 139/139，Release 构建/签名校验和真实无人值守尾检见[阶段 3 实施证据](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-implementation-20260904.md)。
+测试通过：阶段 1/2 的实施与验证见对应证据；阶段 3 最终 Rust 为 76 项单元测试、差分 1 项，Swift 为 139/139，Release 构建/签名校验和真实无人值守尾检见[阶段 3 实施证据](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-implementation-20260904.md)。
 
 ### 完成条件
 
@@ -160,12 +160,12 @@
 | 字段 | 内容 |
 |---|---|
 | 准入状态 | 实施中 |
-| Step 0 | [阶段 1 Step 0](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage1-step0-20260904.md)；阶段 0 的身份边界与 CRITICAL impact 已先通过独立准入。 |
-| 样本矩阵 | [阶段 1 Step 0](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage1-step0-20260904.md)；10 行矩阵覆盖信号、PID 复用、取消、冷却、FFI 和多隧道隔离。 |
+| Step 0 | [阶段 1 Step 0](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage1-step0-20260904.md)；阶段 0 的身份边界与 CRITICAL impact 已先通过独立准入。 |
+| 样本矩阵 | [阶段 1 Step 0](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage1-step0-20260904.md)；10 行矩阵覆盖信号、PID 复用、取消、冷却、FFI 和多隧道隔离。 |
 | 验证方式 | Rust 单元/差分、Swift 专项与全量回归、GitNexus 影响复核、治理检查；阶段 3 才允许用户授权的真实 App 验收。 |
 | 失败/回滚边界 | 实施失败仅回滚本计划独立提交；不改配置、真实 plist、ECS 规则或凭证。 |
 | 当前阻塞项 | 无；阶段 1 已通过独立准入，当前正在实现与隔离验证；阶段 2/3 仍须各自 Step 0 和独立准入。 |
-| 最新独立准入复核 | [阶段 1 独立准入复核](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage1-independent-review-20260904.md)已通过，达到待实施标准；仅限阶段 1。 |
+| 最新独立准入复核 | [阶段 1 独立准入复核](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage1-independent-review-20260904.md)已通过，达到待实施标准；仅限阶段 1。 |
 
 ### 实施步骤
 
@@ -196,16 +196,16 @@
 
 | 日期 | 类型 | 动作/结果 | 证据 | 状态 | 记录者 |
 |---|---|---|---|---|---|
-| 2026-09-04 | 阶段 0 Step 0 基线 | 核对 Rust `LaunchCtlExecutor`、`LaunchdExecuting`、`CoreOwner.stop`、健康恢复上限和信号入口；Rust 66+1、Swift 139 回归通过；未发送信号或改真实资源 | [阶段 0 Step 0](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage0-step0-20260904.md) | 已建立；阶段 0 独立准入已通过 | Codex |
-| 2026-09-04 | 阶段 0 独立准入复核 | 复核目标、范围、libproc 身份字段、失败语义、8 行矩阵、CRITICAL 影响和回滚边界；冻结“读取失败不发信号”、当前 Core owner 内存冷却和阶段 3 真实验收边界 | [阶段 0 独立准入复核](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage0-independent-review-20260904.md) | 通过，达到待实施标准；不代表阶段 1 已准入或已实现 | Codex |
-| 2026-09-04 | 阶段 1 Step 0 与独立准入复核 | 登记 Rust 身份/信号抽象、bootout-first 收敛、PID 复用/取消/FFI 反证、Swift 30 分钟内存冷却和 10 行隔离矩阵；Rust 66+1、Swift 139 基线回归通过 | [阶段 1 Step 0](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage1-step0-20260904.md)；[阶段 1 独立准入复核](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage1-independent-review-20260904.md) | 通过，进入实施；不代表功能完成或真实环境验收 | Codex |
-| 2026-09-04 | 阶段 1 实施与独立完成复核 | Rust 受管身份/有界信号收敛、初始未加载和状态异常 fail-closed、SSH/非 SSH 路由、Swift 30 分钟自动冷却；Rust 72+1、Swift 139、GitNexus 8 文件/79 符号/23 流程 `critical`、治理检查通过 | [阶段 1 实施证据](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage1-implementation-20260904.md)；[阶段 1 独立完成复核](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage1-independent-completion-review-20260904.md) | 阶段 1 完成；不代表阶段 2 准入或真实环境验收 | Codex |
-| 2026-09-04 | 阶段 2 Step 0 与独立准入复核 | 冻结 Release/FFI/隔离 App 样本矩阵、失败/回滚边界和阶段 3 后置真实信号边界 | [阶段 2 Step 0](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage2-step0-20260904.md)；[阶段 2 独立准入复核](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage2-independent-review-20260904.md) | 通过，达到待实施标准；不代表阶段 2 已完成或真实环境已验收 | Codex |
-| 2026-09-04 | 阶段 2 实施与独立完成复核 | Release/FFI/隔离 App 验证、包签名/资源、启动退出和全量回归通过；未发送真实进程信号 | [阶段 2 实施证据](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage2-implementation-20260904.md)；[阶段 2 独立完成复核](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage2-independent-completion-review-20260904.md) | 阶段 2 完成；不代表阶段 3 真实环境已验收 | Codex |
-| 2026-09-04 | 阶段 3 Step 0 与独立准入复核 | 固定真实 Release App、目标/非目标隧道、实时身份核验、单次 `SIGSTOP`、无人工观察、恢复和回滚矩阵 | [阶段 3 Step 0](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-step0-20260904.md)；[阶段 3 独立准入复核](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-independent-review-20260904.md) | 通过，达到待实施标准；不代表阶段 3 已完成 | Codex |
-| 2026-09-04 | 阶段 3 首次真实验收 | 目标 PID 实时核验通过后注入 `SIGSTOP`；目标 HTTP 变为 `000`，但健康循环卡在无超时 `launchctl print`，90 秒内未进入自动恢复；随后人工 `SIGCONT` 回滚 | [阶段 3 首次验收失败](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-failure-20260904.md) | 未通过；当前阶段阻塞，未计入完成 | Codex |
-| 2026-09-04 | 阶段 3 修复与真实验收 | 为状态查询、bootout 和启动后重读加入有界收敛；修正 `proc_pidpath` 有效字节长度读取；Release App 中对目标 PID 单次 `SIGSTOP` 后无人工释放，约 50 秒由 launchd 拉起新 PID `64393`，约 60 秒 HTTP 恢复 `401/satisfied`，非目标 `reverse-ssh` PID `63343` 未变 | [阶段 3 实施证据](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-implementation-20260904.md) | 通过；阶段 3 实施完成 | Codex |
-| 2026-09-04 | 阶段 3 独立完成复核 | 独立核对身份保护、有界 stop、无人工恢复、探针成功、非目标隔离、ECS 只读边界、Rust/Swift 回归、Release 和治理门禁 | [阶段 3 独立完成复核](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-independent-completion-review-20260904.md) | 通过；阶段 3 完成，本计划关闭 | Codex（独立只读复核） |
+| 2026-09-04 | 阶段 0 Step 0 基线 | 核对 Rust `LaunchCtlExecutor`、`LaunchdExecuting`、`CoreOwner.stop`、健康恢复上限和信号入口；Rust 66+1、Swift 139 回归通过；未发送信号或改真实资源 | [阶段 0 Step 0](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage0-step0-20260904.md) | 已建立；阶段 0 独立准入已通过 | Codex |
+| 2026-09-04 | 阶段 0 独立准入复核 | 复核目标、范围、libproc 身份字段、失败语义、8 行矩阵、CRITICAL 影响和回滚边界；冻结“读取失败不发信号”、当前 Core owner 内存冷却和阶段 3 真实验收边界 | [阶段 0 独立准入复核](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage0-independent-review-20260904.md) | 通过，达到待实施标准；不代表阶段 1 已准入或已实现 | Codex |
+| 2026-09-04 | 阶段 1 Step 0 与独立准入复核 | 登记 Rust 身份/信号抽象、bootout-first 收敛、PID 复用/取消/FFI 反证、Swift 30 分钟内存冷却和 10 行隔离矩阵；Rust 66+1、Swift 139 基线回归通过 | [阶段 1 Step 0](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage1-step0-20260904.md)；[阶段 1 独立准入复核](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage1-independent-review-20260904.md) | 通过，进入实施；不代表功能完成或真实环境验收 | Codex |
+| 2026-09-04 | 阶段 1 实施与独立完成复核 | Rust 受管身份/有界信号收敛、初始未加载和状态异常 fail-closed、SSH/非 SSH 路由、Swift 30 分钟自动冷却；Rust 72+1、Swift 139、GitNexus 8 文件/79 符号/23 流程 `critical`、治理检查通过 | [阶段 1 实施证据](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage1-implementation-20260904.md)；[阶段 1 独立完成复核](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage1-independent-completion-review-20260904.md) | 阶段 1 完成；不代表阶段 2 准入或真实环境验收 | Codex |
+| 2026-09-04 | 阶段 2 Step 0 与独立准入复核 | 冻结 Release/FFI/隔离 App 样本矩阵、失败/回滚边界和阶段 3 后置真实信号边界 | [阶段 2 Step 0](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage2-step0-20260904.md)；[阶段 2 独立准入复核](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage2-independent-review-20260904.md) | 通过，达到待实施标准；不代表阶段 2 已完成或真实环境已验收 | Codex |
+| 2026-09-04 | 阶段 2 实施与独立完成复核 | Release/FFI/隔离 App 验证、包签名/资源、启动退出和全量回归通过；未发送真实进程信号 | [阶段 2 实施证据](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage2-implementation-20260904.md)；[阶段 2 独立完成复核](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage2-independent-completion-review-20260904.md) | 阶段 2 完成；不代表阶段 3 真实环境已验收 | Codex |
+| 2026-09-04 | 阶段 3 Step 0 与独立准入复核 | 固定真实 Release App、目标/非目标隧道、实时身份核验、单次 `SIGSTOP`、无人工观察、恢复和回滚矩阵 | [阶段 3 Step 0](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-step0-20260904.md)；[阶段 3 独立准入复核](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-independent-review-20260904.md) | 通过，达到待实施标准；不代表阶段 3 已完成 | Codex |
+| 2026-09-04 | 阶段 3 首次真实验收 | 目标 PID 实时核验通过后注入 `SIGSTOP`；目标 HTTP 变为 `000`，但健康循环卡在无超时 `launchctl print`，90 秒内未进入自动恢复；随后人工 `SIGCONT` 回滚 | [阶段 3 首次验收失败](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-failure-20260904.md) | 未通过；当前阶段阻塞，未计入完成 | Codex |
+| 2026-09-04 | 阶段 3 修复与真实验收 | 为状态查询、bootout 和启动后重读加入有界收敛；修正 `proc_pidpath` 有效字节长度读取；Release App 中对目标 PID 单次 `SIGSTOP` 后无人工释放，约 50 秒由 launchd 拉起新 PID `64393`，约 60 秒 HTTP 恢复 `401/satisfied`，非目标 `reverse-ssh` PID `63343` 未变 | [阶段 3 实施证据](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-implementation-20260904.md) | 通过；阶段 3 实施完成 | Codex |
+| 2026-09-04 | 阶段 3 独立完成复核 | 独立核对身份保护、有界 stop、无人工恢复、探针成功、非目标隔离、ECS 只读边界、Rust/Swift 回归、Release 和治理门禁 | [阶段 3 独立完成复核](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-independent-completion-review-20260904.md) | 通过；阶段 3 完成，本计划关闭 | Codex（独立只读复核） |
 
 ### 验证方式
 
@@ -216,7 +216,7 @@
 
 ### 测试覆盖率
 
-测试通过：阶段 0/1 的基线、实现和复核见对应证据；阶段 2 的 Release/FFI/隔离 App 证据见对应文档。阶段 3 最终通过 Rust 76+1、Swift 139/139、Release 构建/签名和真实无人值守验收；证据见[阶段 3 实施证据](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-implementation-20260904.md)和[阶段 3 独立完成复核](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-independent-completion-review-20260904.md)，真实验收不替代任一隔离反证。
+测试通过：阶段 0/1 的基线、实现和复核见对应证据；阶段 2 的 Release/FFI/隔离 App 证据见对应文档。阶段 3 最终通过 Rust 76+1、Swift 139/139、Release 构建/签名和真实无人值守验收；证据见[阶段 3 实施证据](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-implementation-20260904.md)和[阶段 3 独立完成复核](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-independent-completion-review-20260904.md)，真实验收不替代任一隔离反证。
 
 ### 完成条件
 
@@ -233,20 +233,20 @@
 | 日期 | 2026-09-04 |
 | 阶段 | 阶段 3 |
 | 结论 | 通过，阶段 3 完成；本计划关闭 |
-| 证据 | [阶段 3 独立完成复核](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-independent-completion-review-20260904.md)；实施与真实验收见[阶段 3 实施证据](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-implementation-20260904.md) |
+| 证据 | [阶段 3 独立完成复核](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-independent-completion-review-20260904.md)；实施与真实验收见[阶段 3 实施证据](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-implementation-20260904.md) |
 | 复核者 | Codex（独立只读完成复核） |
 
 ## 独立复核记录
 
 | 日期 | 类型 | 阶段 | 结论 | 证据 | 复核者 |
 |---|---|---|---|---|---|
-| 2026-09-04 | 独立准入复核 | 阶段 0 | 通过，达到待实施标准 | [阶段 0 独立准入复核](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage0-independent-review-20260904.md)；不代表阶段 1 已准入或已实现 | Codex（独立只读复核） |
-| 2026-09-04 | 独立准入复核 | 阶段 1 | 通过，达到待实施标准 | [阶段 1 独立准入复核](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage1-independent-review-20260904.md)；不代表阶段 1 已完成或真实环境已验收 | Codex（独立只读复核） |
-| 2026-09-04 | 独立完成复核 | 阶段 1 | 通过，阶段 1 完成 | [阶段 1 独立完成复核](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage1-independent-completion-review-20260904.md)；不代表阶段 2 已准入或真实环境已验收 | Codex（独立只读复核） |
-| 2026-09-04 | 独立准入复核 | 阶段 2 | 通过，达到待实施标准 | [阶段 2 独立准入复核](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage2-independent-review-20260904.md)；不代表阶段 2 已完成或阶段 3 真实环境已验收 | Codex（独立只读复核） |
-| 2026-09-04 | 独立完成复核 | 阶段 2 | 通过，阶段 2 完成 | [阶段 2 独立完成复核](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage2-independent-completion-review-20260904.md)；不代表阶段 3 已准入或真实环境已验收 | Codex（独立只读复核） |
-| 2026-09-04 | 独立准入复核 | 阶段 3 | 通过，达到待实施标准 | [阶段 3 独立准入复核](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-independent-review-20260904.md)；不代表阶段 3 已完成 | Codex（独立只读复核） |
-| 2026-09-04 | 独立完成复核 | 阶段 3 | 通过，阶段 3 完成；本计划关闭 | [阶段 3 独立完成复核](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-independent-completion-review-20260904.md)；真实实施与验收见[阶段 3 实施证据](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-implementation-20260904.md) | Codex（独立只读复核） |
+| 2026-09-04 | 独立准入复核 | 阶段 0 | 通过，达到待实施标准 | [阶段 0 独立准入复核](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage0-independent-review-20260904.md)；不代表阶段 1 已准入或已实现 | Codex（独立只读复核） |
+| 2026-09-04 | 独立准入复核 | 阶段 1 | 通过，达到待实施标准 | [阶段 1 独立准入复核](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage1-independent-review-20260904.md)；不代表阶段 1 已完成或真实环境已验收 | Codex（独立只读复核） |
+| 2026-09-04 | 独立完成复核 | 阶段 1 | 通过，阶段 1 完成 | [阶段 1 独立完成复核](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage1-independent-completion-review-20260904.md)；不代表阶段 2 已准入或真实环境已验收 | Codex（独立只读复核） |
+| 2026-09-04 | 独立准入复核 | 阶段 2 | 通过，达到待实施标准 | [阶段 2 独立准入复核](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage2-independent-review-20260904.md)；不代表阶段 2 已完成或阶段 3 真实环境已验收 | Codex（独立只读复核） |
+| 2026-09-04 | 独立完成复核 | 阶段 2 | 通过，阶段 2 完成 | [阶段 2 独立完成复核](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage2-independent-completion-review-20260904.md)；不代表阶段 3 已准入或真实环境已验收 | Codex（独立只读复核） |
+| 2026-09-04 | 独立准入复核 | 阶段 3 | 通过，达到待实施标准 | [阶段 3 独立准入复核](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-independent-review-20260904.md)；不代表阶段 3 已完成 | Codex（独立只读复核） |
+| 2026-09-04 | 独立完成复核 | 阶段 3 | 通过，阶段 3 完成；本计划关闭 | [阶段 3 独立完成复核](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-independent-completion-review-20260904.md)；真实实施与验收见[阶段 3 实施证据](../../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-implementation-20260904.md) | Codex（独立只读复核） |
 
 ## 未决问题
 
@@ -266,6 +266,6 @@
 
 ## 关联 ADR、迁移、spec 或 issue
 
-- [Rust Core 作为唯一生命周期 owner](../adr/0001-rust-core-single-owner.md)
-- [TunnelPad Rust Core owner 切换迁移说明](../migrations/tunnelpad-rust-owner-cutover.md)
-- [此前阶段 2 真实 App 验收](../data-quality/tunnelpad-health-monitor-energy-stage2-real-app-acceptance-20260904.md)
+- [Rust Core 作为唯一生命周期 owner](../../adr/0001-rust-core-single-owner.md)
+- [TunnelPad Rust Core owner 切换迁移说明](../../migrations/tunnelpad-rust-owner-cutover.md)
+- [此前阶段 2 真实 App 验收](../../data-quality/tunnelpad-health-monitor-energy-stage2-real-app-acceptance-20260904.md)

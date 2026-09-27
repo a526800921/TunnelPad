@@ -3,7 +3,7 @@
 - 日期：2026-09-02
 - 阶段：阶段 2
 - 复核者：Codex（独立只读复核）
-- 关联计划：[TunnelPad 隧道稳定性与健康恢复](../plans/tunnelpad-stability.md)
+- 关联计划：[TunnelPad 隧道稳定性与健康恢复](../plans/20260830/tunnelpad-stability.md)
 - 阶段证据：[阶段 2 真实 App 受控验收](tunnelpad-stability-stage2-real-app-acceptance-20260902.md)
 - 结论：通过，阶段 2 已完成；阶段 3 保持设计中
 

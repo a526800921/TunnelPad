@@ -1,7 +1,7 @@
 # TunnelPad 日志事件流与面板生命周期阶段 0 基线证据
 
 - 日期：2026-08-31；追加验证：2026-09-01
-- 关联计划：[TunnelPad 日志事件流与面板生命周期](../plans/tunnelpad-log-streaming.md)
+- 关联计划：[TunnelPad 日志事件流与面板生命周期](../plans/20260830/tunnelpad-log-streaming.md)
 - 基线类型：行为迁移现状快照 + 隔离最小复现
 - 结论：源码、日志路由、Rust owner 和并行工作树边界已完成只读核验；现状基线最小复现和阶段 0 独立准入复核已通过，阶段 1 Step 0 证据已单独落盘
 

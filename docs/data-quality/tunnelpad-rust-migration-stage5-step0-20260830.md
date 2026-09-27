@@ -4,7 +4,7 @@
 - 阶段：阶段 5
 - 类型：行为迁移与真实 `launchd` 受控基线
 - 结论：Step 0、阶段 5 实施、删除后回归、最终反向引用审计和独立收尾复核均已完成
-- 关联计划：[TunnelPad Rust Core 迁移](../plans/tunnelpad-rust-migration.md)
+- 关联计划：[TunnelPad Rust Core 迁移](../plans/20260830/tunnelpad-rust-migration.md)
 
 ## 当前配置基线
 

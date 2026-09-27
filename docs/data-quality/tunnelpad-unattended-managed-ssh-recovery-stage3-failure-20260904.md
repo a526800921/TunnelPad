@@ -2,7 +2,7 @@
 
 - 日期：2026-09-04
 - 阶段：阶段 3
-- 计划：[TunnelPad 无人值守受管 SSH 收敛恢复](../plans/tunnelpad-unattended-managed-ssh-recovery.md)
+- 计划：[TunnelPad 无人值守受管 SSH 收敛恢复](../plans/20260904/tunnelpad-unattended-managed-ssh-recovery.md)
 - 结论：未通过；已安全回滚冻结状态，不构成完成证据
 
 ## 现场结果

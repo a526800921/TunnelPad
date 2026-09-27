@@ -1,7 +1,7 @@
 # TunnelPad 日志保留与能耗回归修复：阶段 2 Step 0
 
 - 日期：2026-09-05（Asia/Shanghai）
-- 关联计划：[日志保留与能耗回归修复](../plans/tunnelpad-log-retention-energy-regression.md)
+- 关联计划：[日志保留与能耗回归修复](../plans/20260905/tunnelpad-log-retention-energy-regression.md)
 - 阶段：阶段 2
 - 基线类型：当前工作树 arm64 Release App + 本机真实 API/launchd + 用户授权的真实隧道日志增长窗口
 - 状态：准入材料完成，等待独立准入复核

@@ -3,7 +3,7 @@
 - 日期：2026-09-05
 - 阶段：阶段 2
 - 基线类型：真实 Release App + 本机 launchd 隧道 + 日志文件元数据 + 本地 API
-- 关联计划：[TunnelPad 日志低写放大与流式保留](../plans/tunnelpad-log-write-amplification.md)
+- 关联计划：[TunnelPad 日志低写放大与流式保留](../plans/20260905/tunnelpad-log-write-amplification.md)
 
 ## Step 0 输入与边界
 

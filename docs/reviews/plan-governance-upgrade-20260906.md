@@ -19,7 +19,7 @@
 | 新规范与旧计划 | 新计划使用同源风险模板；已完成计划保持旧独立历史；移除计划头部重复状态元数据，最后更新归地图 | [规范适用与历史兼容](../PLAN_MAP.md#规范适用与历史兼容)；14 个计划顶部说明 |
 | 当前阻塞表达 | 当前摘要的无阻塞字段统一为 `无`，补充说明移表外；不删除历史失败或改成自验通过 | `git diff -- docs/plans`；各计划最新独立结论和独立记录 |
 | 能耗旧阻塞 | 将已由无人值守专项解决的信号处置问题同步为已完成；保留首轮人工释放、隔夜失败和后续恢复结论 | [无人值守阶段 3 独立完成复核](../data-quality/tunnelpad-unattended-managed-ssh-recovery-stage3-independent-completion-review-20260904.md)；[能耗日志修复后独立完成复核](../data-quality/tunnelpad-health-monitor-energy-post-log-retention-fix-independent-completion-review-20260905.md) |
-| 索引与契约漂移 | 移除推荐顺序中的旧待实施时态和字段级重复；迁移状态改引用地图；ADR 保留策略链接已完成后续计划 | [迁移说明](../migrations/tunnelpad-rust-owner-cutover.md)；[ADR-0003](../adr/0003-log-event-stream-and-retention.md)；[低写放大不变量](../plans/tunnelpad-log-write-amplification.md#不变量) |
+| 索引与契约漂移 | 移除推荐顺序中的旧待实施时态和字段级重复；迁移状态改引用地图；ADR 保留策略链接已完成后续计划 | [迁移说明](../migrations/tunnelpad-rust-owner-cutover.md)；[ADR-0003](../adr/0003-log-event-stream-and-retention.md)；[低写放大不变量](../plans/20260905/tunnelpad-log-write-amplification.md#不变量) |
 | 验收闭环 | 新增工作按实际风险和用户可观察场景验收；本次不追溯编造用户接受、性能测量或新的业务完成证据 | [规范适用与历史兼容](../PLAN_MAP.md#规范适用与历史兼容) |
 
 ## 验证记录

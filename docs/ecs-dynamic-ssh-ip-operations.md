@@ -1,6 +1,6 @@
 # ECS 动态 SSH 公网 IP 同步操作说明
 
-本说明对应 [ECS 动态 SSH 公网 IP 同步计划](plans/ecs-dynamic-ssh-ip.md) 的阶段 1。命令是独立的本机前置工具，当前不会被 TunnelPad 启动链路自动调用。
+本说明对应 [ECS 动态 SSH 公网 IP 同步计划](plans/20260829/ecs-dynamic-ssh-ip.md) 的阶段 1。命令是独立的本机前置工具，当前不会被 TunnelPad 启动链路自动调用。
 
 ## 首次准备
 

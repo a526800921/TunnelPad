@@ -1,0 +1,16 @@
+{
+  "plan": "tunnelpad-stability",
+  "phase": "-",
+  "status": "已完成",
+  "plan_path": "docs/plans/20260830/tunnelpad-stability.md",
+  "plan_map_path": "docs/PLAN_MAP.md",
+  "plan_sha256": "a826f6966de80c97e1408b6698a0478463834ee3da14f9d3e5d7086ab733d0ec",
+  "plan_map_sha256": "01626407673bb5881f3f0174fd792ef7ff04d3403fb05c5b5e82ba272d3c9a70",
+  "created_at": "2026-09-27T09:53:41Z",
+  "created_by": "plan-governance",
+  "reason": "阶段完成快照",
+  "purpose": "phase_completion",
+  "snapshot_id": "20260927T095341Z-a2015f03",
+  "supersedes": "docs/attestations/tunnelpad-stability--phase_completion--20260902T093610Z-bdbe1569.json",
+  "review_status": "needs_review"
+}

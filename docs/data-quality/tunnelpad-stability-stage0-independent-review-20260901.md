@@ -3,7 +3,7 @@
 - 日期：2026-09-01
 - 阶段：阶段 0
 - 复核者：Codex（独立只读复核）
-- 关联计划：[TunnelPad 隧道稳定性与健康恢复](../plans/tunnelpad-stability.md)
+- 关联计划：[TunnelPad 隧道稳定性与健康恢复](../plans/20260830/tunnelpad-stability.md)
 - 复核范围：当前仓库内容、阶段 0 基线证据、`PLAN_MAP`、4 项 Swift 基线测试、1 项 Rust `bootout` 基线测试，以及日志计划完成后的共享边界。
 - 结论：未达到“待实施”标准。
 

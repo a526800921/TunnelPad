@@ -4,7 +4,7 @@
 - 阶段：阶段 2
 - 切片：ECS 自动恢复切片
 - 复核者：Codex（独立只读复核）
-- 关联计划：[TunnelPad 隧道稳定性与健康恢复](../plans/tunnelpad-stability.md)
+- 关联计划：[TunnelPad 隧道稳定性与健康恢复](../plans/20260830/tunnelpad-stability.md)
 - Step 0 证据：[阶段 2 Step 0 基线](tunnelpad-stability-stage2-step0-20260902.md)
 - 结论：达到“待实施”标准（仅限 ECS 自动恢复切片）
 

@@ -1,6 +1,6 @@
 # 计划：TunnelPad Rust Core 迁移
 
-> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../PLAN_MAP.md#计划索引)为准。
+> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../../PLAN_MAP.md#计划索引)为准。
 
 - 前置：`tunnelpad-v1`、`tunnelpad-ui-refinements` 与 `tunnelpad-code-quality-refactor` 已完成；阶段 0–5 已完成
 
@@ -32,8 +32,8 @@ TunnelPad 当前是 SwiftUI/AppKit + SwiftPM 的 macOS 菜单栏应用。Swift U
 
 - 用户确认采用“保留 SwiftUI/AppKit，只替换 `TunnelPadCore`”的迁移范围。
 - 阶段 0–4 用户确认并验证“C ABI 主路径 + Swift Core 可回退”；阶段 5 用户确认继续采用进程内 C ABI，但验证完成后不保留 Swift fallback，sidecar 不纳入本次实施。
-- 阶段 0 的历史快照曾记录仓库没有 `Cargo.toml`、Rust 源码或 Rust target；该事实已被阶段 1–4 的 Rust 产物取代，现有 Swift 产品目标仍见 [Package.swift](../../Package.swift)。
-- 当前 Swift Core 已完成内部职责拆分；现有行为契约由 [TunnelPad v1 计划](tunnelpad-v1.md)、[界面优化计划](tunnelpad-ui-refinements.md) 和 [代码质量重构计划](tunnelpad-code-quality-refactor.md) 共同约束。
+- 阶段 0 的历史快照曾记录仓库没有 `Cargo.toml`、Rust 源码或 Rust target；该事实已被阶段 1–4 的 Rust 产物取代，现有 Swift 产品目标仍见 [Package.swift](../../../Package.swift)。
+- 当前 Swift Core 已完成内部职责拆分；现有行为契约由 [TunnelPad v1 计划](../20260829/tunnelpad-v1.md)、[界面优化计划](../20260829/tunnelpad-ui-refinements.md) 和 [代码质量重构计划](tunnelpad-code-quality-refactor.md) 共同约束。
 - 阶段 0 的历史自动化基线为 `swift test` 74/74；Debug/Release 构建和 `.app` 签名校验已通过，且已在 HEAD `64e126fa` 复验（见阶段 0 基线证据）。阶段 4 增加 shadow bridge 测试后，当前 `swift test` 门禁为 80/80。
 - 本机已安装 `rustc 1.96.0` 与 `cargo 1.96.0`；当前 Swift 为 Apple Swift 6.3.3，目标为 arm64 macOS。
 
@@ -153,11 +153,11 @@ TunnelPad 当前是 SwiftUI/AppKit + SwiftPM 的 macOS 菜单栏应用。Swift U
 
 ### Step 0 证据
 
-类型：行为迁移与架构 owner 切换基线。阶段 4 已完成的 ABI/动态库/Release/AX 证据作为 Rust 产物基线；本阶段新增本机配置、真实 `launchd` 状态和受控启停证据见[阶段 5 Step 0 证据](../data-quality/tunnelpad-rust-migration-stage5-step0-20260830.md)。
+类型：行为迁移与架构 owner 切换基线。阶段 4 已完成的 ABI/动态库/Release/AX 证据作为 Rust 产物基线；本阶段新增本机配置、真实 `launchd` 状态和受控启停证据见[阶段 5 Step 0 证据](../../data-quality/tunnelpad-rust-migration-stage5-step0-20260830.md)。
 
 已确认的本机基线：当前配置包含 `admin-tunnel` 和 `reverse-ssh` 两条隧道，均为 `launchd`；没有 `app` 配置。历史 Swift 路径对 `admin-tunnel` 的一次受控 bootout/bootstrap 闭环成功，旧 PID 已退出，新 PID 正常运行，`reverse-ssh` 保持运行；后续 Rust owner 直接重启验证中的 HTTP 探针返回 `401`，属于配置声明的期望状态 `200,401`。
 
-已完成的 Step 0 证据：owner ABI/配置/并发隔离原型、Swift FFI 适配、Rust/Swift smoke、51 个 Rust 单测 + 1 个差分测试、Swift 80/80、fake `launchd` 成功/未加载/命令失败/spawn 失败矩阵、generation 失配前置拒绝、取消与生命周期并行、正在运行子进程终止和 restart bootstrap 取消、Release `.app` 构建与签名、当前两条真实隧道的 Rust owner 状态/重启验证、真实 Release App 的信号退出清理，以及独立临时 home 下的 App AX/退出清理和 app 入口隐藏回归；`admin-tunnel` 的配置探针也已验证为期望状态。生产信号处理已绑定 `TunnelManager` 持有的同一 Rust owner 句柄，未再创建第二套 Swift 生命周期 owner；阶段 5 独立准入复核已于 2026-08-30 通过，删除后回归、反向引用审计和最新打包 App 实机验证已于 2026-08-31 收尾，细节见[阶段 5 Step 0 证据](../data-quality/tunnelpad-rust-migration-stage5-step0-20260830.md)。
+已完成的 Step 0 证据：owner ABI/配置/并发隔离原型、Swift FFI 适配、Rust/Swift smoke、51 个 Rust 单测 + 1 个差分测试、Swift 80/80、fake `launchd` 成功/未加载/命令失败/spawn 失败矩阵、generation 失配前置拒绝、取消与生命周期并行、正在运行子进程终止和 restart bootstrap 取消、Release `.app` 构建与签名、当前两条真实隧道的 Rust owner 状态/重启验证、真实 Release App 的信号退出清理，以及独立临时 home 下的 App AX/退出清理和 app 入口隐藏回归；`admin-tunnel` 的配置探针也已验证为期望状态。生产信号处理已绑定 `TunnelManager` 持有的同一 Rust owner 句柄，未再创建第二套 Swift 生命周期 owner；阶段 5 独立准入复核已于 2026-08-30 通过，删除后回归、反向引用审计和最新打包 App 实机验证已于 2026-08-31 收尾，细节见[阶段 5 Step 0 证据](../../data-quality/tunnelpad-rust-migration-stage5-step0-20260830.md)。
 
 ### 样本矩阵
 
@@ -210,7 +210,7 @@ TunnelPad 当前是 SwiftUI/AppKit + SwiftPM 的 macOS 菜单栏应用。Swift U
 
 ## 阶段 4 完成摘要
 
-阶段 4 的进程内 shadow bridge、动态库自包含、固定时区、Release/AX 和回退路径证据保留在[阶段 4 Step 0 证据](../data-quality/tunnelpad-rust-migration-stage4-step0-20260830.md)及历史独立复核记录中。阶段 4 的 Swift 唯一 owner 和 fallback 是历史基线，不是阶段 5 的最终架构。
+阶段 4 的进程内 shadow bridge、动态库自包含、固定时区、Release/AX 和回退路径证据保留在[阶段 4 Step 0 证据](../../data-quality/tunnelpad-rust-migration-stage4-step0-20260830.md)及历史独立复核记录中。阶段 4 的 Swift 唯一 owner 和 fallback 是历史基线，不是阶段 5 的最终架构。
 
 ## 历史契约冻结记录（阶段 1–4）
 
@@ -330,9 +330,9 @@ C ABI 最小原型在阶段 1 必须逐项证明以下门槛；任一不成立�
 
 ## 关联计划、ADR、迁移、spec 或 issue
 
-- [TunnelPad v1](tunnelpad-v1.md)：配置、执行器、迁移接管和退出语义的现有行为事实源。
-- [TunnelPad 界面优化](tunnelpad-ui-refinements.md)：当前 SwiftUI/AppKit 用户操作与 UI/AX 契约。
+- [TunnelPad v1](../20260829/tunnelpad-v1.md)：配置、执行器、迁移接管和退出语义的现有行为事实源。
+- [TunnelPad 界面优化](../20260829/tunnelpad-ui-refinements.md)：当前 SwiftUI/AppKit 用户操作与 UI/AX 契约。
 - [TunnelPad 代码质量重构](tunnelpad-code-quality-refactor.md)：Rust 迁移的前置内部边界与测试基线。
-- [ADR-0001：Rust Core 作为唯一生命周期 owner](../adr/0001-rust-core-single-owner.md)
-- [ADR-0002：App bundle ID 迁移至 com.jafish.tunnelpad.app](../adr/0002-app-bundle-id-migration.md)：阶段 5 产物的 App 身份与菜单栏宿主记录迁移决策。
-- [Rust Core owner 切换迁移说明](../migrations/tunnelpad-rust-owner-cutover.md)
+- [ADR-0001：Rust Core 作为唯一生命周期 owner](../../adr/0001-rust-core-single-owner.md)
+- [ADR-0002：App bundle ID 迁移至 com.jafish.tunnelpad.app](../../adr/0002-app-bundle-id-migration.md)：阶段 5 产物的 App 身份与菜单栏宿主记录迁移决策。
+- [Rust Core owner 切换迁移说明](../../migrations/tunnelpad-rust-owner-cutover.md)

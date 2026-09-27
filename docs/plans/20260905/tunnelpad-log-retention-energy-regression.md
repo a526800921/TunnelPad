@@ -1,6 +1,6 @@
 # 计划：TunnelPad 日志保留与能耗回归修复
 
-> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../PLAN_MAP.md#计划索引)为准。
+> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../../PLAN_MAP.md#计划索引)为准。
 
 - 前置：`tunnelpad-log-streaming` 已完成，`ADR-0003` 已冻结日志路径、2000 行文件保留、锁失败保留原文件和 Rust Core owner 边界。本计划独立承接隔夜能耗复验暴露的日志保留实现缺陷；后台健康监测能耗计划是本计划完成后重新复验的消费者，不是本计划的实现前置。
 
@@ -8,9 +8,9 @@
 
 2026-09-05 的隔夜真实 Release App 复验仍出现约 10 秒一次的 CPU/能耗峰值。运行产物已核验为 2026-09-04 新构建，两个真实隧道保持运行；两次进程栈采样均指向 `LogEventStore.ensureWatcher → fileDidChange → refreshState → LogFileRetention.trimIfNeeded`，而不是旧版健康循环或未重新打包。
 
-真实 `admin-tunnel.log` 约 8.4 MB，包含约 83,516 个 CRLF 行；当前 `trimIfNeeded` 每次文件变化都会读取整个文件，转换为 `String` 后以 `"\n"` 切分。真实 CRLF 输入被漏计，2000 行裁剪门槛失效，小量追加仍会触发大文件全文扫描。完整证据保留在[隔夜复验与诊断](../data-quality/tunnelpad-health-monitor-energy-overnight-revalidation-20260905.md)。
+真实 `admin-tunnel.log` 约 8.4 MB，包含约 83,516 个 CRLF 行；当前 `trimIfNeeded` 每次文件变化都会读取整个文件，转换为 `String` 后以 `"\n"` 切分。真实 CRLF 输入被漏计，2000 行裁剪门槛失效，小量追加仍会触发大文件全文扫描。完整证据保留在[隔夜复验与诊断](../../data-quality/tunnelpad-health-monitor-energy-overnight-revalidation-20260905.md)。
 
-此计划与已完成的[日志事件流与面板生命周期计划](tunnelpad-log-streaming.md)保持边界关系：已完成计划的 2000 行保留目标仍然有效，但本计划负责修复其在真实 CRLF 大日志输入下的实现缺口；不把已完成计划改写为未完成。
+此计划与已完成的[日志事件流与面板生命周期计划](../20260830/tunnelpad-log-streaming.md)保持边界关系：已完成计划的 2000 行保留目标仍然有效，但本计划负责修复其在真实 CRLF 大日志输入下的实现缺口；不把已完成计划改写为未完成。
 
 ## 需求探索
 
@@ -93,12 +93,12 @@
 | 字段 | 内容 |
 |---|---|
 | 准入状态 | 已完成 |
-| Step 0 | 阶段 0：[阶段 0 独立准入复核](../data-quality/tunnelpad-log-retention-energy-regression-stage0-independent-review-20260905.md)；阶段 2：[阶段 2 Step 0](../data-quality/tunnelpad-log-retention-energy-regression-stage2-step0-20260905.md) |
-| 样本矩阵 | 下表 1–7 和[阶段 2 Step 0](../data-quality/tunnelpad-log-retention-energy-regression-stage2-step0-20260905.md)的 R1–R6 均包含输入、命令、预期、失败判定和输出位置 |
+| Step 0 | 阶段 0：[阶段 0 独立准入复核](../../data-quality/tunnelpad-log-retention-energy-regression-stage0-independent-review-20260905.md)；阶段 2：[阶段 2 Step 0](../../data-quality/tunnelpad-log-retention-energy-regression-stage2-step0-20260905.md) |
+| 样本矩阵 | 下表 1–7 和[阶段 2 Step 0](../../data-quality/tunnelpad-log-retention-energy-regression-stage2-step0-20260905.md)的 R1–R6 均包含输入、命令、预期、失败判定和输出位置 |
 | 验证方式 | 阶段 1 使用隔离 Swift fixture、读取范围/字节计数、锁回归、Swift/Rust/Release；阶段 2 使用用户授权的真实 Release App、CPU/能耗、日志元数据、API、launchd 和进程栈 |
 | 失败/回滚边界 | 阶段 1 失败时保留原文件并延后裁剪，代码按独立提交回滚；阶段 2 失败时停止真实扩大范围，只停止本机隧道/App，不改配置、ECS、凭证、真实日志或非目标隧道 |
 | 当前阻塞项 | 无 |
-| 最新独立准入复核 | 通过并完成；[阶段 2 独立完成复核](../data-quality/tunnelpad-log-retention-energy-regression-stage2-independent-completion-review-20260905.md)确认阶段 2 完成，本计划关闭 |
+| 最新独立准入复核 | 通过并完成；[阶段 2 独立完成复核](../../data-quality/tunnelpad-log-retention-energy-regression-stage2-independent-completion-review-20260905.md)确认阶段 2 完成，本计划关闭 |
 
 阻塞说明：R1–R6 真实验收已完成
 
@@ -108,7 +108,7 @@
 2. 用户已确认逻辑行定义和推荐的字节级有界扫描方向：LF/CRLF 计行，裸 CR 暂按正文保留，10 秒周期不调整。
 3. 阶段 0 独立复核已确认下方矩阵、验证方式、失败/回滚边界和 `PLAN_MAP.md` 同步情况。
 4. 阶段 1 实施前保持单一编辑窗口，先记录 `trimIfNeeded` 的 CRITICAL upstream impact，再修改实现和隔离测试。
-5. 阶段 1 已完成，证据见[阶段 1 实施证据](../data-quality/tunnelpad-log-retention-energy-regression-stage1-implementation-20260905.md)；定向测试 15/15、Swift 全量 144/144、Rust 76+1、Release 构建和无隧道真实启动均通过。
+5. 阶段 1 已完成，证据见[阶段 1 实施证据](../../data-quality/tunnelpad-log-retention-energy-regression-stage1-implementation-20260905.md)；定向测试 15/15、Swift 全量 144/144、Rust 76+1、Release 构建和无隧道真实启动均通过。
 6. 阶段 2 Step 0 和独立准入已通过；R1–R6 真实 Release 验证已完成，真实隧道只使用既有配置，结束后按边界清理本机资源。
 
 ### Step 0 证据
@@ -119,7 +119,7 @@
 
 | # | 输入/基线 | 可执行命令或操作 | 预期结果 | 失败判定 | 输出位置 |
 |---|---|---|---|---|---|
-| 1 | 现有真实缺陷基线 | 查阅[隔夜复验与诊断](../data-quality/tunnelpad-health-monitor-energy-overnight-revalidation-20260905.md)；复核 `top -l 66 -pid <PID> -stats pid,cpu,threads,time -s 1`、`sample` 与日志元数据记录 | 能复现“约 10 秒峰值 + watcher/trimIfNeeded 热点”的证据链，且产物核验通过 | 把旧包、健康探针或日志输入之外的原因当作已证实根因 | 本计划 Step 0；隔夜诊断 |
+| 1 | 现有真实缺陷基线 | 查阅[隔夜复验与诊断](../../data-quality/tunnelpad-health-monitor-energy-overnight-revalidation-20260905.md)；复核 `top -l 66 -pid <PID> -stats pid,cpu,threads,time -s 1`、`sample` 与日志元数据记录 | 能复现“约 10 秒峰值 + watcher/trimIfNeeded 热点”的证据链，且产物核验通过 | 把旧包、健康探针或日志输入之外的原因当作已证实根因 | 本计划 Step 0；隔夜诊断 |
 | 2 | LF 2001 行、末尾换行 | 新增隔离测试后运行 `swift test --filter LogEventStoreTests` | 保留最近 2000 个逻辑行，最旧记录被淘汰，现有 LF 行为不回归 | 行数错误、最新记录丢失、路径或文件身份异常 | 阶段 0/1 实现证据 |
 | 3 | CRLF 2001 行、末尾换行 | 新增隔离测试后运行 `swift test --filter LogEventStoreTests` | CRLF 每个换行计一行，保留最近 2000 行，不把 CR 计成额外正文或行 | 仍漏计 CRLF、文件超过上限不裁剪或正文改变 | 阶段 0/1 实现证据 |
 | 4 | 混合 LF/CRLF、末行无换行、空文件和裸 CR | 新增隔离测试后运行 `swift test --filter LogEventStoreTests` | 已冻结的逻辑行规则稳定；末行可恢复；空文件不产生伪造内容 | 版本/快照异常、末行丢失、裸 CR 被无意解释为新语义 | 阶段 0/1 实现证据 |
@@ -131,22 +131,22 @@
 
 | 日期 | 类型 | 动作/结果 | 证据 | 状态 | 记录者 |
 |---|---|---|---|---|---|
-| 2026-09-05 | 计划建立/现状基线登记 | 根据隔夜真实复验新增独立日志修复计划；登记新产物、周期峰值、watcher/裁剪栈和 CRLF 大日志，不修改实现 | [隔夜复验与诊断](../data-quality/tunnelpad-health-monitor-energy-overnight-revalidation-20260905.md) | 进行中；阶段 0 待独立准入 | Codex |
-| 2026-09-05 | 阶段 0 独立准入复核 | 核对现状证据、用户推荐方案、样本矩阵、验证/回滚边界、依赖同步和 CRITICAL impact；阶段 0 关闭，阶段 1 达到待实施标准 | [阶段 0 独立准入复核](../data-quality/tunnelpad-log-retention-energy-regression-stage0-independent-review-20260905.md) | 通过；阶段 1 待实施 | Codex（独立准入复核） |
-| 2026-09-05 | 阶段 1 实施与回归 | 完成字节级尾部扫描、CRLF 正确计行、原位回滚保护和隔离矩阵；Swift 15/15、144/144，Rust 76+1，Release/签名和无隧道真实启动通过 | [阶段 1 实施证据](../data-quality/tunnelpad-log-retention-energy-regression-stage1-implementation-20260905.md) | 通过；阶段 1 完成 | Codex |
-| 2026-09-05 | 阶段 2 Step 0 与独立准入 | 固定真实 Release 长期回归矩阵、启动/停止顺序、失败/回滚边界；未把真实隧道验证预先写成通过 | [阶段 2 Step 0](../data-quality/tunnelpad-log-retention-energy-regression-stage2-step0-20260905.md)；[阶段 2 独立准入复核](../data-quality/tunnelpad-log-retention-energy-regression-stage2-independent-review-20260905.md) | 通过；阶段 2 准入完成 | Codex（独立准入复核） |
-| 2026-09-05 | 阶段 2 真实 Release 验收 | 两隧道运行约 46 秒；日志均保持 2000 LF；CPU 最高约 7.7%；Activity Monitor 即时能耗约 2.0；状态、运行栈和退出清理通过 | [阶段 2 实施与真实验收证据](../data-quality/tunnelpad-log-retention-energy-regression-stage2-implementation-20260905.md) | 通过；等待独立完成复核 | Codex |
-| 2026-09-05 | 阶段 2 独立完成复核 | 逐条核对日志行语义、尾部读取、失败边界、回归、Release、真实两隧道窗口和清理；完成条件满足 | [阶段 2 独立完成复核](../data-quality/tunnelpad-log-retention-energy-regression-stage2-independent-completion-review-20260905.md) | 通过；阶段 2 完成，本计划关闭 | Codex（独立只读完成复核） |
+| 2026-09-05 | 计划建立/现状基线登记 | 根据隔夜真实复验新增独立日志修复计划；登记新产物、周期峰值、watcher/裁剪栈和 CRLF 大日志，不修改实现 | [隔夜复验与诊断](../../data-quality/tunnelpad-health-monitor-energy-overnight-revalidation-20260905.md) | 进行中；阶段 0 待独立准入 | Codex |
+| 2026-09-05 | 阶段 0 独立准入复核 | 核对现状证据、用户推荐方案、样本矩阵、验证/回滚边界、依赖同步和 CRITICAL impact；阶段 0 关闭，阶段 1 达到待实施标准 | [阶段 0 独立准入复核](../../data-quality/tunnelpad-log-retention-energy-regression-stage0-independent-review-20260905.md) | 通过；阶段 1 待实施 | Codex（独立准入复核） |
+| 2026-09-05 | 阶段 1 实施与回归 | 完成字节级尾部扫描、CRLF 正确计行、原位回滚保护和隔离矩阵；Swift 15/15、144/144，Rust 76+1，Release/签名和无隧道真实启动通过 | [阶段 1 实施证据](../../data-quality/tunnelpad-log-retention-energy-regression-stage1-implementation-20260905.md) | 通过；阶段 1 完成 | Codex |
+| 2026-09-05 | 阶段 2 Step 0 与独立准入 | 固定真实 Release 长期回归矩阵、启动/停止顺序、失败/回滚边界；未把真实隧道验证预先写成通过 | [阶段 2 Step 0](../../data-quality/tunnelpad-log-retention-energy-regression-stage2-step0-20260905.md)；[阶段 2 独立准入复核](../../data-quality/tunnelpad-log-retention-energy-regression-stage2-independent-review-20260905.md) | 通过；阶段 2 准入完成 | Codex（独立准入复核） |
+| 2026-09-05 | 阶段 2 真实 Release 验收 | 两隧道运行约 46 秒；日志均保持 2000 LF；CPU 最高约 7.7%；Activity Monitor 即时能耗约 2.0；状态、运行栈和退出清理通过 | [阶段 2 实施与真实验收证据](../../data-quality/tunnelpad-log-retention-energy-regression-stage2-implementation-20260905.md) | 通过；等待独立完成复核 | Codex |
+| 2026-09-05 | 阶段 2 独立完成复核 | 逐条核对日志行语义、尾部读取、失败边界、回归、Release、真实两隧道窗口和清理；完成条件满足 | [阶段 2 独立完成复核](../../data-quality/tunnelpad-log-retention-energy-regression-stage2-independent-completion-review-20260905.md) | 通过；阶段 2 完成，本计划关闭 | Codex（独立只读完成复核） |
 
 ### 验证方式
 
 - 阶段 0：只读复核现有证据，完成行语义、成本指标、样本矩阵、失败/回滚边界、GitNexus impact 和治理同步；不运行会改写真实日志的命令。
-- 阶段 1：[阶段 1 实施证据](../data-quality/tunnelpad-log-retention-energy-regression-stage1-implementation-20260905.md)中的隔离测试、Swift/Rust 回归、Release 构建、签名和无隧道真实启动；并执行 `git diff --check`、`plan-governance-cli check .` 和 GitNexus `detect_changes()`。
-- 阶段 2：[阶段 2 实施与真实验收证据](../data-quality/tunnelpad-log-retention-energy-regression-stage2-implementation-20260905.md)记录用户授权的真实 Release App 两隧道窗口；核对 CPU 周期峰值、Activity Monitor、日志逻辑行数/大小、两个隧道状态、本机 API、进程栈、清理和非目标隔离，并回填后台健康监测能耗计划的最新独立复核。
+- 阶段 1：[阶段 1 实施证据](../../data-quality/tunnelpad-log-retention-energy-regression-stage1-implementation-20260905.md)中的隔离测试、Swift/Rust 回归、Release 构建、签名和无隧道真实启动；并执行 `git diff --check`、`plan-governance-cli check .` 和 GitNexus `detect_changes()`。
+- 阶段 2：[阶段 2 实施与真实验收证据](../../data-quality/tunnelpad-log-retention-energy-regression-stage2-implementation-20260905.md)记录用户授权的真实 Release App 两隧道窗口；核对 CPU 周期峰值、Activity Monitor、日志逻辑行数/大小、两个隧道状态、本机 API、进程栈、清理和非目标隔离，并回填后台健康监测能耗计划的最新独立复核。
 
 ### 测试覆盖率
 
-阶段 1 已记录 LF、CRLF、混合换行、末行无换行、空/小文件、裸 CR、2000 行边界、大日志尾部扫描、锁失败、文件替换和增量采集结果；Swift 专项测试 15/15 通过、全量测试 144/144 通过，Rust 测试 76+1 通过。阶段 2 已补充真实日志追加/裁剪、两隧道状态、CPU/Activity Monitor、运行栈和退出清理；并发/截断异常仍遵守失败保留原文件边界。测试覆盖率证据见[阶段 1 实施证据](../data-quality/tunnelpad-log-retention-energy-regression-stage1-implementation-20260905.md)、[阶段 2 真实验收证据](../data-quality/tunnelpad-log-retention-energy-regression-stage2-implementation-20260905.md)和[阶段 2 独立完成复核](../data-quality/tunnelpad-log-retention-energy-regression-stage2-independent-completion-review-20260905.md)。
+阶段 1 已记录 LF、CRLF、混合换行、末行无换行、空/小文件、裸 CR、2000 行边界、大日志尾部扫描、锁失败、文件替换和增量采集结果；Swift 专项测试 15/15 通过、全量测试 144/144 通过，Rust 测试 76+1 通过。阶段 2 已补充真实日志追加/裁剪、两隧道状态、CPU/Activity Monitor、运行栈和退出清理；并发/截断异常仍遵守失败保留原文件边界。测试覆盖率证据见[阶段 1 实施证据](../../data-quality/tunnelpad-log-retention-energy-regression-stage1-implementation-20260905.md)、[阶段 2 真实验收证据](../../data-quality/tunnelpad-log-retention-energy-regression-stage2-implementation-20260905.md)和[阶段 2 独立完成复核](../../data-quality/tunnelpad-log-retention-energy-regression-stage2-independent-completion-review-20260905.md)。
 
 ### 完成条件
 
@@ -165,25 +165,25 @@
 | 日期 | 2026-09-05 |
 | 阶段 | 阶段 2 |
 | 结论 | 通过；阶段 2 完成，本计划关闭 |
-| 证据 | [阶段 2 独立完成复核](../data-quality/tunnelpad-log-retention-energy-regression-stage2-independent-completion-review-20260905.md)；[阶段 2 实施与真实验收证据](../data-quality/tunnelpad-log-retention-energy-regression-stage2-implementation-20260905.md) |
+| 证据 | [阶段 2 独立完成复核](../../data-quality/tunnelpad-log-retention-energy-regression-stage2-independent-completion-review-20260905.md)；[阶段 2 实施与真实验收证据](../../data-quality/tunnelpad-log-retention-energy-regression-stage2-implementation-20260905.md) |
 | 复核者 | Codex（基于当前仓库、回归输出、真实 Release 窗口和清理结果的独立只读完成复核） |
 
 ## 独立复核记录
 
 | 日期 | 类型 | 阶段 | 结论 | 证据 | 复核者 |
 |---|---|---|---|---|---|
-| 2026-09-05 | 计划建立后的准入状态登记 | 阶段 0 | 待复核；不授予阶段 1 实施准入 | [隔夜复验与诊断](../data-quality/tunnelpad-health-monitor-energy-overnight-revalidation-20260905.md)；本计划 Step 0 与样本矩阵 | 尚未进行独立复核 |
-| 2026-09-05 | 阶段 0 独立准入复核 | 阶段 1 | 通过；达到待实施标准 | [阶段 0 独立准入复核](../data-quality/tunnelpad-log-retention-energy-regression-stage0-independent-review-20260905.md)；CRITICAL upstream impact 已登记 | Codex（独立准入复核） |
-| 2026-09-05 | 阶段 1 实施复核 | 阶段 1 | 通过；阶段 1 完成 | [阶段 1 实施证据](../data-quality/tunnelpad-log-retention-energy-regression-stage1-implementation-20260905.md)；Swift/Rust/Release/真实无隧道控制组均通过 | Codex（基于证据的只读复核） |
-| 2026-09-05 | 阶段 2 独立准入复核 | 阶段 2 | 通过；达到“待实施”标准 | [阶段 2 独立准入复核](../data-quality/tunnelpad-log-retention-energy-regression-stage2-independent-review-20260905.md)；R3–R6 随后已实际执行 | Codex（独立准入复核） |
-| 2026-09-05 | 阶段 2 独立完成复核 | 阶段 2 | 通过；阶段 2 完成，本计划关闭 | [阶段 2 独立完成复核](../data-quality/tunnelpad-log-retention-energy-regression-stage2-independent-completion-review-20260905.md)；真实两隧道窗口、日志 2000 LF、CPU/能耗和清理均通过 | Codex（独立只读完成复核） |
+| 2026-09-05 | 计划建立后的准入状态登记 | 阶段 0 | 待复核；不授予阶段 1 实施准入 | [隔夜复验与诊断](../../data-quality/tunnelpad-health-monitor-energy-overnight-revalidation-20260905.md)；本计划 Step 0 与样本矩阵 | 尚未进行独立复核 |
+| 2026-09-05 | 阶段 0 独立准入复核 | 阶段 1 | 通过；达到待实施标准 | [阶段 0 独立准入复核](../../data-quality/tunnelpad-log-retention-energy-regression-stage0-independent-review-20260905.md)；CRITICAL upstream impact 已登记 | Codex（独立准入复核） |
+| 2026-09-05 | 阶段 1 实施复核 | 阶段 1 | 通过；阶段 1 完成 | [阶段 1 实施证据](../../data-quality/tunnelpad-log-retention-energy-regression-stage1-implementation-20260905.md)；Swift/Rust/Release/真实无隧道控制组均通过 | Codex（基于证据的只读复核） |
+| 2026-09-05 | 阶段 2 独立准入复核 | 阶段 2 | 通过；达到“待实施”标准 | [阶段 2 独立准入复核](../../data-quality/tunnelpad-log-retention-energy-regression-stage2-independent-review-20260905.md)；R3–R6 随后已实际执行 | Codex（独立准入复核） |
+| 2026-09-05 | 阶段 2 独立完成复核 | 阶段 2 | 通过；阶段 2 完成，本计划关闭 | [阶段 2 独立完成复核](../../data-quality/tunnelpad-log-retention-energy-regression-stage2-independent-completion-review-20260905.md)；真实两隧道窗口、日志 2000 LF、CPU/能耗和清理均通过 | Codex（独立只读完成复核） |
 
 ## 未决问题
 
 | 问题 | 推荐方案 | 是否阻塞当前阶段 | 状态 |
 |---|---|---|---|
 | 裸 CR 是否应作为独立行边界 | 保持兼容：LF/CRLF 计行，裸 CR 先按正文保留；若样本证明现有日志需要其他语义，先更新计划和 ADR | 否 | 已确认（用户按推荐方案执行） |
-| 裁剪检查何时触发、读取上界如何证明 | 隔离大文件读取计数 fixture 与[阶段 2 独立完成复核](../data-quality/tunnelpad-log-retention-energy-regression-stage2-independent-completion-review-20260905.md)已覆盖本计划范围；后续触发策略由[低写放大计划](tunnelpad-log-write-amplification.md#不变量)细化 | 否 | 已完成 |
+| 裁剪检查何时触发、读取上界如何证明 | 隔离大文件读取计数 fixture 与[阶段 2 独立完成复核](../../data-quality/tunnelpad-log-retention-energy-regression-stage2-independent-completion-review-20260905.md)已覆盖本计划范围；后续触发策略由[低写放大计划](tunnelpad-log-write-amplification.md#不变量)细化 | 否 | 已完成 |
 | 是否需要新增 ADR | 先在 ADR-0003 既有边界内实现；只有路径、原位身份、并发失败或可观察保留语义变化时新增 ADR | 否 | 暂不需要 |
 | 真实长期能耗验收是否由本计划独立关闭 | 本计划提供日志实现和真实回归证据；后台健康监测计划追加自己的最新独立完成复核并负责关闭自身阶段 2 | 否 | 已由能耗计划追加独立完成复核 |
 
@@ -197,8 +197,8 @@
 
 ## 关联 ADR、迁移、spec 或 issue
 
-- [TunnelPad 日志事件流与面板生命周期](tunnelpad-log-streaming.md)
-- [TunnelPad Rust Core 迁移](tunnelpad-rust-migration.md)
-- [ADR-0003：日志事件流、缓存和文件保留边界](../adr/0003-log-event-stream-and-retention.md)
-- [TunnelPad Rust Core owner 切换迁移说明](../migrations/tunnelpad-rust-owner-cutover.md)
-- [隔夜复验与诊断](../data-quality/tunnelpad-health-monitor-energy-overnight-revalidation-20260905.md)
+- [TunnelPad 日志事件流与面板生命周期](../20260830/tunnelpad-log-streaming.md)
+- [TunnelPad Rust Core 迁移](../20260830/tunnelpad-rust-migration.md)
+- [ADR-0003：日志事件流、缓存和文件保留边界](../../adr/0003-log-event-stream-and-retention.md)
+- [TunnelPad Rust Core owner 切换迁移说明](../../migrations/tunnelpad-rust-owner-cutover.md)
+- [隔夜复验与诊断](../../data-quality/tunnelpad-health-monitor-energy-overnight-revalidation-20260905.md)

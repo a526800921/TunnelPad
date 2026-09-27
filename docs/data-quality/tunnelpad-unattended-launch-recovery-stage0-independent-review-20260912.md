@@ -4,7 +4,7 @@
 - 复核者：`stage0_preflight_review`，独立只读子代理，未参与设计文档/测试编写。
 - 方式/风险：独立 / 高影响。
 - 结论：**通过；阶段 0 无未解决的必须修复项。**
-- 受审范围：[专项计划](../plans/tunnelpad-unattended-launch-recovery.md)阶段 0 契约、[实际基线](tunnelpad-unattended-launch-recovery-stage0-step0-20260912.md)、`Tests/TunnelPadCoreTests/UnattendedLaunchStage0Tests.swift` 与 `Tests/update-ecs-ssh-ip-test.sh` 新增反证。
+- 受审范围：[专项计划](../plans/20260912/tunnelpad-unattended-launch-recovery.md)阶段 0 契约、[实际基线](tunnelpad-unattended-launch-recovery-stage0-step0-20260912.md)、`Tests/TunnelPadCoreTests/UnattendedLaunchStage0Tests.swift` 与 `Tests/update-ecs-ssh-ip-test.sh` 新增反证。
 - 本文件由主代理依据复核者返回结果落档，不把记录者伪称为复核者。
 
 ## 发现与闭环

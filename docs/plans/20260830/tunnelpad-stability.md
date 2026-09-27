@@ -1,6 +1,6 @@
 # 计划：TunnelPad 隧道稳定性与健康恢复
 
-> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../PLAN_MAP.md#计划索引)为准。
+> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../../PLAN_MAP.md#计划索引)为准。
 
 - 前置：`tunnelpad-v1`、`tunnelpad-code-quality-refactor`、`tunnelpad-rust-migration` 阶段 5 和 `ecs-dynamic-ssh-ip` 阶段 2 已完成并关闭；阶段 0–3 已完成，阶段 2 的四个稳定性切片、真实 App/launchd 生命周期和探针假死触发 ECS 自动恢复均已通过阶段 2 总体独立完成复核；阶段 3 的 Step 0、独立准入和最终发布门禁均已通过
 
@@ -46,17 +46,17 @@ ECS 动态 SSH 计划已完成“TunnelPad 手动启动/重启前同步公网 IP
 
 ### 已确认事实
 
-- 当前 `ProbeService` 对配置 URL 执行 HTTP GET，默认超时 3 秒，按期望状态码返回满足、不满足或失败三态；它本身不执行启停。[ProbeService.swift](../../Sources/TunnelPadCore/ProbeService.swift)
-- 当前 `TunnelManager.runProbes()` 由同步/异步刷新路径调用，结果只写入运行时展示状态；现有阶段证据明确登记“探针只影响展示、无后台轮询”。[TunnelManager.swift](../../Sources/TunnelPadCore/TunnelManager.swift)；[v1 阶段 2 证据](../data-quality/tunnelpad-v1-stage2-features-20260829.md)
-- 当前主窗口的状态刷新任务每 5 秒运行一次，但只在主窗口可见时运行；这不能作为常驻稳定性监测的所有者。[MainPanelView.swift](../../Sources/tunnelpad/MainPanelView.swift)
-- 阶段 5 删除前，`AppDelegate.applicationDidFinishLaunching` 只安装信号处理、创建菜单栏控制器并显示窗口；`TunnelManager.init` 只加载配置，历史启动路径没有调用 `Shutdown.killByPidfile` 或等价的 app 孤儿收敛流程。当前运行路径不再提供 app pidfile 收敛。[AppDelegate.swift](../../Sources/tunnelpad/AppDelegate.swift)；[Shutdown.swift](../../Sources/TunnelPadCore/Shutdown.swift)
+- 当前 `ProbeService` 对配置 URL 执行 HTTP GET，默认超时 3 秒，按期望状态码返回满足、不满足或失败三态；它本身不执行启停。[ProbeService.swift](../../../Sources/TunnelPadCore/ProbeService.swift)
+- 当前 `TunnelManager.runProbes()` 由同步/异步刷新路径调用，结果只写入运行时展示状态；现有阶段证据明确登记“探针只影响展示、无后台轮询”。[TunnelManager.swift](../../../Sources/TunnelPadCore/TunnelManager.swift)；[v1 阶段 2 证据](../../data-quality/tunnelpad-v1-stage2-features-20260829.md)
+- 当前主窗口的状态刷新任务每 5 秒运行一次，但只在主窗口可见时运行；这不能作为常驻稳定性监测的所有者。[MainPanelView.swift](../../../Sources/tunnelpad/MainPanelView.swift)
+- 阶段 5 删除前，`AppDelegate.applicationDidFinishLaunching` 只安装信号处理、创建菜单栏控制器并显示窗口；`TunnelManager.init` 只加载配置，历史启动路径没有调用 `Shutdown.killByPidfile` 或等价的 app 孤儿收敛流程。当前运行路径不再提供 app pidfile 收敛。[AppDelegate.swift](../../../Sources/tunnelpad/AppDelegate.swift)；[Shutdown.swift](../../../Sources/TunnelPadCore/Shutdown.swift)
 - 阶段 5 删除前，v1 的 app 执行器 `status` 只查询进程内存中的 `contexts`，不会从 pidfile 恢复上下文；该问题已移出当前 `launchd` 稳定性范围，未来 app 计划重新定义。
-- `launchd` 执行器将 `keepAlive` 写入 plist，由 launchd 观察受管进程生命周期；历史 app 的 termination handler/`throttleInterval` 语义保留在 v1 计划，未来 app 计划重新定义。[LaunchdPlistRenderer.swift](../../Sources/TunnelPadCore/LaunchdPlistRenderer.swift)；[TunnelPad v1 计划](tunnelpad-v1.md#app-执行器语义)
-- `reloadConfigAsync()` 会直接接受 `ConfigStore.load()` 的结果并裁剪运行时状态；配置损坏时 `ConfigStore.load()` 会留档原文件并返回空配置。该恢复语义尚未证明适合运行中的配置刷新。[ConfigStore.swift](../../Sources/TunnelPadCore/ConfigStore.swift)；[TunnelManager.swift](../../Sources/TunnelPadCore/TunnelManager.swift)
-- 阶段 5 删除前，`updateTunnelAsync()` 的执行器切换和 `restartSync()` 的停止结果曾是本计划的失败注入基线；当前实现已由 Rust owner 统一生命周期边界，本计划阶段 0 需基于现有代码重新冻结失败分类。[TunnelManager.swift](../../Sources/TunnelPadCore/TunnelManager.swift)；[Rust owner](../../rust/tunnelpad-core/src/owner.rs)
-- ECS 动态 SSH 阶段 2 当前只在 `TunnelManager` 的显式 start/restart 前执行同步；运行中的 `launchd` `KeepAlive` 自动重连直接执行 SSH，不会回调 `TunnelManager`。该边界来自已完成 ECS 计划的实现与真实 App 验收。[ECS 动态 SSH 计划](ecs-dynamic-ssh-ip.md)；[LaunchdPlistRenderer.swift](../../Sources/TunnelPadCore/LaunchdPlistRenderer.swift)
-- 阶段 5 删除前，正常退出与信号退出使用不同的 app/pidfile 资源发现路径；当前运行路径统一由 Rust owner 按配置中的 `launchd` label 清理，启动/退出切片已验证两条路径共享同一 owner，历史差异只保留为迁移背景。[AppDelegate.swift](../../Sources/tunnelpad/AppDelegate.swift)；[Shutdown.swift](../../Sources/TunnelPadCore/Shutdown.swift)
-- 现有 v1 和代码质量重构计划已冻结手动停止、删除、退出清理、过期任务保护和探针展示兼容边界；本计划是行为增强，不替代这些事实源。[TunnelPad v1 计划](tunnelpad-v1.md)；[代码质量重构计划](tunnelpad-code-quality-refactor.md)
+- `launchd` 执行器将 `keepAlive` 写入 plist，由 launchd 观察受管进程生命周期；历史 app 的 termination handler/`throttleInterval` 语义保留在 v1 计划，未来 app 计划重新定义。[LaunchdPlistRenderer.swift](../../../Sources/TunnelPadCore/LaunchdPlistRenderer.swift)；[TunnelPad v1 计划](../20260829/tunnelpad-v1.md#app-执行器语义)
+- `reloadConfigAsync()` 会直接接受 `ConfigStore.load()` 的结果并裁剪运行时状态；配置损坏时 `ConfigStore.load()` 会留档原文件并返回空配置。该恢复语义尚未证明适合运行中的配置刷新。[ConfigStore.swift](../../../Sources/TunnelPadCore/ConfigStore.swift)；[TunnelManager.swift](../../../Sources/TunnelPadCore/TunnelManager.swift)
+- 阶段 5 删除前，`updateTunnelAsync()` 的执行器切换和 `restartSync()` 的停止结果曾是本计划的失败注入基线；当前实现已由 Rust owner 统一生命周期边界，本计划阶段 0 需基于现有代码重新冻结失败分类。[TunnelManager.swift](../../../Sources/TunnelPadCore/TunnelManager.swift)；[Rust owner](../../../rust/tunnelpad-core/src/owner.rs)
+- ECS 动态 SSH 阶段 2 当前只在 `TunnelManager` 的显式 start/restart 前执行同步；运行中的 `launchd` `KeepAlive` 自动重连直接执行 SSH，不会回调 `TunnelManager`。该边界来自已完成 ECS 计划的实现与真实 App 验收。[ECS 动态 SSH 计划](../20260829/ecs-dynamic-ssh-ip.md)；[LaunchdPlistRenderer.swift](../../../Sources/TunnelPadCore/LaunchdPlistRenderer.swift)
+- 阶段 5 删除前，正常退出与信号退出使用不同的 app/pidfile 资源发现路径；当前运行路径统一由 Rust owner 按配置中的 `launchd` label 清理，启动/退出切片已验证两条路径共享同一 owner，历史差异只保留为迁移背景。[AppDelegate.swift](../../../Sources/tunnelpad/AppDelegate.swift)；[Shutdown.swift](../../../Sources/TunnelPadCore/Shutdown.swift)
+- 现有 v1 和代码质量重构计划已冻结手动停止、删除、退出清理、过期任务保护和探针展示兼容边界；本计划是行为增强，不替代这些事实源。[TunnelPad v1 计划](../20260829/tunnelpad-v1.md)；[代码质量重构计划](tunnelpad-code-quality-refactor.md)
 - Rust Core 阶段 5 已完成实现并已提交；本计划不覆盖 owner 切换实现。阶段 1 已按本计划自身准入门禁重新核对共享生命周期模块影响面并完成；阶段 2 的 Rust 生命周期增强仍须遵守本计划阶段路线和独立复核。
 
 ### 暂定假设与验证方式
@@ -205,7 +205,7 @@ ECS 动态 SSH 计划已完成“TunnelPad 手动启动/重启前同步公网 IP
 | 验证方式 | 只读源码核对、隔离 fixture、现有测试清单、后续失败回归测试和 `plan-governance-cli check . --strict-readiness` |
 | 失败/回滚边界 | 阶段 0 不改变运行状态；实现阶段按独立提交回滚，不覆盖 Rust Core 阶段 5 完成后的既有工作树改动；任何真实隧道误操作立即停止该场景 |
 | 当前阻塞项 | 无；Rust Core 阶段 5、日志计划阶段 0–3 和本计划阶段 0 独立准入均已完成；阶段 1 另有自己的 Step 0 和准入门禁 |
-| 最新独立准入复核 | 2026-09-01：达到“待实施”标准；阶段 0 已完成，阶段 1 仍需自己的 Step 0 和独立准入；见[契约 fixture 独立准入复核](../data-quality/tunnelpad-stability-stage0-independent-review-contract-fixtures-20260901.md) |
+| 最新独立准入复核 | 2026-09-01：达到“待实施”标准；阶段 0 已完成，阶段 1 仍需自己的 Step 0 和独立准入；见[契约 fixture 独立准入复核](../../data-quality/tunnelpad-stability-stage0-independent-review-contract-fixtures-20260901.md) |
 
 ### 实施步骤
 
@@ -255,39 +255,39 @@ Step 0 的可执行现状基线现已包括：“配置损坏/半写入时当前
 | 日期 | 类型 | 动作/结果 | 证据 | 状态 | 记录者 |
 |---|---|---|---|---|---|
 | 2026-08-30 | 需求探索/计划建立 | 用户确认独立稳定性计划、HTTP-only、3 次失败、固定退避、最多 10 次并熔断停止；Rust Core 阶段 5 先完成 `launchd` owner，稳定性实现仍等待本计划自身准入 | 本计划“需求探索”与 `docs/PLAN_MAP.md` | 进行中 | Codex |
-| 2026-08-30 | 功能图谱审计合并 | 根据功能图谱审计，将配置异常、`launchd` 执行器/重启失败和退出清理一致性纳入本计划阶段 0；app 执行器与 pidfile 语义留待未来计划；日志事件流与 Rust owner/parity 保持原计划边界 | [功能图谱审计](../data-quality/tunnelpad-functional-graph-review-20260830.md)；本计划“需求探索” | 进行中 | Codex |
-| 2026-09-01 | 阶段 0 当前代码基线 | 只读核对探针/刷新、launchd 状态与 bootout、Rust owner、正常/信号退出、配置损坏处理和 ECS 启动前置；确认稳定性实现代码未混入并行日志基线 | [阶段 0 基线证据](../data-quality/tunnelpad-stability-stage0-20260901.md) | 通过（隔离故障注入与独立准入尚待完成） | Codex |
-| 2026-09-01 | 阶段 0 假死现状最小复现 | 新增 `StabilityStage0BaselineTests`；2/2 通过，确认连续三次探针失败仅产生失败结果，当前 `TunnelManager` 不调用生命周期恢复；未修改生产实现 | [阶段 0 基线证据](../data-quality/tunnelpad-stability-stage0-20260901.md)；`Tests/TunnelPadCoreTests/StabilityStage0BaselineTests.swift` | 通过（仅完成现状缺口，不代表恢复状态机已实现） | Codex |
-| 2026-09-01 | 阶段 0 配置/生命周期故障基线 | `StabilityStage0BaselineTests` 增至 4/4，复现坏 JSON 与半写入会留档并返回空配置；新增 Rust `stage0_baseline_restart_continues_after_bootout_error`，复现 restart 吞掉 bootout 错误后继续 bootstrap；未修改稳定性生产逻辑 | [阶段 0 基线证据](../data-quality/tunnelpad-stability-stage0-20260901.md)；`Tests/TunnelPadCoreTests/StabilityStage0BaselineTests.swift`；`rust/tunnelpad-core/src/owner.rs` | 通过（目标 fail-closed 行为留待阶段 1–2） | Codex |
-| 2026-09-01 | 阶段 0 契约 fixture 补齐 | 新增 6 项仅测试契约 fixture：健康恢复、成功清零、keepAlive、隧道隔离/手动停止、代次取消、配置 fail-closed、ECS 双端点 fail-closed；6/6 通过，未修改生产恢复逻辑 | [阶段 0 基线证据](../data-quality/tunnelpad-stability-stage0-20260901.md)；`Tests/TunnelPadCoreTests/StabilityStage0ContractTests.swift` | 通过（等待新的独立准入复核） | Codex |
-| 2026-09-02 | 阶段 1 初始生产实现 | 接入固定 10 秒后台健康监测、单隧道恢复状态机、配置有效候选保留、手动操作取消/清零、第 10 次失败停止和 Rust `bootout` fail-closed；停止后保留只读监测；未混入启动/退出收敛或真实 ECS/应用验收 | [阶段 1 实施证据](../data-quality/tunnelpad-stability-stage1-implementation-20260902.md)；`Sources/TunnelPadCore/HealthRecovery.swift`；`Sources/TunnelPadCore/TunnelManager.swift`；`rust/tunnelpad-core/src/owner.rs` | 进行中 | Codex |
-| 2026-09-02 | 阶段 2 ECS 自动恢复切片实现 | SSH 自动恢复采用 `stop → preflight → start`，要求 stop 返回 `notLoaded`；ECS 前置失败后仍沿用有界恢复代次；非 SSH 保留 `restart`；5 项专项、123 项 Swift 全量和 Rust 51+1 回归通过 | [阶段 2 ECS 自动恢复切片实施证据](../data-quality/tunnelpad-stability-stage2-ecs-recovery-implementation-20260902.md)；`Sources/TunnelPadCore/ECSPreStart.swift`；`Sources/TunnelPadCore/TunnelManager.swift`；`Tests/TunnelPadCoreTests/StabilityStage2Tests.swift` | 通过（切片完成；阶段 2 后续切片已补齐） | Codex |
+| 2026-08-30 | 功能图谱审计合并 | 根据功能图谱审计，将配置异常、`launchd` 执行器/重启失败和退出清理一致性纳入本计划阶段 0；app 执行器与 pidfile 语义留待未来计划；日志事件流与 Rust owner/parity 保持原计划边界 | [功能图谱审计](../../data-quality/tunnelpad-functional-graph-review-20260830.md)；本计划“需求探索” | 进行中 | Codex |
+| 2026-09-01 | 阶段 0 当前代码基线 | 只读核对探针/刷新、launchd 状态与 bootout、Rust owner、正常/信号退出、配置损坏处理和 ECS 启动前置；确认稳定性实现代码未混入并行日志基线 | [阶段 0 基线证据](../../data-quality/tunnelpad-stability-stage0-20260901.md) | 通过（隔离故障注入与独立准入尚待完成） | Codex |
+| 2026-09-01 | 阶段 0 假死现状最小复现 | 新增 `StabilityStage0BaselineTests`；2/2 通过，确认连续三次探针失败仅产生失败结果，当前 `TunnelManager` 不调用生命周期恢复；未修改生产实现 | [阶段 0 基线证据](../../data-quality/tunnelpad-stability-stage0-20260901.md)；`Tests/TunnelPadCoreTests/StabilityStage0BaselineTests.swift` | 通过（仅完成现状缺口，不代表恢复状态机已实现） | Codex |
+| 2026-09-01 | 阶段 0 配置/生命周期故障基线 | `StabilityStage0BaselineTests` 增至 4/4，复现坏 JSON 与半写入会留档并返回空配置；新增 Rust `stage0_baseline_restart_continues_after_bootout_error`，复现 restart 吞掉 bootout 错误后继续 bootstrap；未修改稳定性生产逻辑 | [阶段 0 基线证据](../../data-quality/tunnelpad-stability-stage0-20260901.md)；`Tests/TunnelPadCoreTests/StabilityStage0BaselineTests.swift`；`rust/tunnelpad-core/src/owner.rs` | 通过（目标 fail-closed 行为留待阶段 1–2） | Codex |
+| 2026-09-01 | 阶段 0 契约 fixture 补齐 | 新增 6 项仅测试契约 fixture：健康恢复、成功清零、keepAlive、隧道隔离/手动停止、代次取消、配置 fail-closed、ECS 双端点 fail-closed；6/6 通过，未修改生产恢复逻辑 | [阶段 0 基线证据](../../data-quality/tunnelpad-stability-stage0-20260901.md)；`Tests/TunnelPadCoreTests/StabilityStage0ContractTests.swift` | 通过（等待新的独立准入复核） | Codex |
+| 2026-09-02 | 阶段 1 初始生产实现 | 接入固定 10 秒后台健康监测、单隧道恢复状态机、配置有效候选保留、手动操作取消/清零、第 10 次失败停止和 Rust `bootout` fail-closed；停止后保留只读监测；未混入启动/退出收敛或真实 ECS/应用验收 | [阶段 1 实施证据](../../data-quality/tunnelpad-stability-stage1-implementation-20260902.md)；`Sources/TunnelPadCore/HealthRecovery.swift`；`Sources/TunnelPadCore/TunnelManager.swift`；`rust/tunnelpad-core/src/owner.rs` | 进行中 | Codex |
+| 2026-09-02 | 阶段 2 ECS 自动恢复切片实现 | SSH 自动恢复采用 `stop → preflight → start`，要求 stop 返回 `notLoaded`；ECS 前置失败后仍沿用有界恢复代次；非 SSH 保留 `restart`；5 项专项、123 项 Swift 全量和 Rust 51+1 回归通过 | [阶段 2 ECS 自动恢复切片实施证据](../../data-quality/tunnelpad-stability-stage2-ecs-recovery-implementation-20260902.md)；`Sources/TunnelPadCore/ECSPreStart.swift`；`Sources/TunnelPadCore/TunnelManager.swift`；`Tests/TunnelPadCoreTests/StabilityStage2Tests.swift` | 通过（切片完成；阶段 2 后续切片已补齐） | Codex |
 
 ### 最近实施/验证记录
 
 | 日期 | 类型 | 动作/结果 | 证据 | 状态 | 记录者 |
 |---|---|---|---|---|---|
 | 2026-08-30 | 只读治理检查 | 新计划写入前执行 `plan-governance-cli check . --strict-readiness`，既有仓库检查通过并保留一项既有 warning | 命令输出；本计划尚未落盘时的基线 | 通过 | Codex |
-| 2026-09-01 | 并行计划边界与阶段 0 基线 | 日志/稳定性阶段 0 改为可并行推进；阶段 1 共享模块串行；完成稳定性当前代码基线证据，并执行普通、严格、停滞检查和空白检查 | [阶段 0 基线证据](../data-quality/tunnelpad-stability-stage0-20260901.md)；`plan-governance-cli check .`；`plan-governance-cli check . --strict-readiness`；`plan-governance-cli check . --stale-days 10`；`git diff --check` | 通过（保留预期共享目标 WARNING） | Codex |
+| 2026-09-01 | 并行计划边界与阶段 0 基线 | 日志/稳定性阶段 0 改为可并行推进；阶段 1 共享模块串行；完成稳定性当前代码基线证据，并执行普通、严格、停滞检查和空白检查 | [阶段 0 基线证据](../../data-quality/tunnelpad-stability-stage0-20260901.md)；`plan-governance-cli check .`；`plan-governance-cli check . --strict-readiness`；`plan-governance-cli check . --stale-days 10`；`git diff --check` | 通过（保留预期共享目标 WARNING） | Codex |
 | 2026-09-01 | 阶段 0 fixture 回归 | 执行 `swift test --filter StabilityStage0BaselineTests`（4/4）、`swift test --filter StabilityStage0ContractTests`（6/6）、`cargo test --manifest-path rust/Cargo.toml stage0_baseline_restart_continues_after_bootout_error`（1/1）、全量 `swift test`（109/109）和全量 `cargo test --manifest-path rust/Cargo.toml`（51 个 Rust 单元测试 + 1 个差分测试）；日志计划已完成，稳定性仍未引入后台恢复生产实现 | `Tests/TunnelPadCoreTests/StabilityStage0BaselineTests.swift`；`Tests/TunnelPadCoreTests/StabilityStage0ContractTests.swift`；`rust/tunnelpad-core/src/owner.rs`；命令输出 | 通过（阶段 0 已通过独立准入，阶段 1 自身 Step 0 尚待完成） | Codex |
-| 2026-09-01 | 阶段 0 独立准入复核 | 独立只读复核确认目标/范围/安全边界和现状基线充分，但状态机、代次取消、ECS 运行中同步 fixture 尚未执行；阶段 0 未达到待实施标准 | [独立准入复核](../data-quality/tunnelpad-stability-stage0-independent-review-20260901.md) | 未通过（保留在阶段 0 设计中） | Codex（独立只读复核） |
-| 2026-09-01 | 阶段 0 独立准入复核 | 复核确认目标/范围/非目标、12 行矩阵、6 项契约 fixture、验证/回滚边界和共享影响均满足阶段 0 准入；阶段 0 达到“待实施标准”并关闭 | [契约 fixture 独立准入复核](../data-quality/tunnelpad-stability-stage0-independent-review-contract-fixtures-20260901.md) | 通过 | Codex（独立只读复核） |
-| 2026-09-02 | 阶段 1 初始实现验证 | `swift test --filter StabilityStage1Tests`（7/7）、全量 `swift test`（116/116）、全量 `cargo test --manifest-path rust/Cargo.toml`（51 个 Rust 单元测试 + 1 个差分测试）、治理普通/严格/停滞检查和 `git diff --check` 均通过；GitNexus `detect_changes()` 报告 `TunnelManager` 枢纽变更为预期高影响，待阶段 1 完整行为验收 | [阶段 1 实施证据](../data-quality/tunnelpad-stability-stage1-implementation-20260902.md)；命令输出；GitNexus 变更范围检查 | 通过（阶段 1 仍在实施） | Codex |
-| 2026-09-02 | 阶段 1 独立完成复核 | 补齐人工 start 后重新恢复、删除时取消排队恢复任务；阶段 1 专项 9/9、全量 Swift 118/118、Rust 51+1、治理普通/严格/停滞检查、`git diff --check` 和 GitNexus `detect_changes()`（83 个变更符号、26 个受影响符号、`critical`）均通过；阶段 1 完成边界与阶段 2 交接项已分离 | [阶段 1 独立完成复核](../data-quality/tunnelpad-stability-stage1-independent-completion-review-20260902.md)；[阶段 1 实施证据](../data-quality/tunnelpad-stability-stage1-implementation-20260902.md) | 通过（阶段 1 已完成） | Codex（独立只读复核） |
-| 2026-09-02 | 阶段 2 ECS 自动恢复切片验证 | `swift test --filter StabilityStage2Tests`（5/5）、阶段 1 专项（9/9）、ECS 前置集成（12/12）、全量 Swift（123/123）、全量 Rust（51+1）、普通/严格/停滞治理检查和 `git diff --check` 均通过；GitNexus `detect_changes()` 报告 TunnelManager hub 预期高风险 | [阶段 2 ECS 自动恢复切片实施证据](../data-quality/tunnelpad-stability-stage2-ecs-recovery-implementation-20260902.md)；命令输出 | 通过（切片完成；启动/退出和跨层切片待后续） | Codex |
-| 2026-09-02 | 阶段 2 启动/退出资源收敛切片 Step 0 与准入 | 固定启动首轮只读状态发现、shutdown 单入口关闭、逐条 bootout 继续清理和状态复核；`CoreOwner.shutdown` upstream impact 为 CRITICAL，已限定修改边界 | [启动/退出切片 Step 0](../data-quality/tunnelpad-stability-stage2-lifecycle-reconciliation-step0-20260902.md)；[启动/退出切片独立准入复核](../data-quality/tunnelpad-stability-stage2-lifecycle-reconciliation-independent-review-20260902.md) | 通过（达到待实施标准；尚未实现） | Codex（独立只读复核） |
-| 2026-09-02 | 阶段 2 启动/退出资源收敛切片实施 | 启动首轮无面板状态发现、snapshot 失败无副作用、shutdown 单入口、单条 bootout 失败后继续清理和成功状态复核已实现；专项 7/7、Swift 125/125、Rust 53+1 回归通过 | [启动/退出切片实施证据](../data-quality/tunnelpad-stability-stage2-lifecycle-reconciliation-implementation-20260902.md)；`rust/tunnelpad-core/src/owner.rs`；`Tests/TunnelPadCoreTests/StabilityStage2Tests.swift` | 通过（切片完成；跨层切片随后单独完成） | Codex |
-| 2026-09-02 | 阶段 2 跨层状态一致性切片实施 | 统一状态读代次与生命周期失效代次；快照应用保留 busy 状态；健康探针结果通过同一门禁后才更新 UI/恢复状态；专项 11/11、Swift 129/129、Rust 53+1 回归通过 | [跨层一致性切片实施证据](../data-quality/tunnelpad-stability-stage2-cross-layer-consistency-implementation-20260902.md)；`Sources/TunnelPadCore/TunnelManager.swift`；`Tests/TunnelPadCoreTests/StabilityStage2Tests.swift` | 通过（切片实现完成；阶段 2 后续切片已补齐） | Codex |
-| 2026-09-02 | 阶段 2 配置重载资源收敛切片实施 | Rust owner 配置重载先校验候选，再对删除 label 执行停止/状态复核；失败保留旧 owner 配置；新增隧道不自动启动，同 ID 参数不自动重启；CfgR-1–CfgR-9、Rust 62+1 和 Swift 129 回归通过 | [配置重载切片实施证据](../data-quality/tunnelpad-stability-stage2-config-reload-reconciliation-implementation-20260902.md)；`rust/tunnelpad-core/src/owner.rs` | 通过（切片完成；阶段 2 后续切片已补齐） | Codex |
-| 2026-09-02 | 阶段 2 配置重载资源收敛切片独立完成复核 | 独立核对候选校验、删除 label 停止/复核/提交顺序、同 ID 参数兼容语义、CfgR-1–CfgR-9、Rust 62+1、Swift 129、治理和 App 冒烟边界 | [配置重载切片独立完成复核](../data-quality/tunnelpad-stability-stage2-config-reload-reconciliation-independent-completion-review-20260902.md)；`plan-governance-cli check . --strict-readiness`；`git diff --check`；GitNexus `detect_changes()` | 通过（仅关闭该切片；阶段 2 整体仍在实施） | Codex（独立只读复核） |
-| 2026-09-02 | 阶段 2 跨层状态一致性切片独立完成复核 | 独立核对 C1–C3/C7 迟到结果反证、busy 状态保护、配置/删除/退出失效边界、非目标范围、专项与全量回归、治理和 GitNexus 变更范围 | [跨层一致性切片独立完成复核](../data-quality/tunnelpad-stability-stage2-cross-layer-consistency-independent-completion-review-20260902.md)；`plan-governance-cli check . --strict-readiness`；`git diff --check`；GitNexus `detect_changes()` | 通过（仅关闭该切片） | Codex（独立只读复核） |
+| 2026-09-01 | 阶段 0 独立准入复核 | 独立只读复核确认目标/范围/安全边界和现状基线充分，但状态机、代次取消、ECS 运行中同步 fixture 尚未执行；阶段 0 未达到待实施标准 | [独立准入复核](../../data-quality/tunnelpad-stability-stage0-independent-review-20260901.md) | 未通过（保留在阶段 0 设计中） | Codex（独立只读复核） |
+| 2026-09-01 | 阶段 0 独立准入复核 | 复核确认目标/范围/非目标、12 行矩阵、6 项契约 fixture、验证/回滚边界和共享影响均满足阶段 0 准入；阶段 0 达到“待实施标准”并关闭 | [契约 fixture 独立准入复核](../../data-quality/tunnelpad-stability-stage0-independent-review-contract-fixtures-20260901.md) | 通过 | Codex（独立只读复核） |
+| 2026-09-02 | 阶段 1 初始实现验证 | `swift test --filter StabilityStage1Tests`（7/7）、全量 `swift test`（116/116）、全量 `cargo test --manifest-path rust/Cargo.toml`（51 个 Rust 单元测试 + 1 个差分测试）、治理普通/严格/停滞检查和 `git diff --check` 均通过；GitNexus `detect_changes()` 报告 `TunnelManager` 枢纽变更为预期高影响，待阶段 1 完整行为验收 | [阶段 1 实施证据](../../data-quality/tunnelpad-stability-stage1-implementation-20260902.md)；命令输出；GitNexus 变更范围检查 | 通过（阶段 1 仍在实施） | Codex |
+| 2026-09-02 | 阶段 1 独立完成复核 | 补齐人工 start 后重新恢复、删除时取消排队恢复任务；阶段 1 专项 9/9、全量 Swift 118/118、Rust 51+1、治理普通/严格/停滞检查、`git diff --check` 和 GitNexus `detect_changes()`（83 个变更符号、26 个受影响符号、`critical`）均通过；阶段 1 完成边界与阶段 2 交接项已分离 | [阶段 1 独立完成复核](../../data-quality/tunnelpad-stability-stage1-independent-completion-review-20260902.md)；[阶段 1 实施证据](../../data-quality/tunnelpad-stability-stage1-implementation-20260902.md) | 通过（阶段 1 已完成） | Codex（独立只读复核） |
+| 2026-09-02 | 阶段 2 ECS 自动恢复切片验证 | `swift test --filter StabilityStage2Tests`（5/5）、阶段 1 专项（9/9）、ECS 前置集成（12/12）、全量 Swift（123/123）、全量 Rust（51+1）、普通/严格/停滞治理检查和 `git diff --check` 均通过；GitNexus `detect_changes()` 报告 TunnelManager hub 预期高风险 | [阶段 2 ECS 自动恢复切片实施证据](../../data-quality/tunnelpad-stability-stage2-ecs-recovery-implementation-20260902.md)；命令输出 | 通过（切片完成；启动/退出和跨层切片待后续） | Codex |
+| 2026-09-02 | 阶段 2 启动/退出资源收敛切片 Step 0 与准入 | 固定启动首轮只读状态发现、shutdown 单入口关闭、逐条 bootout 继续清理和状态复核；`CoreOwner.shutdown` upstream impact 为 CRITICAL，已限定修改边界 | [启动/退出切片 Step 0](../../data-quality/tunnelpad-stability-stage2-lifecycle-reconciliation-step0-20260902.md)；[启动/退出切片独立准入复核](../../data-quality/tunnelpad-stability-stage2-lifecycle-reconciliation-independent-review-20260902.md) | 通过（达到待实施标准；尚未实现） | Codex（独立只读复核） |
+| 2026-09-02 | 阶段 2 启动/退出资源收敛切片实施 | 启动首轮无面板状态发现、snapshot 失败无副作用、shutdown 单入口、单条 bootout 失败后继续清理和成功状态复核已实现；专项 7/7、Swift 125/125、Rust 53+1 回归通过 | [启动/退出切片实施证据](../../data-quality/tunnelpad-stability-stage2-lifecycle-reconciliation-implementation-20260902.md)；`rust/tunnelpad-core/src/owner.rs`；`Tests/TunnelPadCoreTests/StabilityStage2Tests.swift` | 通过（切片完成；跨层切片随后单独完成） | Codex |
+| 2026-09-02 | 阶段 2 跨层状态一致性切片实施 | 统一状态读代次与生命周期失效代次；快照应用保留 busy 状态；健康探针结果通过同一门禁后才更新 UI/恢复状态；专项 11/11、Swift 129/129、Rust 53+1 回归通过 | [跨层一致性切片实施证据](../../data-quality/tunnelpad-stability-stage2-cross-layer-consistency-implementation-20260902.md)；`Sources/TunnelPadCore/TunnelManager.swift`；`Tests/TunnelPadCoreTests/StabilityStage2Tests.swift` | 通过（切片实现完成；阶段 2 后续切片已补齐） | Codex |
+| 2026-09-02 | 阶段 2 配置重载资源收敛切片实施 | Rust owner 配置重载先校验候选，再对删除 label 执行停止/状态复核；失败保留旧 owner 配置；新增隧道不自动启动，同 ID 参数不自动重启；CfgR-1–CfgR-9、Rust 62+1 和 Swift 129 回归通过 | [配置重载切片实施证据](../../data-quality/tunnelpad-stability-stage2-config-reload-reconciliation-implementation-20260902.md)；`rust/tunnelpad-core/src/owner.rs` | 通过（切片完成；阶段 2 后续切片已补齐） | Codex |
+| 2026-09-02 | 阶段 2 配置重载资源收敛切片独立完成复核 | 独立核对候选校验、删除 label 停止/复核/提交顺序、同 ID 参数兼容语义、CfgR-1–CfgR-9、Rust 62+1、Swift 129、治理和 App 冒烟边界 | [配置重载切片独立完成复核](../../data-quality/tunnelpad-stability-stage2-config-reload-reconciliation-independent-completion-review-20260902.md)；`plan-governance-cli check . --strict-readiness`；`git diff --check`；GitNexus `detect_changes()` | 通过（仅关闭该切片；阶段 2 整体仍在实施） | Codex（独立只读复核） |
+| 2026-09-02 | 阶段 2 跨层状态一致性切片独立完成复核 | 独立核对 C1–C3/C7 迟到结果反证、busy 状态保护、配置/删除/退出失效边界、非目标范围、专项与全量回归、治理和 GitNexus 变更范围 | [跨层一致性切片独立完成复核](../../data-quality/tunnelpad-stability-stage2-cross-layer-consistency-independent-completion-review-20260902.md)；`plan-governance-cli check . --strict-readiness`；`git diff --check`；GitNexus `detect_changes()` | 通过（仅关闭该切片） | Codex（独立只读复核） |
 
-| 2026-09-02 | 阶段 2 真实 App 受控验收 | 关闭旧版 App，重新构建并启动当前 `dist/TunnelPad.app`；启动状态发现未猜测性拉起 `not_loaded` 隧道；最新 App 正常退出后进程和两个受管 label 均无残留；未启动或故障注入真实 SSH 隧道 | [阶段 2 真实 App 受控验收](../data-quality/tunnelpad-stability-stage2-real-app-acceptance-20260902.md)；XcodeBuildMCP stop/launch 输出；`scripts/build_app.sh --skip-tests`；`codesign --verify --deep --strict` | 通过（无运行中隧道子场景；阶段 2 整体仍在实施） | Codex |
-| 2026-09-02 | 阶段 2 真实运行中隧道与 App 崩溃恢复验收 | 真实 ECS/IP 只读前置成功；`admin-tunnel` 启动后 HTTP `401` 探针通过；受控 `SIGTERM` 后 `launchd` 从 PID `10260` 重拉起 PID `10320`；真实 `bootout` 后 label/端口/PID 收敛；App `SIGKILL` 后隧道 PID `10411` 保持不变，重启 App 能发现原 label，正常退出后两个受管 label 均为 `not_loaded` | [真实 App 受控验收追加记录](../data-quality/tunnelpad-stability-stage2-real-app-acceptance-20260902.md#追加验收真实运行中受管隧道与-app-崩溃恢复)；`scripts/update-ecs-ssh-ip --check`；XcodeBuildMCP stop/launch 输出；真实 `launchctl`/`curl`/SSH 日志 | 通过（当前 `launchd`/App 运行生命周期场景；ECS 自动恢复业务闭环见下一条记录） | Codex |
-| 2026-09-02 | 阶段 2 真实探针假死与 ECS 自动恢复验收 | 对真实 `admin-tunnel` SSH PID `15035` 做身份校验后发送 `SIGSTOP`，探针失败累计 3 次；健康协调器执行 `stop → ECSPreStartChecker.checkAsync → start`，脚本日志出现 `mode=sync` 与 `already_current`，新 PID `15710` 恢复并返回 HTTP `401`；清理后 App、label、PID 和端口均无残留 | [真实 App 受控验收追加记录](../data-quality/tunnelpad-stability-stage2-real-app-acceptance-20260902.md#追加验收http-探针假死触发-ecs-自动恢复)；`$HOME/.config/tunnelpad/ecs-ssh-ip.log`；真实 `launchctl`/`curl`/SSH 日志 | 通过（ECS 自动恢复真实业务闭环；阶段 2 总体复核见下一条） | Codex |
-| 2026-09-02 | 阶段 2 总体独立完成复核 | 四个稳定性切片、真实 App/launchd 生命周期、探针假死触发 ECS 自动恢复、Swift/Rust 回归、ECS 只读前置、签名、治理和环境清理均独立核对通过 | [阶段 2 总体独立完成复核](../data-quality/tunnelpad-stability-stage2-independent-completion-review-20260902.md) | 通过（阶段 2 已完成；阶段 3 保持设计中） | Codex（独立只读复核） |
-| 2026-09-02 | 阶段 3 Step 0 与独立准入 | 固定隔离 demo、受控应用、Release 产物和治理门禁样本矩阵；阶段 2 真实业务证据不再重复故障注入；当前工作树回归、demo、Release 签名和真实 App 启动/退出均通过 | [阶段 3 Step 0 证据](../data-quality/tunnelpad-stability-stage3-step0-20260902.md)；[阶段 3 独立准入复核](../data-quality/tunnelpad-stability-stage3-independent-review-20260902.md) | 通过（达到待实施标准） | Codex（独立只读复核） |
-| 2026-09-02 | 阶段 3 最终门禁与独立完成复核 | 隔离 demo 3/3、Swift 129/129、Rust 62+1、Release 构建/签名、真实 App 启动/退出、资源清理和治理门禁均通过 | [阶段 3 独立完成复核](../data-quality/tunnelpad-stability-stage3-independent-completion-review-20260902.md) | 通过（阶段 3 已完成；稳定性计划整体已完成） | Codex（独立只读复核） |
+| 2026-09-02 | 阶段 2 真实 App 受控验收 | 关闭旧版 App，重新构建并启动当前 `dist/TunnelPad.app`；启动状态发现未猜测性拉起 `not_loaded` 隧道；最新 App 正常退出后进程和两个受管 label 均无残留；未启动或故障注入真实 SSH 隧道 | [阶段 2 真实 App 受控验收](../../data-quality/tunnelpad-stability-stage2-real-app-acceptance-20260902.md)；XcodeBuildMCP stop/launch 输出；`scripts/build_app.sh --skip-tests`；`codesign --verify --deep --strict` | 通过（无运行中隧道子场景；阶段 2 整体仍在实施） | Codex |
+| 2026-09-02 | 阶段 2 真实运行中隧道与 App 崩溃恢复验收 | 真实 ECS/IP 只读前置成功；`admin-tunnel` 启动后 HTTP `401` 探针通过；受控 `SIGTERM` 后 `launchd` 从 PID `10260` 重拉起 PID `10320`；真实 `bootout` 后 label/端口/PID 收敛；App `SIGKILL` 后隧道 PID `10411` 保持不变，重启 App 能发现原 label，正常退出后两个受管 label 均为 `not_loaded` | [真实 App 受控验收追加记录](../../data-quality/tunnelpad-stability-stage2-real-app-acceptance-20260902.md#追加验收真实运行中受管隧道与-app-崩溃恢复)；`scripts/update-ecs-ssh-ip --check`；XcodeBuildMCP stop/launch 输出；真实 `launchctl`/`curl`/SSH 日志 | 通过（当前 `launchd`/App 运行生命周期场景；ECS 自动恢复业务闭环见下一条记录） | Codex |
+| 2026-09-02 | 阶段 2 真实探针假死与 ECS 自动恢复验收 | 对真实 `admin-tunnel` SSH PID `15035` 做身份校验后发送 `SIGSTOP`，探针失败累计 3 次；健康协调器执行 `stop → ECSPreStartChecker.checkAsync → start`，脚本日志出现 `mode=sync` 与 `already_current`，新 PID `15710` 恢复并返回 HTTP `401`；清理后 App、label、PID 和端口均无残留 | [真实 App 受控验收追加记录](../../data-quality/tunnelpad-stability-stage2-real-app-acceptance-20260902.md#追加验收http-探针假死触发-ecs-自动恢复)；`$HOME/.config/tunnelpad/ecs-ssh-ip.log`；真实 `launchctl`/`curl`/SSH 日志 | 通过（ECS 自动恢复真实业务闭环；阶段 2 总体复核见下一条） | Codex |
+| 2026-09-02 | 阶段 2 总体独立完成复核 | 四个稳定性切片、真实 App/launchd 生命周期、探针假死触发 ECS 自动恢复、Swift/Rust 回归、ECS 只读前置、签名、治理和环境清理均独立核对通过 | [阶段 2 总体独立完成复核](../../data-quality/tunnelpad-stability-stage2-independent-completion-review-20260902.md) | 通过（阶段 2 已完成；阶段 3 保持设计中） | Codex（独立只读复核） |
+| 2026-09-02 | 阶段 3 Step 0 与独立准入 | 固定隔离 demo、受控应用、Release 产物和治理门禁样本矩阵；阶段 2 真实业务证据不再重复故障注入；当前工作树回归、demo、Release 签名和真实 App 启动/退出均通过 | [阶段 3 Step 0 证据](../../data-quality/tunnelpad-stability-stage3-step0-20260902.md)；[阶段 3 独立准入复核](../../data-quality/tunnelpad-stability-stage3-independent-review-20260902.md) | 通过（达到待实施标准） | Codex（独立只读复核） |
+| 2026-09-02 | 阶段 3 最终门禁与独立完成复核 | 隔离 demo 3/3、Swift 129/129、Rust 62+1、Release 构建/签名、真实 App 启动/退出、资源清理和治理门禁均通过 | [阶段 3 独立完成复核](../../data-quality/tunnelpad-stability-stage3-independent-completion-review-20260902.md) | 通过（阶段 3 已完成；稳定性计划整体已完成） | Codex（独立只读复核） |
 
 阶段证据只声明仓库内相对路径；最近实施/验证记录采用追加式记录，不能替代独立准入复核。
 
@@ -345,38 +345,38 @@ Step 0 的可执行现状基线现已包括：“配置损坏/半写入时当前
 | 字段 | 内容 |
 |---|---|
 | 准入状态 | 已完成 |
-| Step 0 | [阶段 3 Step 0 证据](../data-quality/tunnelpad-stability-stage3-step0-20260902.md)已固定隔离 demo、Release 产物、受控应用和治理门禁矩阵；阶段 2 的 Step 0 与四个切片证据已完成并仅作为前置引用 |
+| Step 0 | [阶段 3 Step 0 证据](../../data-quality/tunnelpad-stability-stage3-step0-20260902.md)已固定隔离 demo、Release 产物、受控应用和治理门禁矩阵；阶段 2 的 Step 0 与四个切片证据已完成并仅作为前置引用 |
 | 样本矩阵 | 已登记：Rust/Swift 回归、Release 构建与签名、隔离 `demo-*` 生命周期、当前 `launchd` 受控 App 启动/退出、资源清理和治理反向引用；不重复注入真实用户隧道 |
 | 验证方式 | 阶段 3 采用当前工作树回归、隔离 demo、Release 包校验和受控 App 冒烟；阶段 2 的真实 ECS/launchd 闭环只引用已完成的独立验收证据 |
 | 失败/回滚边界 | 隔离 demo 只能使用虚构 ID 和临时路径；Release 或 App 门禁失败时不触碰真实配置/日志/label/ECS，只回滚阶段 3 产物或文档 |
 | 当前阻塞项 | 无 |
-| 最新独立准入复核 | [阶段 3 独立准入复核](../data-quality/tunnelpad-stability-stage3-independent-review-20260902.md)已通过，阶段 3 达到待实施标准 |
+| 最新独立准入复核 | [阶段 3 独立准入复核](../../data-quality/tunnelpad-stability-stage3-independent-review-20260902.md)已通过，阶段 3 达到待实施标准 |
 
 阻塞说明：阶段 3 最终发布门禁已通过，未来 `app` 进程语义仍是非目标
 
 ### 阶段 3 Step 0
 
-阶段 3 Step 0 已固定隔离 demo、Release 产物、受控 App 和治理门禁的输入、命令、预期、失败判定与回滚边界，证据见[阶段 3 Step 0](../data-quality/tunnelpad-stability-stage3-step0-20260902.md)。本 Step 0 不代表阶段 3 已达到待实施标准。
+阶段 3 Step 0 已固定隔离 demo、Release 产物、受控 App 和治理门禁的输入、命令、预期、失败判定与回滚边界，证据见[阶段 3 Step 0](../../data-quality/tunnelpad-stability-stage3-step0-20260902.md)。本 Step 0 不代表阶段 3 已达到待实施标准。
 
 ## 阶段 2 收尾摘要
 
 ### 阶段 2 Step 0
 
-阶段 2 Step 0 采用“架构探索基线 + 缺陷安全边界”类型，已固定当前后台探针、ECS 前置适配器、`launchd KeepAlive` 直启路径、Rust 生命周期 owner 和退出清理路径；同时记录用户确认的 ECS 触发方案以及经评估冻结的 bootout-first 阻断顺序。证据见[阶段 2 Step 0 基线](../data-quality/tunnelpad-stability-stage2-step0-20260902.md)。
+阶段 2 Step 0 采用“架构探索基线 + 缺陷安全边界”类型，已固定当前后台探针、ECS 前置适配器、`launchd KeepAlive` 直启路径、Rust 生命周期 owner 和退出清理路径；同时记录用户确认的 ECS 触发方案以及经评估冻结的 bootout-first 阻断顺序。证据见[阶段 2 Step 0 基线](../../data-quality/tunnelpad-stability-stage2-step0-20260902.md)。
 
-阶段 2 的 ECS 自动恢复、启动/退出资源收敛、跨层状态一致性和配置重载资源收敛切片均已完成自己的 Step 0、独立准入、实现和独立完成复核，不能互相替代。真实 `admin-tunnel` 的运行中 bootout、KeepAlive 重拉起、App 崩溃后重启发现、正常退出清理和探针假死触发 ECS 自动恢复已追加验收；阶段 2 总体独立完成复核已通过，本次真实环境限制和证据见[真实 App 受控验收](../data-quality/tunnelpad-stability-stage2-real-app-acceptance-20260902.md)。
+阶段 2 的 ECS 自动恢复、启动/退出资源收敛、跨层状态一致性和配置重载资源收敛切片均已完成自己的 Step 0、独立准入、实现和独立完成复核，不能互相替代。真实 `admin-tunnel` 的运行中 bootout、KeepAlive 重拉起、App 崩溃后重启发现、正常退出清理和探针假死触发 ECS 自动恢复已追加验收；阶段 2 总体独立完成复核已通过，本次真实环境限制和证据见[真实 App 受控验收](../../data-quality/tunnelpad-stability-stage2-real-app-acceptance-20260902.md)。
 
 ### 阶段 2 配置重载资源收敛切片
 
-该切片已完成 Step 0、独立准入、实现和独立完成复核。切片固定保留现有“同 ID 参数修改只保存、下次显式重启生效”的语义；外部刷新删除隧道时，必须先逐条停止并复核待删除的旧 `launchd` label，全部达到 `notLoaded` 后才替换 Rust owner 配置，任一失败则保留旧配置。详细边界见[切片 Step 0](../data-quality/tunnelpad-stability-stage2-config-reload-reconciliation-step0-20260902.md)、[独立准入复核](../data-quality/tunnelpad-stability-stage2-config-reload-reconciliation-independent-review-20260902.md)、[实施证据](../data-quality/tunnelpad-stability-stage2-config-reload-reconciliation-implementation-20260902.md)和[独立完成复核](../data-quality/tunnelpad-stability-stage2-config-reload-reconciliation-independent-completion-review-20260902.md)。
+该切片已完成 Step 0、独立准入、实现和独立完成复核。切片固定保留现有“同 ID 参数修改只保存、下次显式重启生效”的语义；外部刷新删除隧道时，必须先逐条停止并复核待删除的旧 `launchd` label，全部达到 `notLoaded` 后才替换 Rust owner 配置，任一失败则保留旧配置。详细边界见[切片 Step 0](../../data-quality/tunnelpad-stability-stage2-config-reload-reconciliation-step0-20260902.md)、[独立准入复核](../../data-quality/tunnelpad-stability-stage2-config-reload-reconciliation-independent-review-20260902.md)、[实施证据](../../data-quality/tunnelpad-stability-stage2-config-reload-reconciliation-implementation-20260902.md)和[独立完成复核](../../data-quality/tunnelpad-stability-stage2-config-reload-reconciliation-independent-completion-review-20260902.md)。
 
 ### 阶段 2 启动/退出资源收敛切片
 
-该切片已完成 Step 0、独立准入、实现、专项验证和独立完成复核。启动后通过现有后台协调器读取配置内 `launchd` 状态；退出时由同一 Rust owner 逐条尝试并复核 `bootout`，单条失败不截断其他隧道，且 shutdown 只允许单入口执行。详细边界见[切片 Step 0](../data-quality/tunnelpad-stability-stage2-lifecycle-reconciliation-step0-20260902.md)、[独立准入复核](../data-quality/tunnelpad-stability-stage2-lifecycle-reconciliation-independent-review-20260902.md)、[实施证据](../data-quality/tunnelpad-stability-stage2-lifecycle-reconciliation-implementation-20260902.md)和[独立完成复核](../data-quality/tunnelpad-stability-stage2-lifecycle-reconciliation-independent-completion-review-20260902.md)。
+该切片已完成 Step 0、独立准入、实现、专项验证和独立完成复核。启动后通过现有后台协调器读取配置内 `launchd` 状态；退出时由同一 Rust owner 逐条尝试并复核 `bootout`，单条失败不截断其他隧道，且 shutdown 只允许单入口执行。详细边界见[切片 Step 0](../../data-quality/tunnelpad-stability-stage2-lifecycle-reconciliation-step0-20260902.md)、[独立准入复核](../../data-quality/tunnelpad-stability-stage2-lifecycle-reconciliation-independent-review-20260902.md)、[实施证据](../../data-quality/tunnelpad-stability-stage2-lifecycle-reconciliation-implementation-20260902.md)和[独立完成复核](../../data-quality/tunnelpad-stability-stage2-lifecycle-reconciliation-independent-completion-review-20260902.md)。
 
 ### 阶段 2 跨层状态一致性切片
 
-该切片已完成 Step 0、独立准入、实现、专项验证和独立完成复核。实现让异步 Rust 快照、健康探针和恢复结果在手动启停、配置变化、删除和退出后接受统一的结果门禁，保留 busy 状态，禁止旧结果倒灌 UI 或推进恢复状态。详细边界见[切片 Step 0](../data-quality/tunnelpad-stability-stage2-cross-layer-consistency-step0-20260902.md)、[独立准入复核](../data-quality/tunnelpad-stability-stage2-cross-layer-consistency-independent-review-20260902.md)、[实施证据](../data-quality/tunnelpad-stability-stage2-cross-layer-consistency-implementation-20260902.md)和[独立完成复核](../data-quality/tunnelpad-stability-stage2-cross-layer-consistency-independent-completion-review-20260902.md)。
+该切片已完成 Step 0、独立准入、实现、专项验证和独立完成复核。实现让异步 Rust 快照、健康探针和恢复结果在手动启停、配置变化、删除和退出后接受统一的结果门禁，保留 busy 状态，禁止旧结果倒灌 UI 或推进恢复状态。详细边界见[切片 Step 0](../../data-quality/tunnelpad-stability-stage2-cross-layer-consistency-step0-20260902.md)、[独立准入复核](../../data-quality/tunnelpad-stability-stage2-cross-layer-consistency-independent-review-20260902.md)、[实施证据](../../data-quality/tunnelpad-stability-stage2-cross-layer-consistency-implementation-20260902.md)和[独立完成复核](../../data-quality/tunnelpad-stability-stage2-cross-layer-consistency-independent-completion-review-20260902.md)。
 
 ## 阶段 1 收尾
 
@@ -387,14 +387,14 @@ Step 0 的可执行现状基线现已包括：“配置损坏/半写入时当前
 | 完成状态 | 已完成；只关闭阶段 1，不改变阶段 2 已完成、阶段 3 设计中的状态 |
 | 完成范围 | `launchd` 后台健康监测、固定恢复状态机、配置 fail-closed、操作/恢复代次与取消保护、手动 stop/start/restart 语义、删除迟到任务保护，以及 Rust `bootout` fail-closed |
 | 固定策略 | 连续 3 次失败触发恢复；退避 10/30/60/300 秒封顶；最多 10 次；第 10 次失败停止当前隧道并保留只读监测；成功或人工 start/restart 清零 |
-| 隔离验证 | 阶段 1 专项 9/9；最终全量 Swift/Rust、治理检查、空白检查和变更范围检查见[阶段 1 独立完成复核](../data-quality/tunnelpad-stability-stage1-independent-completion-review-20260902.md) |
+| 隔离验证 | 阶段 1 专项 9/9；最终全量 Swift/Rust、治理检查、空白检查和变更范围检查见[阶段 1 独立完成复核](../../data-quality/tunnelpad-stability-stage1-independent-completion-review-20260902.md) |
 | 明确留待阶段 2 | 启动/退出收敛、ECS 运行中同步和跨层状态一致性；不把这些未实现项计入阶段 1 缺口 |
 
 ### 阶段 1 Step 0
 
-阶段 1 的 Step 0 证据见[阶段 1 Step 0 证据](../data-quality/tunnelpad-stability-stage1-step0-20260902.md)，记录了生产实现前基线、`TunnelManager`/`TunnelRuntimeState`/`RustLifecycleOwner`/`ProbeCoordinator` 的 upstream impact、共享编辑边界，以及 fake `launchd`、fake 探针、隔离配置和 ECS 双端点矩阵。它是阶段 1 的历史准入证据，不替代阶段 2 自己的 Step 0。
+阶段 1 的 Step 0 证据见[阶段 1 Step 0 证据](../../data-quality/tunnelpad-stability-stage1-step0-20260902.md)，记录了生产实现前基线、`TunnelManager`/`TunnelRuntimeState`/`RustLifecycleOwner`/`ProbeCoordinator` 的 upstream impact、共享编辑边界，以及 fake `launchd`、fake 探针、隔离配置和 ECS 双端点矩阵。它是阶段 1 的历史准入证据，不替代阶段 2 自己的 Step 0。
 
-阶段 1 已完成 Step 0、独立准入、生产实现和独立完成复核；详细实施结果见[阶段 1 实施证据](../data-quality/tunnelpad-stability-stage1-implementation-20260902.md)。
+阶段 1 已完成 Step 0、独立准入、生产实现和独立完成复核；详细实施结果见[阶段 1 实施证据](../../data-quality/tunnelpad-stability-stage1-implementation-20260902.md)。
 
 ## 最新独立准入复核
 
@@ -403,7 +403,7 @@ Step 0 的可执行现状基线现已包括：“配置损坏/半写入时当前
 | 日期 | 2026-09-02 |
 | 阶段 | 阶段 3 |
 | 结论 | 通过（达到“待实施标准”） |
-| 证据 | [阶段 3 Step 0](../data-quality/tunnelpad-stability-stage3-step0-20260902.md)；[阶段 3 独立准入复核](../data-quality/tunnelpad-stability-stage3-independent-review-20260902.md)；阶段 2 总体独立完成复核已通过 |
+| 证据 | [阶段 3 Step 0](../../data-quality/tunnelpad-stability-stage3-step0-20260902.md)；[阶段 3 独立准入复核](../../data-quality/tunnelpad-stability-stage3-independent-review-20260902.md)；阶段 2 总体独立完成复核已通过 |
 | 复核者 | Codex（独立只读复核） |
 
 ## 最新独立完成复核
@@ -413,27 +413,27 @@ Step 0 的可执行现状基线现已包括：“配置损坏/半写入时当前
 | 日期 | 2026-09-02 |
 | 阶段 | 阶段 3 |
 | 结论 | 通过（阶段 3 已完成；稳定性计划整体已完成） |
-| 证据 | [阶段 3 独立完成复核](../data-quality/tunnelpad-stability-stage3-independent-completion-review-20260902.md)；隔离 demo、Release 产物、受控 App、阶段 2 前置、Swift/Rust、治理和环境清理通过 |
+| 证据 | [阶段 3 独立完成复核](../../data-quality/tunnelpad-stability-stage3-independent-completion-review-20260902.md)；隔离 demo、Release 产物、受控 App、阶段 2 前置、Swift/Rust、治理和环境清理通过 |
 | 复核者 | Codex（独立只读复核） |
 
 ## 独立复核记录
 
 | 日期 | 类型 | 阶段 | 结论 | 证据 | 复核者 |
 |---|---|---|---|---|---|
-| 2026-09-01 | 阶段准入复核 | 阶段 0 | 未通过（未达到待实施标准） | [上一轮独立准入复核](../data-quality/tunnelpad-stability-stage0-independent-review-20260901.md)；健康恢复状态机、配置/操作代次与取消、ECS 运行中同步 fixture 尚未执行 | Codex（独立只读复核） |
-| 2026-09-01 | 阶段准入复核 | 阶段 0 | 通过（达到“待实施标准”） | [契约 fixture 独立准入复核](../data-quality/tunnelpad-stability-stage0-independent-review-contract-fixtures-20260901.md)；阶段 0 目标/范围、12 行矩阵、6 项契约 fixture、验证/回滚边界和共享影响复核均通过 | Codex（独立只读复核） |
-| 2026-09-02 | 阶段准入复核 | 阶段 1 | 未通过（未达到“待实施标准”） | [阶段 1 独立准入复核](../data-quality/tunnelpad-stability-stage1-independent-review-20260902.md)；复核时 `PLAN_MAP` 尚未登记阶段 1 证据，且计划将生产接入测试列为当前阻塞项；两项已整改，待重新复核 | Codex（独立只读复核） |
-| 2026-09-02 | 阶段准入复核 | 阶段 1 | 通过（达到“待实施标准”） | [阶段 1 独立准入复核（r2）](../data-quality/tunnelpad-stability-stage1-independent-review-20260902-r2.md)；Step 0、8 行矩阵、影响复核、验证/回滚边界、共享日志边界和当前准入状态均通过 | Codex（独立只读复核） |
-| 2026-09-02 | 阶段完成复核 | 阶段 1 | 通过（已完成） | [阶段 1 独立完成复核](../data-quality/tunnelpad-stability-stage1-independent-completion-review-20260902.md)；完成边界、9/9 专项、118/118 Swift、Rust 51+1、治理和变更范围均通过；阶段 2 保持设计中 | Codex（独立只读复核） |
-| 2026-09-02 | 切片完成复核 | 阶段 2 | 通过（启动/退出资源收敛切片已完成） | [启动/退出资源收敛切片独立完成复核](../data-quality/tunnelpad-stability-stage2-lifecycle-reconciliation-independent-completion-review-20260902.md)；当前代码、启动/退出失败注入、专项与全量回归、治理和变更范围独立核对通过；阶段 2 整体仍保留跨层一致性后续切片 | Codex（独立只读复核） |
-| 2026-09-02 | 阶段准入复核 | 阶段 2 | 通过（达到“待实施标准”） | [ECS 自动恢复切片独立准入复核](../data-quality/tunnelpad-stability-stage2-ecs-recovery-independent-review-20260902.md)；本结论仅覆盖 bootout-first、`notLoaded` 门禁、ECS fail-closed、影响分析、验证/回滚边界，后续阶段 2 切片不在范围内 | Codex（独立只读复核） |
-| 2026-09-02 | 切片完成复核 | 阶段 2 | 通过（跨层状态一致性切片已完成） | [跨层状态一致性切片独立完成复核](../data-quality/tunnelpad-stability-stage2-cross-layer-consistency-independent-completion-review-20260902.md)；当前代码、C1–C3/C7 迟到结果反证、busy 状态保护、专项与全量回归、治理和变更范围独立核对通过；阶段 2 整体仍保留真实受控应用和后续配置/执行器边界 | Codex（独立只读复核） |
-| 2026-09-02 | 阶段准入复核 | 阶段 2 | 通过（达到“待实施标准”） | [跨层状态一致性切片独立准入复核](../data-quality/tunnelpad-stability-stage2-cross-layer-consistency-independent-review-20260902.md)；本结论仅覆盖异步快照/探针结果门禁、busy 状态保护、迟到结果失效和 C1–C8 验证边界；后续已由该切片实施证据和独立完成复核闭环 | Codex（独立只读复核） |
-| 2026-09-02 | 阶段准入复核 | 阶段 2 | 通过（达到“待实施标准”） | [配置重载资源收敛切片独立准入复核](../data-quality/tunnelpad-stability-stage2-config-reload-reconciliation-independent-review-20260902.md)；本结论仅覆盖候选校验、删除 label 的停止/复核/提交顺序、同 ID 参数修改兼容语义和 CfgR-1–CfgR-9 验证边界 | Codex（独立只读复核） |
-| 2026-09-02 | 切片完成复核 | 阶段 2 | 通过（配置重载资源收敛切片已完成） | [配置重载资源收敛切片独立完成复核](../data-quality/tunnelpad-stability-stage2-config-reload-reconciliation-independent-completion-review-20260902.md)；候选失败保留旧 owner 配置、删除 label 先停止/复核、同 ID 参数不自动重启；CfgR-1–CfgR-9、Rust 62+1、Swift 129、治理和 App 冒烟边界均通过 | Codex（独立只读复核） |
-| 2026-09-02 | 阶段完成复核 | 阶段 2 | 通过（已完成） | [阶段 2 总体独立完成复核](../data-quality/tunnelpad-stability-stage2-independent-completion-review-20260902.md)；四个切片、真实 App/launchd 生命周期、真实探针假死触发 ECS 自动恢复、Swift/Rust、治理和环境清理均通过；阶段 3 保持设计中 | Codex（独立只读复核） |
-| 2026-09-02 | 阶段准入复核 | 阶段 3 | 通过（达到“待实施标准”） | [阶段 3 独立准入复核](../data-quality/tunnelpad-stability-stage3-independent-review-20260902.md)；Step 0、隔离 demo/Release/App/治理矩阵、验证/回滚边界和阶段 2 前置均通过 | Codex（独立只读复核） |
-| 2026-09-02 | 阶段完成复核 | 阶段 3 | 通过（已完成） | [阶段 3 独立完成复核](../data-quality/tunnelpad-stability-stage3-independent-completion-review-20260902.md)；隔离 demo 3/3、Release 构建/签名、受控 App 启动/退出、Swift/Rust、治理和环境清理均通过 | Codex（独立只读复核） |
+| 2026-09-01 | 阶段准入复核 | 阶段 0 | 未通过（未达到待实施标准） | [上一轮独立准入复核](../../data-quality/tunnelpad-stability-stage0-independent-review-20260901.md)；健康恢复状态机、配置/操作代次与取消、ECS 运行中同步 fixture 尚未执行 | Codex（独立只读复核） |
+| 2026-09-01 | 阶段准入复核 | 阶段 0 | 通过（达到“待实施标准”） | [契约 fixture 独立准入复核](../../data-quality/tunnelpad-stability-stage0-independent-review-contract-fixtures-20260901.md)；阶段 0 目标/范围、12 行矩阵、6 项契约 fixture、验证/回滚边界和共享影响复核均通过 | Codex（独立只读复核） |
+| 2026-09-02 | 阶段准入复核 | 阶段 1 | 未通过（未达到“待实施标准”） | [阶段 1 独立准入复核](../../data-quality/tunnelpad-stability-stage1-independent-review-20260902.md)；复核时 `PLAN_MAP` 尚未登记阶段 1 证据，且计划将生产接入测试列为当前阻塞项；两项已整改，待重新复核 | Codex（独立只读复核） |
+| 2026-09-02 | 阶段准入复核 | 阶段 1 | 通过（达到“待实施标准”） | [阶段 1 独立准入复核（r2）](../../data-quality/tunnelpad-stability-stage1-independent-review-20260902-r2.md)；Step 0、8 行矩阵、影响复核、验证/回滚边界、共享日志边界和当前准入状态均通过 | Codex（独立只读复核） |
+| 2026-09-02 | 阶段完成复核 | 阶段 1 | 通过（已完成） | [阶段 1 独立完成复核](../../data-quality/tunnelpad-stability-stage1-independent-completion-review-20260902.md)；完成边界、9/9 专项、118/118 Swift、Rust 51+1、治理和变更范围均通过；阶段 2 保持设计中 | Codex（独立只读复核） |
+| 2026-09-02 | 切片完成复核 | 阶段 2 | 通过（启动/退出资源收敛切片已完成） | [启动/退出资源收敛切片独立完成复核](../../data-quality/tunnelpad-stability-stage2-lifecycle-reconciliation-independent-completion-review-20260902.md)；当前代码、启动/退出失败注入、专项与全量回归、治理和变更范围独立核对通过；阶段 2 整体仍保留跨层一致性后续切片 | Codex（独立只读复核） |
+| 2026-09-02 | 阶段准入复核 | 阶段 2 | 通过（达到“待实施标准”） | [ECS 自动恢复切片独立准入复核](../../data-quality/tunnelpad-stability-stage2-ecs-recovery-independent-review-20260902.md)；本结论仅覆盖 bootout-first、`notLoaded` 门禁、ECS fail-closed、影响分析、验证/回滚边界，后续阶段 2 切片不在范围内 | Codex（独立只读复核） |
+| 2026-09-02 | 切片完成复核 | 阶段 2 | 通过（跨层状态一致性切片已完成） | [跨层状态一致性切片独立完成复核](../../data-quality/tunnelpad-stability-stage2-cross-layer-consistency-independent-completion-review-20260902.md)；当前代码、C1–C3/C7 迟到结果反证、busy 状态保护、专项与全量回归、治理和变更范围独立核对通过；阶段 2 整体仍保留真实受控应用和后续配置/执行器边界 | Codex（独立只读复核） |
+| 2026-09-02 | 阶段准入复核 | 阶段 2 | 通过（达到“待实施标准”） | [跨层状态一致性切片独立准入复核](../../data-quality/tunnelpad-stability-stage2-cross-layer-consistency-independent-review-20260902.md)；本结论仅覆盖异步快照/探针结果门禁、busy 状态保护、迟到结果失效和 C1–C8 验证边界；后续已由该切片实施证据和独立完成复核闭环 | Codex（独立只读复核） |
+| 2026-09-02 | 阶段准入复核 | 阶段 2 | 通过（达到“待实施标准”） | [配置重载资源收敛切片独立准入复核](../../data-quality/tunnelpad-stability-stage2-config-reload-reconciliation-independent-review-20260902.md)；本结论仅覆盖候选校验、删除 label 的停止/复核/提交顺序、同 ID 参数修改兼容语义和 CfgR-1–CfgR-9 验证边界 | Codex（独立只读复核） |
+| 2026-09-02 | 切片完成复核 | 阶段 2 | 通过（配置重载资源收敛切片已完成） | [配置重载资源收敛切片独立完成复核](../../data-quality/tunnelpad-stability-stage2-config-reload-reconciliation-independent-completion-review-20260902.md)；候选失败保留旧 owner 配置、删除 label 先停止/复核、同 ID 参数不自动重启；CfgR-1–CfgR-9、Rust 62+1、Swift 129、治理和 App 冒烟边界均通过 | Codex（独立只读复核） |
+| 2026-09-02 | 阶段完成复核 | 阶段 2 | 通过（已完成） | [阶段 2 总体独立完成复核](../../data-quality/tunnelpad-stability-stage2-independent-completion-review-20260902.md)；四个切片、真实 App/launchd 生命周期、真实探针假死触发 ECS 自动恢复、Swift/Rust、治理和环境清理均通过；阶段 3 保持设计中 | Codex（独立只读复核） |
+| 2026-09-02 | 阶段准入复核 | 阶段 3 | 通过（达到“待实施标准”） | [阶段 3 独立准入复核](../../data-quality/tunnelpad-stability-stage3-independent-review-20260902.md)；Step 0、隔离 demo/Release/App/治理矩阵、验证/回滚边界和阶段 2 前置均通过 | Codex（独立只读复核） |
+| 2026-09-02 | 阶段完成复核 | 阶段 3 | 通过（已完成） | [阶段 3 独立完成复核](../../data-quality/tunnelpad-stability-stage3-independent-completion-review-20260902.md)；隔离 demo 3/3、Release 构建/签名、受控 App 启动/退出、Swift/Rust、治理和环境清理均通过 | Codex（独立只读复核） |
 
 ## 未决问题
 
@@ -459,8 +459,8 @@ Step 0 的可执行现状基线现已包括：“配置损坏/半写入时当前
 
 ## 关联 ADR、迁移、spec 或 issue
 
-- [TunnelPad v1 隧道管理应用](tunnelpad-v1.md)
+- [TunnelPad v1 隧道管理应用](../20260829/tunnelpad-v1.md)
 - [TunnelPad 代码质量重构](tunnelpad-code-quality-refactor.md)
 - [TunnelPad Rust Core 迁移](tunnelpad-rust-migration.md)
-- [v1 阶段 2 功能与验收记录](../data-quality/tunnelpad-v1-stage2-features-20260829.md)
+- [v1 阶段 2 功能与验收记录](../../data-quality/tunnelpad-v1-stage2-features-20260829.md)
 - 当前仓库暂无与本计划对应的 ADR 或 migration 文件；若实施中产生持久架构决策或兼容迁移，先补充对应文档，再更新本节。

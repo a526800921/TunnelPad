@@ -2,7 +2,7 @@
 
 - 日期：2026-09-04
 - 基线类型：高风险生命周期行为变更的源码现状、已有真实故障诊断和可执行 fixture 矩阵
-- 计划：[TunnelPad 无人值守受管 SSH 收敛恢复](../plans/tunnelpad-unattended-managed-ssh-recovery.md)
+- 计划：[TunnelPad 无人值守受管 SSH 收敛恢复](../plans/20260904/tunnelpad-unattended-managed-ssh-recovery.md)
 - 结论：Step 0 基线已建立，阶段 0 独立准入已通过；这不代表信号升级已实现，阶段 1 仍须自己的 Step 0 与独立准入。
 
 ## 现状基线

@@ -1,6 +1,6 @@
 # 计划：TunnelPad 界面优化
 
-> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../PLAN_MAP.md#计划索引)为准。
+> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../../PLAN_MAP.md#计划索引)为准。
 
 - 前置：tunnelpad-v1 已完成（主窗口左右布局、设置弹窗、SSH 详细日志开关均已交付，commit `31345a4`、`b6c9796`）
 
@@ -130,26 +130,26 @@ tunnelpad-v1 收档后，用户 2026-08-29 实机使用提出 8 项界面反馈�
 | 日期 | 类型 | 动作/结果 | 证据 | 状态 | 记录者 |
 |---|---|---|---|---|---|
 | 2026-08-29 | 设计 | 需求探索与阶段划分落盘，状态设计中 | 本文件 | 完成 | ZCode Agent（需求轮次） |
-| 2026-08-29 | 实施 | 代码完成：固定侧栏（HSplitView）、去全部启动/停止、消息栏只留错误、日志「自动滚动」开关（ModelPad 式，含一次方案变更与重写）；`swift build` 零告警、`swift test` 55/55、治理检查通过；矩阵 1/2/3 通过 | [阶段 1 证据](../data-quality/tunnelpad-ui-refinements-stage1-20260829.md) | 完成 | ZCode Agent（实施轮次） |
-| 2026-08-30 | 实机补验 | 在打包 App 中关闭「自动滚动」，向上回看后静置 6.5 秒；AX 滚动条值由约 `0.9965` 保持在约 `0.9952`，日志继续刷新但未被拽回底部；空表单保存仍保留弹窗并显示「名称不能为空」 | [阶段 3 证据](../data-quality/tunnelpad-ui-refinements-stage3-20260830.md) | 完成 | Codex（实机复核轮次） |
+| 2026-08-29 | 实施 | 代码完成：固定侧栏（HSplitView）、去全部启动/停止、消息栏只留错误、日志「自动滚动」开关（ModelPad 式，含一次方案变更与重写）；`swift build` 零告警、`swift test` 55/55、治理检查通过；矩阵 1/2/3 通过 | [阶段 1 证据](../../data-quality/tunnelpad-ui-refinements-stage1-20260829.md) | 完成 | ZCode Agent（实施轮次） |
+| 2026-08-30 | 实机补验 | 在打包 App 中关闭「自动滚动」，向上回看后静置 6.5 秒；AX 滚动条值由约 `0.9965` 保持在约 `0.9952`，日志继续刷新但未被拽回底部；空表单保存仍保留弹窗并显示「名称不能为空」 | [阶段 3 证据](../../data-quality/tunnelpad-ui-refinements-stage3-20260830.md) | 完成 | Codex（实机复核轮次） |
 
 ### 阶段准入摘要（阶段 1，历史）
 
-阶段 1 已按 2026-08-29 独立准入复核进入实施；摘要七字段随实施落定，事实源见 [阶段 1 证据](../data-quality/tunnelpad-ui-refinements-stage1-20260829.md) 与下方独立复核记录。
+阶段 1 已按 2026-08-29 独立准入复核进入实施；摘要七字段随实施落定，事实源见 [阶段 1 证据](../../data-quality/tunnelpad-ui-refinements-stage1-20260829.md) 与下方独立复核记录。
 
-- 证据事实源：[tunnelpad-ui-refinements-stage1-20260829.md](../data-quality/tunnelpad-ui-refinements-stage1-20260829.md)。
+- 证据事实源：[tunnelpad-ui-refinements-stage1-20260829.md](../../data-quality/tunnelpad-ui-refinements-stage1-20260829.md)。
 - 交互变更：日志滚动由"视口底部自动检测"改为 ModelPad 式「自动滚动」开关（用户 2026-08-29 实施中改定），见"需求探索-候选方案与取舍"。
 - 收尾证据：矩阵 4 已在 2026-08-30 实机复验通过；矩阵 5 已在阶段 2/3 的实机验证中通过；阶段 1 关闭。
 
 ## 阶段 2 记录（已完成，2026-08-29）
 
-- 证据事实源：[tunnelpad-ui-refinements-stage2-20260829.md](../data-quality/tunnelpad-ui-refinements-stage2-20260829.md)。
+- 证据事实源：[tunnelpad-ui-refinements-stage2-20260829.md](../../data-quality/tunnelpad-ui-refinements-stage2-20260829.md)。
 - 结论：样本矩阵 5 行全过——取消路径零副作用；launchd demo 删除（bootout+plist/日志/config 清理）；app demo 删除（进程终止+pidfile/日志/config 清理）；59/59 用例（含 bootout 失败中断保留配置）；真实隧道全程无影响。config 验证后恢复为两条真实隧道。
 - 附带补验阶段 1 矩阵 5（保存无信息文案）：结构性保证（`lastMessage` 无 UI 读者）+ 删除操作后 AX 树无信息文案元素，判定通过。
 
 ## 阶段 3 记录（已完成，2026-08-30）
 
-- 证据事实源：[tunnelpad-ui-refinements-stage3-20260830.md](../data-quality/tunnelpad-ui-refinements-stage3-20260830.md)。
+- 证据事实源：[tunnelpad-ui-refinements-stage3-20260830.md](../../data-quality/tunnelpad-ui-refinements-stage3-20260830.md)。
 - 结论：空白新建表单默认值、空表单校验、`Demo Add` → `demo-add` 落盘且不自动启动、新建后删除并恢复两条真实隧道均已实机通过；生成的 pidfile、plist、日志均已清理。
 - 回归依据：阶段 3 实施记录中的 `swift build` 零告警、`swift test` 63/63 和治理检查通过；id 冲突序号由 `TunnelIDTests` 覆盖。
 
@@ -209,7 +209,7 @@ tunnelpad-v1 收档后，用户 2026-08-29 实机使用提出 8 项界面反馈�
 ## Step 0 证据
 
 - 阶段 4 基线确认：`MenuBarController.rebuildMenu` 原先按执行器类型禁用 app 项，`toggleTunnel(_:)` 已按 `TunnelStatus` 统一分派到 `TunnelManager.start/stop`。
-- 阶段 4 实施证据：[阶段 4 证据](../data-quality/tunnelpad-ui-refinements-stage4-20260830.md)，包含代码差异、真实配置保护和状态栏实机结果。
+- 阶段 4 实施证据：[阶段 4 证据](../../data-quality/tunnelpad-ui-refinements-stage4-20260830.md)，包含代码差异、真实配置保护和状态栏实机结果。
 
 ## 验证方式
 

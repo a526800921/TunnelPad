@@ -267,7 +267,7 @@ Rust 与 Swift 对字段缺失和显式 null 必须保持一致；不能直接�
 
 ## 关联 ADR、迁移、spec 或 issue
 
-- [ECS 动态 SSH IP](../ecs-dynamic-ssh-ip.md)：本计划收窄其“所有 SSH 均同步”的范围，保留事务安全契约。
-- [无人值守启动恢复](../tunnelpad-unattended-launch-recovery.md)、[ECS 漂移恢复](../tunnelpad-unattended-ecs-ip-drift-recovery.md)：复用队列、持续恢复、取消与状态门禁。
-- [SSH 异常恢复与孤儿清理](../tunnelpad-unattended-ssh-recovery-and-orphan-cleanup.md)：进程收敛和远端清理不随 ECS 关闭而丢失。
+- [ECS 动态 SSH IP](../20260829/ecs-dynamic-ssh-ip.md)：本计划收窄其“所有 SSH 均同步”的范围，保留事务安全契约。
+- [无人值守启动恢复](../20260912/tunnelpad-unattended-launch-recovery.md)、[ECS 漂移恢复](../20260919/tunnelpad-unattended-ecs-ip-drift-recovery.md)：复用队列、持续恢复、取消与状态门禁。
+- [SSH 异常恢复与孤儿清理](../20260919/tunnelpad-unattended-ssh-recovery-and-orphan-cleanup.md)：进程收敛和远端清理不随 ECS 关闭而丢失。
 - [Rust owner ADR](../../adr/0001-rust-core-single-owner.md)：保持配置与生命周期单一 owner。

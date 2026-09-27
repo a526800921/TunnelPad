@@ -1,7 +1,7 @@
 # TunnelPad Rust Core 风险收敛与覆盖率提升：阶段 0 独立准入复核
 
 日期：2026-09-02
-计划：[TunnelPad Rust Core 风险收敛与覆盖率提升](../plans/tunnelpad-core-hardening.md)
+计划：[TunnelPad Rust Core 风险收敛与覆盖率提升](../plans/20260902/tunnelpad-core-hardening.md)
 复核类型：独立只读准入复核
 
 ## 结论

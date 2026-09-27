@@ -3,7 +3,7 @@
 - 日期：2026-09-02
 - 阶段：阶段 2（ECS 自动恢复切片）
 - 状态：切片实现完成；阶段 2 整体仍在实施中
-- 关联计划：[TunnelPad 隧道稳定性与健康恢复](../plans/tunnelpad-stability.md)
+- 关联计划：[TunnelPad 隧道稳定性与健康恢复](../plans/20260830/tunnelpad-stability.md)
 - 准入复核：[ECS 自动恢复切片独立准入复核](tunnelpad-stability-stage2-ecs-recovery-independent-review-20260902.md)
 
 ## 实施范围

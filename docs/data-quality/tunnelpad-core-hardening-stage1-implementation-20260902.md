@@ -1,7 +1,7 @@
 # TunnelPad Rust Core 风险收敛与覆盖率提升：阶段 1 实施证据
 
 日期：2026-09-02
-计划：[TunnelPad Rust Core 风险收敛与覆盖率提升](../plans/tunnelpad-core-hardening.md)
+计划：[TunnelPad Rust Core 风险收敛与覆盖率提升](../plans/20260902/tunnelpad-core-hardening.md)
 状态：实施完成，提交独立完成复核
 
 ## 1. 实施内容

@@ -3,7 +3,7 @@
 - 日期：2026-09-04
 - 阶段：阶段 2
 - 复核者：Codex（独立只读复核）
-- 计划：[TunnelPad 无人值守受管 SSH 收敛恢复](../plans/tunnelpad-unattended-managed-ssh-recovery.md)
+- 计划：[TunnelPad 无人值守受管 SSH 收敛恢复](../plans/20260904/tunnelpad-unattended-managed-ssh-recovery.md)
 - 实施证据：[阶段 2 实施证据](tunnelpad-unattended-managed-ssh-recovery-stage2-implementation-20260904.md)
 - 结论：通过，阶段 2 完成；不代表阶段 3 真实环境已准入或已验收
 

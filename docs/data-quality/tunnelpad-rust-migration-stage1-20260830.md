@@ -2,7 +2,7 @@
 
 - 日期：2026-08-30
 - 范围：C ABI 最小原型与契约冻结；不接入 Package.swift 产品目标，不操作真实隧道
-- 对应计划：[TunnelPad Rust Core 迁移](../plans/tunnelpad-rust-migration.md)
+- 对应计划：[TunnelPad Rust Core 迁移](../plans/20260830/tunnelpad-rust-migration.md)
 - 基线：阶段 0 复验基线（HEAD `64e126fa` 工作树干净）+ Rust 1.96.0
 
 ## 交付物

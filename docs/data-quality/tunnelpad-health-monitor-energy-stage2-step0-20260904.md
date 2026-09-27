@@ -1,7 +1,7 @@
 # TunnelPad 后台健康监测能耗优化：阶段 2 Step 0
 
 - 日期：2026-09-04
-- 关联计划：[TunnelPad 后台健康监测能耗优化](../plans/tunnelpad-health-monitor-energy.md)
+- 关联计划：[TunnelPad 后台健康监测能耗优化](../plans/20260904/tunnelpad-health-monitor-energy.md)
 - 基线类型：用户授权的真实 App、真实本机配置和 Activity Monitor 现状快照
 - 用户决策：用户明确要求直接使用真实环境，阶段 2 不再额外运行隔离 App；该替代不改变代码范围和安全边界
 

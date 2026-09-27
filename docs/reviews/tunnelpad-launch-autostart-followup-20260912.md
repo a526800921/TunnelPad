@@ -2,7 +2,7 @@
 
 - 日期：2026-09-12；起始 HEAD：`92b610c`，起始工作树干净。
 - 本次记录者/修复者：Codex；日志修复为低风险自验，不冒充独立复核。
-- 关联：[原计划](../plans/tunnelpad-launch-autostart.md)、[无人值守启动恢复新计划](../plans/tunnelpad-unattended-launch-recovery.md)。历史完成证据不回写。
+- 关联：[原计划](../plans/20260912/tunnelpad-launch-autostart.md)、[无人值守启动恢复新计划](../plans/20260912/tunnelpad-unattended-launch-recovery.md)。历史完成证据不回写。
 
 ## 用户取舍与范围
 

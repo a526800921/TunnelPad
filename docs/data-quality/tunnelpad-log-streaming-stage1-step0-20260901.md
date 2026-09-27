@@ -1,7 +1,7 @@
 # TunnelPad 日志事件流阶段 1 Step 0 证据
 
 - 日期：2026-09-01
-- 计划：[TunnelPad 日志事件流与面板生命周期](../plans/tunnelpad-log-streaming.md)
+- 计划：[TunnelPad 日志事件流与面板生命周期](../plans/20260830/tunnelpad-log-streaming.md)
 - 阶段：阶段 1
 - 基线类型：行为迁移现状快照 + 隔离文件/事件契约基线
 

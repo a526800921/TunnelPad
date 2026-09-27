@@ -1,7 +1,7 @@
 # TunnelPad Rust Core 迁移：阶段 4 Step 0 时间戳兼容证据
 
 日期：2026-08-30
-计划：[tunnelpad-rust-migration.md](../plans/tunnelpad-rust-migration.md)
+计划：[tunnelpad-rust-migration.md](../plans/20260830/tunnelpad-rust-migration.md)
 
 ## 结论
 

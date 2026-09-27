@@ -1,7 +1,7 @@
 # TunnelPad 日志保留与能耗回归修复：阶段 2 独立准入复核
 
 - 日期：2026-09-05（Asia/Shanghai）
-- 关联计划：[日志保留与能耗回归修复](../plans/tunnelpad-log-retention-energy-regression.md)
+- 关联计划：[日志保留与能耗回归修复](../plans/20260905/tunnelpad-log-retention-energy-regression.md)
 - 复核类型：阶段 2 独立准入复核
 - 结论：通过；达到“待实施”标准。
 

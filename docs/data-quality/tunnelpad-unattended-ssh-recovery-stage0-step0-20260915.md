@@ -93,7 +93,7 @@ pipe_holder proxy_pid=<temporary pid> proxy_alive=yes desc_pid=<temporary pid> d
 
 ## 阶段 0 结论
 
-现状缺口已可复现，阶段 1 的 O1–O7 验证入口、观测字段、错误注入点和失败判定已登记在[专项计划](../plans/tunnelpad-unattended-ssh-recovery-and-orphan-cleanup.md)。O2–O7 的当前隔离输出已经补齐；其中 O2、O4 和 O7 是明确失败反证，不能冒充通过。2026-09-16 独立只读复核确认阶段 0 达到准入，阶段 1 可开始实现；这些反证必须迁移为正向断言，O8 仍延期阶段 2。
+现状缺口已可复现，阶段 1 的 O1–O7 验证入口、观测字段、错误注入点和失败判定已登记在[专项计划](../plans/20260919/tunnelpad-unattended-ssh-recovery-and-orphan-cleanup.md)。O2–O7 的当前隔离输出已经补齐；其中 O2、O4 和 O7 是明确失败反证，不能冒充通过。2026-09-16 独立只读复核确认阶段 0 达到准入，阶段 1 可开始实现；这些反证必须迁移为正向断言，O8 仍延期阶段 2。
 
 ## 脱敏与安全边界
 

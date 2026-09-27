@@ -1,7 +1,7 @@
 # TunnelPad 日志保留与能耗回归修复：阶段 1 实施证据
 
 - 日期：2026-09-05（Asia/Shanghai）
-- 关联计划：[日志保留与能耗回归修复](../plans/tunnelpad-log-retention-energy-regression.md)
+- 关联计划：[日志保留与能耗回归修复](../plans/20260905/tunnelpad-log-retention-energy-regression.md)
 - 阶段：阶段 1
 - 结论：实现完成；进入阶段 2 真实 Release 回归前置复核
 

@@ -1,7 +1,7 @@
 # TunnelPad 日志事件流阶段 3 Step 0 证据
 
 - 日期：2026-09-01
-- 计划：[TunnelPad 日志事件流与面板生命周期](../plans/tunnelpad-log-streaming.md)
+- 计划：[TunnelPad 日志事件流与面板生命周期](../plans/20260830/tunnelpad-log-streaming.md)
 - 阶段：阶段 3
 - 基线类型：阶段 2 隔离 App UI 验收 + Rust/Swift 当前工作树回归 + Release 产物校验
 

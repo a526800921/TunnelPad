@@ -1,6 +1,6 @@
 # TunnelPad Rust Core 风险收敛与覆盖率提升计划
 
-> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../PLAN_MAP.md#计划索引)为准。
+> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../../PLAN_MAP.md#计划索引)为准。
 
 
 ## 需求探索
@@ -46,7 +46,7 @@
 | 当前阶段目标 | 已明确：Core 生命周期风险收敛、反证测试和 production-only 覆盖率 |
 | 范围与非目标 | 已明确：Rust Core；不含 UI、app executor、pidfile/orphan |
 | Step 0 基线 | 已记录：Rust 62 个 unit + 1 个 differential 通过；production-only 行覆盖率 80.60% |
-| 样本/fixture 矩阵 | 下表保留实施前的基线矩阵；实施及独立完成结果见[阶段 1 证据](../data-quality/tunnelpad-core-hardening-stage1-implementation-20260902.md)和[阶段 2 独立完成复核](../data-quality/tunnelpad-core-hardening-stage2-independent-completion-review-20260902.md) |
+| 样本/fixture 矩阵 | 下表保留实施前的基线矩阵；实施及独立完成结果见[阶段 1 证据](../../data-quality/tunnelpad-core-hardening-stage1-implementation-20260902.md)和[阶段 2 独立完成复核](../../data-quality/tunnelpad-core-hardening-stage2-independent-completion-review-20260902.md) |
 | 验证、失败和回滚边界 | 已建立：不改 Schema/ABI/JSON 协议；单一 owner 改动失败可回退 |
 | 最新独立准入复核 | 阶段 0 已通过，阶段 1 达到 `待实施` 标准；阶段 1/2 实施和独立完成复核也已通过 |
 
@@ -58,12 +58,12 @@
 
 阶段 0 基线和独立准入证据已落盘：
 
-- [阶段 0 基线证据](../data-quality/tunnelpad-core-hardening-stage0-20260902.md)：Rust 62+1 回归、覆盖率采集链路、C0–C7 矩阵、CRITICAL impact 和回滚边界。
-- [阶段 0 独立准入复核](../data-quality/tunnelpad-core-hardening-stage0-independent-review-20260902.md)：确认达到阶段 1 `待实施` 标准。
+- [阶段 0 基线证据](../../data-quality/tunnelpad-core-hardening-stage0-20260902.md)：Rust 62+1 回归、覆盖率采集链路、C0–C7 矩阵、CRITICAL impact 和回滚边界。
+- [阶段 0 独立准入复核](../../data-quality/tunnelpad-core-hardening-stage0-independent-review-20260902.md)：确认达到阶段 1 `待实施` 标准。
 
 ## 测试覆盖率
 
-阶段 1 已完成 Core/FFI 反证和覆盖率复测，production-only 行覆盖率为 `1710/2008 = 85.16%`，高于 `>=85%` 目标。完整采集口径、原始 LLVM 警告和专项/全量测试输出见[阶段 1 实施证据](../data-quality/tunnelpad-core-hardening-stage1-implementation-20260902.md)。
+阶段 1 已完成 Core/FFI 反证和覆盖率复测，production-only 行覆盖率为 `1710/2008 = 85.16%`，高于 `>=85%` 目标。完整采集口径、原始 LLVM 警告和专项/全量测试输出见[阶段 1 实施证据](../../data-quality/tunnelpad-core-hardening-stage1-implementation-20260902.md)。
 
 ## Step 0 基线与样本矩阵
 
@@ -92,15 +92,15 @@
 
 | 日期 | 阶段 | 结论 | 证据 | 复核者 |
 |---|---|---|---|---|
-| 2026-09-02 | 阶段 0 → 阶段 1 | 通过，达到阶段 1 `待实施` 标准 | [阶段 0 基线证据](../data-quality/tunnelpad-core-hardening-stage0-20260902.md)；[阶段 0 独立准入复核](../data-quality/tunnelpad-core-hardening-stage0-independent-review-20260902.md) | Codex（独立只读复核） |
+| 2026-09-02 | 阶段 0 → 阶段 1 | 通过，达到阶段 1 `待实施` 标准 | [阶段 0 基线证据](../../data-quality/tunnelpad-core-hardening-stage0-20260902.md)；[阶段 0 独立准入复核](../../data-quality/tunnelpad-core-hardening-stage0-independent-review-20260902.md) | Codex（独立只读复核） |
 
 ## 独立复核记录
 
 | 日期 | 类型 | 结论 | 证据 | 状态 |
 |---|---|---|---|---|
 | 2026-09-02 | 计划建立与范围筛选 | 选定 shutdown 重试和 Core/FFI 反证覆盖；配置 fail-closed、restart fail-closed 作为既有契约回归；UI/app executor/pidfile 风险延后 | 本计划“P1/P2 选择”；`docs/data-quality/tunnelpad-functional-graph-review-20260830.md`；`docs/plans/tunnelpad-stability.md` | 待独立准入复核 |
-| 2026-09-02 | 阶段 0 独立准入 | 基线、C0–C7 矩阵、CRITICAL impact、验证/回滚和非目标边界通过；阶段 1 达到 `待实施` 标准 | [阶段 0 基线证据](../data-quality/tunnelpad-core-hardening-stage0-20260902.md)；[独立准入复核](../data-quality/tunnelpad-core-hardening-stage0-independent-review-20260902.md) | 通过 |
-| 2026-09-02 | 阶段 1 实施与阶段 2 独立完成复核 | shutdown 清理失败可重试；Core/FFI 反证测试通过；production-only 行覆盖率 85.16%；Rust、治理和变更范围检查通过 | [阶段 1 实施证据](../data-quality/tunnelpad-core-hardening-stage1-implementation-20260902.md)；[阶段 2 独立完成复核](../data-quality/tunnelpad-core-hardening-stage2-independent-completion-review-20260902.md) | 通过 |
+| 2026-09-02 | 阶段 0 独立准入 | 基线、C0–C7 矩阵、CRITICAL impact、验证/回滚和非目标边界通过；阶段 1 达到 `待实施` 标准 | [阶段 0 基线证据](../../data-quality/tunnelpad-core-hardening-stage0-20260902.md)；[独立准入复核](../../data-quality/tunnelpad-core-hardening-stage0-independent-review-20260902.md) | 通过 |
+| 2026-09-02 | 阶段 1 实施与阶段 2 独立完成复核 | shutdown 清理失败可重试；Core/FFI 反证测试通过；production-only 行覆盖率 85.16%；Rust、治理和变更范围检查通过 | [阶段 1 实施证据](../../data-quality/tunnelpad-core-hardening-stage1-implementation-20260902.md)；[阶段 2 独立完成复核](../../data-quality/tunnelpad-core-hardening-stage2-independent-completion-review-20260902.md) | 通过 |
 
 ## 实施方案
 

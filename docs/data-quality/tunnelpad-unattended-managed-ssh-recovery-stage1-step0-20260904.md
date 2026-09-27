@@ -2,7 +2,7 @@
 
 - 日期：2026-09-04
 - 基线类型：Rust Core 高风险生命周期实现前的内部契约、隔离 fixture 和失败边界
-- 计划：[TunnelPad 无人值守受管 SSH 收敛恢复](../plans/tunnelpad-unattended-managed-ssh-recovery.md)
+- 计划：[TunnelPad 无人值守受管 SSH 收敛恢复](../plans/20260904/tunnelpad-unattended-managed-ssh-recovery.md)
 - 前置：[阶段 0 独立准入复核](tunnelpad-unattended-managed-ssh-recovery-stage0-independent-review-20260904.md)
 - 结论：阶段 1 Step 0 已建立；当前只允许进行阶段 1 独立准入，不代表 Rust 信号升级已经实现。
 

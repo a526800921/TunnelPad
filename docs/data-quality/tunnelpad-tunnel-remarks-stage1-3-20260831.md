@@ -1,7 +1,7 @@
 # TunnelPad 隧道备注说明与列表副标题：阶段 1–3 实施证据
 
 日期：2026-08-31
-计划：[TunnelPad 隧道备注说明与列表副标题](../plans/tunnelpad-tunnel-remarks.md)
+计划：[TunnelPad 隧道备注说明与列表副标题](../plans/20260830/tunnelpad-tunnel-remarks.md)
 基线：备注计划阶段 0 独立准入已通过；Rust Core 迁移阶段 5 已完成，Rust 继续作为配置读写、schema 校验和生命周期唯一 owner。
 
 ## 实施范围

@@ -3,7 +3,7 @@
 - 日期：2026-09-05
 - 阶段：阶段 2
 - 结论：通过；阶段 2 完成，专项计划达到关闭条件
-- 关联计划：[TunnelPad 日志低写放大与流式保留](../plans/tunnelpad-log-write-amplification.md)
+- 关联计划：[TunnelPad 日志低写放大与流式保留](../plans/20260905/tunnelpad-log-write-amplification.md)
 - 复核性质：基于当前仓库、可复现验证命令、真实 Release 证据和反向引用的独立收尾复核
 
 ## 独立核对结果

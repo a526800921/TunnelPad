@@ -1,7 +1,7 @@
 # 无人值守启动恢复迁移与回滚
 
 - 状态：阶段 1 实施契约；尚未部署。
-- 关联：[专项计划](../plans/tunnelpad-unattended-launch-recovery.md)。
+- 关联：[专项计划](../plans/20260912/tunnelpad-unattended-launch-recovery.md)。
 
 ## 版本与文件
 

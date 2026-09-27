@@ -1,7 +1,7 @@
 # TunnelPad 稳定性计划阶段 1 实施证据
 
 - 日期：2026-09-02
-- 关联计划：[TunnelPad 隧道稳定性与健康恢复](../plans/tunnelpad-stability.md)
+- 关联计划：[TunnelPad 隧道稳定性与健康恢复](../plans/20260830/tunnelpad-stability.md)
 - 准入：[阶段 1 独立准入复核（r2）](tunnelpad-stability-stage1-independent-review-20260902-r2.md)
 - 完成复核：[阶段 1 独立完成复核](tunnelpad-stability-stage1-independent-completion-review-20260902.md)
 - 实施范围：后台健康监测、单隧道健康恢复状态机、配置有效候选保留、手动操作取消/清零、第 10 次失败后的停止和 Rust `launchd` `bootout` fail-closed

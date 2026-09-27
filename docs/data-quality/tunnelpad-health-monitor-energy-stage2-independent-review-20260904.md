@@ -1,7 +1,7 @@
 # TunnelPad 后台健康监测能耗优化：阶段 2 独立准入复核
 
 - 日期：2026-09-04
-- 关联计划：[TunnelPad 后台健康监测能耗优化](../plans/tunnelpad-health-monitor-energy.md)
+- 关联计划：[TunnelPad 后台健康监测能耗优化](../plans/20260904/tunnelpad-health-monitor-energy.md)
 - 复核依据：[阶段 2 Step 0](tunnelpad-health-monitor-energy-stage2-step0-20260904.md)
 
 ## 复核结论

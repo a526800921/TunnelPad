@@ -1,7 +1,7 @@
 # TunnelPad Rust Core owner 切换迁移说明
 
-- 状态、当前阶段和最后更新：[计划索引](../PLAN_MAP.md#计划索引)为准；阶段 5 关闭证据见[专项计划独立复核记录](../plans/tunnelpad-rust-migration.md#独立复核记录)。
-- 关联计划：[TunnelPad Rust Core 迁移](../plans/tunnelpad-rust-migration.md)
+- 状态、当前阶段和最后更新：[计划索引](../PLAN_MAP.md#计划索引)为准；阶段 5 关闭证据见[专项计划独立复核记录](../plans/20260830/tunnelpad-rust-migration.md#独立复核记录)。
+- 关联计划：[TunnelPad Rust Core 迁移](../plans/20260830/tunnelpad-rust-migration.md)
 - 关联决策：[ADR-0001](../adr/0001-rust-core-single-owner.md)
 - 日期：2026-08-30
 

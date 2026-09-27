@@ -1,12 +1,12 @@
 # 计划：ECS 动态 SSH 公网 IP 同步
 
-> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../PLAN_MAP.md#计划索引)为准。
+> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../../PLAN_MAP.md#计划索引)为准。
 
 ## 背景
 
 本机网络切换会改变公网 IPv4，使仅允许旧来源 `/32` 的 ECS SSH 安全组规则失效。本计划先在项目外跑通受控的安全组同步流程，再将已验证的流程接入仓库；阶段 0 和阶段 1 保持与 TunnelPad 启动链路隔离，阶段 2 才在 Rust Core 唯一 owner 已完成的边界上设计 SSH 启动前集成。
 
-[ecs-dynamic-ssh-ip-design.md](../ecs-dynamic-ssh-ip-design.md) 是初始背景材料。本计划是本事项的唯一规范事实源。
+[ecs-dynamic-ssh-ip-design.md](../../ecs-dynamic-ssh-ip-design.md) 是初始背景材料。本计划是本事项的唯一规范事实源。
 
 ## 目标
 
@@ -159,7 +159,7 @@
 
 ### Step 0 证据
 
-本机预检、云端只读验证、写权限审查和项目外受控实跑均已形成脱敏证据；最新实跑记录见 [阶段 0 项目外受控实跑](../data-quality/ecs-dynamic-ssh-ip-stage0-controlled-run-20260829.md)。证据不含原始公网 IP、账户 ID、完整资源 ID、AccessKey 或 Secret。
+本机预检、云端只读验证、写权限审查和项目外受控实跑均已形成脱敏证据；最新实跑记录见 [阶段 0 项目外受控实跑](../../data-quality/ecs-dynamic-ssh-ip-stage0-controlled-run-20260829.md)。证据不含原始公网 IP、账户 ID、完整资源 ID、AccessKey 或 Secret。
 
 ### 样本矩阵
 
@@ -176,7 +176,7 @@
 
 ### 阶段证据
 
-- [本机预检（2026-08-29）](../data-quality/ecs-dynamic-ssh-ip-stage0-local-preflight-20260829.md)：目标 SSH 别名配置未输出跳板/代理指令；`jq` 与 OpenSSH 可用；阿里云 CLI 未安装；未读取 FullAccess CSV，未连接 ECS 或调用云 API。
+- [本机预检（2026-08-29）](../../data-quality/ecs-dynamic-ssh-ip-stage0-local-preflight-20260829.md)：目标 SSH 别名配置未输出跳板/代理指令；`jq` 与 OpenSSH 可用；阿里云 CLI 未安装；未读取 FullAccess CSV，未连接 ECS 或调用云 API。
 - `docs/data-quality/ecs-dynamic-ssh-ip-stage0-cli-credential-prep-20260829.md`（CLI 与凭证准备，2026-08-29）：官方 CLI 已安装；经用户授权的新 CSV 数据行仅在本机进程内用于一次失败的隔离 profile 初始化，未写入配置或输出；因尚无 RegionId 未执行 STS 或 ECS 调用。
 - `docs/data-quality/ecs-dynamic-ssh-ip-stage0-cloud-readonly-20260829.md`（云端只读验证，2026-08-29）：隔离 profile 已在仓库外创建；新专用 RAM 用户通过 STS 验证，且读取目标安全组成功；仅该安全组中未发现宽泛 SSH 放行。
 - `docs/data-quality/ecs-dynamic-ssh-ip-stage0-network-baseline-20260829.md`（公网出口基线，2026-08-29）：禁用代理、强制 IPv4 后两个 HTTPS 端点返回一致的全局 IPv4；用户随后报告本机运行代理，故该基线不能单独证明 SSH 实际来源。
@@ -352,7 +352,7 @@
 
 ### Step 0 证据
 
-本阶段 Step 0 采用架构探索基线类型，已通过只读命令固定 Rust owner、启动入口、SSH 分类和阶段 1 命令契约；证据见[阶段 2 Step 0 基线](../data-quality/ecs-dynamic-ssh-ip-stage2-step0-20260831.md)。该证据不调用真实 ECS 写接口、不启停真实隧道，也不包含凭证或原始公网 IP。
+本阶段 Step 0 采用架构探索基线类型，已通过只读命令固定 Rust owner、启动入口、SSH 分类和阶段 1 命令契约；证据见[阶段 2 Step 0 基线](../../data-quality/ecs-dynamic-ssh-ip-stage2-step0-20260831.md)。该证据不调用真实 ECS 写接口、不启停真实隧道，也不包含凭证或原始公网 IP。
 
 ### 样本矩阵
 
@@ -418,4 +418,4 @@
 ## 关联 ADR、迁移、spec 或 issue
 
 - TunnelPad v1：范围隔离对象；本计划不修改其 v1 范围，也不依赖其阶段状态。
-- [ECS 动态 SSH 公网 IP 更新方案（背景材料）](../ecs-dynamic-ssh-ip-design.md)：初始方案推导，不是规范事实源。
+- [ECS 动态 SSH 公网 IP 更新方案（背景材料）](../../ecs-dynamic-ssh-ip-design.md)：初始方案推导，不是规范事实源。

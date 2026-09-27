@@ -1,7 +1,7 @@
 # TunnelPad 稳定性计划阶段 0 基线证据
 
 - 日期：2026-09-01
-- 关联计划：[TunnelPad 隧道稳定性与健康恢复](../plans/tunnelpad-stability.md)
+- 关联计划：[TunnelPad 隧道稳定性与健康恢复](../plans/20260830/tunnelpad-stability.md)
 - 基线类型：缺陷现状快照 + 隔离 fixture 设计
 - 结论：现有探针、配置、launchd 生命周期、退出清理和 ECS 启动前置边界已完成只读核验；现状缺口已通过 4 项 Swift 隔离测试和 1 项 Rust 基线测试复现，后续实现契约又通过 6 项仅测试契约 fixture 固定，未接入生产恢复逻辑；阶段 0 已通过独立准入并关闭，阶段 1 仍需自己的 Step 0 和准入。
 

@@ -2,7 +2,7 @@
 
 - 日期：2026-08-30
 - 范围：9 类组件 parity + 跨语言差分测试；不接入产品路径，不操作真实隧道
-- 对应计划：[TunnelPad Rust Core 迁移](../plans/tunnelpad-rust-migration.md)
+- 对应计划：[TunnelPad Rust Core 迁移](../plans/20260830/tunnelpad-rust-migration.md)
 - 基线：阶段 1 完成态（HEAD `adfb12e`）
 
 ## 交付物

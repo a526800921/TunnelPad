@@ -1,7 +1,7 @@
 # TunnelPad 稳定性阶段 2 启动/退出资源收敛切片实施证据
 
 - 日期：2026-09-02
-- 计划：[TunnelPad 隧道稳定性与健康恢复](../plans/tunnelpad-stability.md)
+- 计划：[TunnelPad 隧道稳定性与健康恢复](../plans/20260830/tunnelpad-stability.md)
 - 阶段：阶段 2
 - 切片：`launchd` 启动/退出资源收敛
 - 前置：[切片 Step 0](tunnelpad-stability-stage2-lifecycle-reconciliation-step0-20260902.md)；[切片独立准入复核](tunnelpad-stability-stage2-lifecycle-reconciliation-independent-review-20260902.md)

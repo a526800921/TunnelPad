@@ -2,7 +2,7 @@
 
 - 日期：2026-08-30
 - 范围：只读架构/工具链/行为基线；不创建 Rust 工程，不操作真实隧道
-- 对应计划：[TunnelPad Rust Core 迁移](../plans/tunnelpad-rust-migration.md)
+- 对应计划：[TunnelPad Rust Core 迁移](../plans/20260830/tunnelpad-rust-migration.md)
 
 ## 基线结论
 

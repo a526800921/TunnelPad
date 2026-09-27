@@ -1,7 +1,7 @@
 # TunnelPad 后台健康监测能耗优化：日志修复后阶段 2 独立完成复核
 
 - 日期：2026-09-05（Asia/Shanghai）
-- 关联计划：[后台健康监测能耗优化](../plans/tunnelpad-health-monitor-energy.md)
+- 关联计划：[后台健康监测能耗优化](../plans/20260904/tunnelpad-health-monitor-energy.md)
 - 复核类型：日志保留修复后的阶段 2 独立完成复核
 - 结论：通过；阶段 2 完成，本计划关闭。
 

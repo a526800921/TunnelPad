@@ -1,6 +1,6 @@
 # 计划：TunnelPad v1 隧道管理应用
 
-> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../PLAN_MAP.md#计划索引)为准。
+> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../../PLAN_MAP.md#计划索引)为准。
 
 ## 背景
 
@@ -99,7 +99,7 @@ v1 引入 TunnelPad 自身的配置文件 schema（config.json v1，定义见"�
 
 ## 阶段 0 记录（已完成，2026-08-29）
 
-- 证据事实源：[tunnelpad-v1-stage0-baseline-20260829.md](../data-quality/tunnelpad-v1-stage0-baseline-20260829.md)（含样本矩阵四项实测、两条 plist 脱敏原文、launchctl 关键状态、日志观察）。
+- 证据事实源：[tunnelpad-v1-stage0-baseline-20260829.md](../../data-quality/tunnelpad-v1-stage0-baseline-20260829.md)（含样本矩阵四项实测、两条 plist 脱敏原文、launchctl 关键状态、日志观察）。
 - 结论：两条旧 agent 均 `state=running`；admin 回环探测 `401`；ECS 侧 `LISTEN 127.0.0.1:22022`；无阻塞项。
 - 迁移输入要点：两条命令选项集合不同（admin-tunnel 多 `ConnectTimeout=10`）、`ThrottleInterval` 分别为 10/15、日志路径与 stdout/stderr 分文件方式不同；admin-tunnel 历史 TCC 报错印证 launchd 不可读 `~/Documents`；reverse-ssh `runs=7126` 证明 KeepAlive 重拉长期真实生效。
 
@@ -199,13 +199,13 @@ v1 引入 TunnelPad 自身的配置文件 schema（config.json v1，定义见"�
 
 #### 打包约定
 
-- `App/Resources/Info.plist`：`CFBundleIdentifier=com.jafish.tunnelpad.app`（2026-08-30 由 `com.jafish.tunnelpad` 迁移，根因、证据与身份约束见 [ADR-0002](../adr/0002-app-bundle-id-migration.md)；launchd 标签前缀 `com.jafish.tunnelpad.<tunnel-id>` 不变）、`CFBundleExecutable=tunnelpad`、`LSUIElement=true`、`LSMinimumSystemVersion=14.0`。
+- `App/Resources/Info.plist`：`CFBundleIdentifier=com.jafish.tunnelpad.app`（2026-08-30 由 `com.jafish.tunnelpad` 迁移，根因、证据与身份约束见 [ADR-0002](../../adr/0002-app-bundle-id-migration.md)；launchd 标签前缀 `com.jafish.tunnelpad.<tunnel-id>` 不变）、`CFBundleExecutable=tunnelpad`、`LSUIElement=true`、`LSMinimumSystemVersion=14.0`。
 - 图标：`scripts/make_icon.swift`（AppKit 绘制 1024px → sips 生成 iconset → iconutil 合成）产出 `App/Resources/TunnelPad.icns`，产物入库保证可复现构建。
 - `scripts/build_app.sh`（参照 ModelPad 同名脚本）：`swift test`（`--skip-tests` 可跳）→ `swift build -c release --product tunnelpad` → 组装 `dist/TunnelPad.app` → ad-hoc 签名 → `plutil -lint` 校验。
 
 ## 阶段 1 记录（已完成，2026-08-29）
 
-- 证据事实源：[tunnelpad-v1-stage1-takeover-20260829.md](../data-quality/tunnelpad-v1-stage1-takeover-20260829.md)。
+- 证据事实源：[tunnelpad-v1-stage1-takeover-20260829.md](../../data-quality/tunnelpad-v1-stage1-takeover-20260829.md)。
 - 结论：两条隧道经 UI 接管至 `com.jafish.tunnelpad.*`，命令逐字等价、行为探测（curl 401 / ECS LISTEN 22022）接管前后一致；杀 ssh 进程 1 秒自动重连；退出即停两条路径（菜单正常退出 + SIGTERM）均实测通过；重启 app 一键恢复两次实测通过。`swift build` 零告警、`swift test` 29 用例全通过。
 - 实施中发现并修复：SIGTERM 信号处理闭包继承 `@MainActor` 隔离导致 `dispatch_assert_queue` 崩溃（bootout 未执行）；已移入 nonisolated `Shutdown.installSignalHandlers()` 并复测通过。
 - 旧 plist 备份于 `~/Library/Application Support/TunnelPad/migration-backup/`；`~/Library/LaunchAgents` 已无旧 plist。
@@ -218,7 +218,7 @@ v1 引入 TunnelPad 自身的配置文件 schema（config.json v1，定义见"�
 
 ## 阶段 2 记录（已完成，2026-08-29）
 
-- 证据事实源：[tunnelpad-v1-stage2-features-20260829.md](../data-quality/tunnelpad-v1-stage2-features-20260829.md)。
+- 证据事实源：[tunnelpad-v1-stage2-features-20260829.md](../../data-quality/tunnelpad-v1-stage2-features-20260829.md)。
 - 结论：样本矩阵 9 行全部通过——app 执行器（真实 demo 隧道 + 外部 kill 后 keepAlive 1s 自动重启）、真实探针（`探针 401 ✓`）、日志查看 sheet、`build_app.sh` 打包（plutil/codesign 通过）、.app LSUIElement 生效（`ApplicationType="UIElement"`）与退出语义（菜单退出 → launchd 卸载 + app 子进程终止 + pidfile 清理）；`swift build` 零告警、`swift test` 48 用例全部通过。
 - 最终状态：`dist/TunnelPad.app`（UIElement）常驻菜单栏托管两条真实隧道，admin 探针满足；demo 验收隧道已从 config 移除。
 - 技术契约见"技术方案（阶段 2 冻结）"章节；schema 追加的可选 `probe` 字段向后兼容。
@@ -241,14 +241,14 @@ v1 引入 TunnelPad 自身的配置文件 schema（config.json v1，定义见"�
 
 | 阶段 | Step 0 基线 | 证据 |
 |---|---|---|
-| 阶段 0 | 两条手工 launchd 隧道现状快照（plist 脱敏原文、launchctl 状态、curl 401、ECS LISTEN 22022） | [基线快照](../data-quality/tunnelpad-v1-stage0-baseline-20260829.md) |
-| 阶段 1 | 阶段 0 快照作为迁移行为基线；ModelPad 骨架为可运行参照 | [接管与验证记录](../data-quality/tunnelpad-v1-stage1-takeover-20260829.md) |
-| 阶段 2 | ModelPad `ModelProcessManager` 为 app 执行器参照；阶段 0/1 真实行为（curl 401 / ECS LISTEN 22022）为探针期望值 | [功能与验收记录](../data-quality/tunnelpad-v1-stage2-features-20260829.md) |
+| 阶段 0 | 两条手工 launchd 隧道现状快照（plist 脱敏原文、launchctl 状态、curl 401、ECS LISTEN 22022） | [基线快照](../../data-quality/tunnelpad-v1-stage0-baseline-20260829.md) |
+| 阶段 1 | 阶段 0 快照作为迁移行为基线；ModelPad 骨架为可运行参照 | [接管与验证记录](../../data-quality/tunnelpad-v1-stage1-takeover-20260829.md) |
+| 阶段 2 | ModelPad `ModelProcessManager` 为 app 执行器参照；阶段 0/1 真实行为（curl 401 / ECS LISTEN 22022）为探针期望值 | [功能与验收记录](../../data-quality/tunnelpad-v1-stage2-features-20260829.md) |
 
 ## 验证方式
 
 - `swift build` 零告警；`swift test` 48 用例全部通过（2026-08-29 独立复核轮次复测）。
-- 真实验证矩阵证据：[阶段 1 接管验证记录](../data-quality/tunnelpad-v1-stage1-takeover-20260829.md)、[阶段 2 功能与验收记录](../data-quality/tunnelpad-v1-stage2-features-20260829.md)。
+- 真实验证矩阵证据：[阶段 1 接管验证记录](../../data-quality/tunnelpad-v1-stage1-takeover-20260829.md)、[阶段 2 功能与验收记录](../../data-quality/tunnelpad-v1-stage2-features-20260829.md)。
 - `plan-governance-cli check .` 与 `--strict-readiness` 无 ERROR。
 
 ## 测试覆盖率

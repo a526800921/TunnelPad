@@ -1,6 +1,6 @@
 # 计划：TunnelPad 隧道备注说明与列表副标题
 
-> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../PLAN_MAP.md#计划索引)为准。
+> 规范适用（2026-09-06）：本计划保留完成时的阶段、验收条件与独立复核历史；后续变更遵循[新版规范与历史兼容](../../PLAN_MAP.md#规范适用与历史兼容)。状态、当前阶段和最后更新以[计划索引](../../PLAN_MAP.md#计划索引)为准。
 
 - 前置：`tunnelpad-v1`、`tunnelpad-code-quality-refactor` 和 `tunnelpad-rust-migration` 阶段 5 已完成；本计划阶段 0–3 已完成
 
@@ -32,11 +32,11 @@
 
 ### 已确认事实
 
-- 左下角刷新按钮位于 `MainPanelView`，动作是 `Task { await manager.reloadConfigAsync(); rescanLegacyAgents() }`，帮助文案为“重新加载 config.json”。[MainPanelView.swift](../../Sources/tunnelpad/MainPanelView.swift)
-- `reloadConfigAsync()` 只加载并替换配置、裁剪运行时状态，然后调用 `refreshAsync()`；没有调用 `start`、`stop`、`restart` 或 launchd plist 写入流程。[TunnelManager.swift](../../Sources/TunnelPadCore/TunnelManager.swift)
-- 编辑保存路径明确提示运行中的隧道在下次重启后使用新参数；切换执行器时只停止旧执行器实例，不会把普通参数修改自动重启。[TunnelManager.swift](../../Sources/TunnelPadCore/TunnelManager.swift)
-- `TunnelConfig` 使用手写 `Codable` 解码器，已有 `executor`、`keepAlive`、`throttleInterval` 和 `probe` 的缺省兼容模式，适合追加可选备注字段。[TunnelConfig.swift](../../Sources/TunnelPadCore/TunnelConfig.swift)
-- `TunnelSidebarRow` 当前在隧道名称下显示 `tunnel.launchdLabel`；新建和编辑表单共用 `TunnelFormState`，基本信息区目前只有名称输入。[TunnelDetailComponents.swift](../../Sources/tunnelpad/TunnelDetailComponents.swift)；[TunnelFormState.swift](../../Sources/tunnelpad/TunnelFormState.swift)；[TunnelSettingsSheet.swift](../../Sources/tunnelpad/TunnelSettingsSheet.swift)；[NewTunnelSheet.swift](../../Sources/tunnelpad/NewTunnelSheet.swift)
+- 左下角刷新按钮位于 `MainPanelView`，动作是 `Task { await manager.reloadConfigAsync(); rescanLegacyAgents() }`，帮助文案为“重新加载 config.json”。[MainPanelView.swift](../../../Sources/tunnelpad/MainPanelView.swift)
+- `reloadConfigAsync()` 只加载并替换配置、裁剪运行时状态，然后调用 `refreshAsync()`；没有调用 `start`、`stop`、`restart` 或 launchd plist 写入流程。[TunnelManager.swift](../../../Sources/TunnelPadCore/TunnelManager.swift)
+- 编辑保存路径明确提示运行中的隧道在下次重启后使用新参数；切换执行器时只停止旧执行器实例，不会把普通参数修改自动重启。[TunnelManager.swift](../../../Sources/TunnelPadCore/TunnelManager.swift)
+- `TunnelConfig` 使用手写 `Codable` 解码器，已有 `executor`、`keepAlive`、`throttleInterval` 和 `probe` 的缺省兼容模式，适合追加可选备注字段。[TunnelConfig.swift](../../../Sources/TunnelPadCore/TunnelConfig.swift)
+- `TunnelSidebarRow` 当前在隧道名称下显示 `tunnel.launchdLabel`；新建和编辑表单共用 `TunnelFormState`，基本信息区目前只有名称输入。[TunnelDetailComponents.swift](../../../Sources/tunnelpad/TunnelDetailComponents.swift)；[TunnelFormState.swift](../../../Sources/tunnelpad/TunnelFormState.swift)；[TunnelSettingsSheet.swift](../../../Sources/tunnelpad/TunnelSettingsSheet.swift)；[NewTunnelSheet.swift](../../../Sources/tunnelpad/NewTunnelSheet.swift)
 - 当前 HEAD 为 `90dba27b582411c6c836233cc3d1319c03593001`，工作树干净；Rust Core 阶段 5 已完成并由 Rust 作为配置读写、schema 校验和生命周期的唯一 owner。本计划不把 Rust 迁移历史改动归入备注功能，也不覆盖既有提交。
 
 ### 暂定假设与验证方式
@@ -131,7 +131,7 @@
 | 当前阻塞项 | 无 |
 | 最新独立准入复核 | 2026-08-31：阶段 3 通过，达到本计划完成标准 |
 
-阻塞说明：备注阶段 1–3 已完成；旧 ECS 漂移提示仅保留在历史复核记录中，当前 ECS 状态见[计划索引](../PLAN_MAP.md#计划索引)。
+阻塞说明：备注阶段 1–3 已完成；旧 ECS 漂移提示仅保留在历史复核记录中，当前 ECS 状态见[计划索引](../../PLAN_MAP.md#计划索引)。
 
 ### 实施步骤
 
@@ -139,7 +139,7 @@
 2. 在 Swift `TunnelConfig`、`TunnelFormState` 和新建/编辑表单中追加备注绑定，保存前去除首尾空白。
 3. 补齐 Swift/Rust 旧配置兼容、Unicode round-trip、表单保存和配置字段不影响 launchd 派生值的测试。
 4. 阶段 1 通过后进入阶段 2，实现备注优先、launchd label 兜底的列表副标题，并验证外部刷新只更新展示。
-5. 阶段 2 通过后完成受控应用冒烟、差分/回归、治理检查和独立完成复核。以上步骤已全部完成，具体结果见[阶段 1–3 实施证据](../data-quality/tunnelpad-tunnel-remarks-stage1-3-20260831.md)。
+5. 阶段 2 通过后完成受控应用冒烟、差分/回归、治理检查和独立完成复核。以上步骤已全部完成，具体结果见[阶段 1–3 实施证据](../../data-quality/tunnelpad-tunnel-remarks-stage1-3-20260831.md)。
 
 ### Step 0 证据（阶段 1–3）
 
@@ -172,7 +172,7 @@
 | 2026-08-30 | 只读源码核对 | 查证刷新入口、配置解码器、共享表单状态和侧栏行当前实现；未修改代码、配置或运行中隧道 | `MainPanelView.swift`、`TunnelManager.swift`、`TunnelConfig.swift`、`TunnelFormState.swift`、`TunnelDetailComponents.swift`、双表单源码 | 通过 | Codex |
 | 2026-08-31 | 阶段 0 基线复验 | 在干净 HEAD `90dba27b582411c6c836233cc3d1319c03593001` 复跑刷新链路、Swift/Rust 配置字段、列表副标题和 owner 事实核对；确认 `remark` 尚未进入实现，Rust Core 阶段 5 已完成；未修改代码、配置或运行中隧道 | `rg -n 'reloadConfigAsync|refreshAsync|下次重启|restart|bootstrap' Sources/tunnelpad/MainPanelView.swift Sources/TunnelPadCore/TunnelManager.swift`；`rg -n 'remark|TunnelConfig' Sources/TunnelPadCore/TunnelConfig.swift rust/tunnelpad-core/src/lib.rs Sources/tunnelpad/TunnelFormState.swift Sources/tunnelpad/TunnelDetailComponents.swift`；`git status --porcelain=v1`；`docs/adr/0001-rust-core-single-owner.md`；`docs/migrations/tunnelpad-rust-owner-cutover.md` | 通过 | Codex |
 | 2026-08-31 | 阶段 0 独立准入复核 | 逐条复核目标/非目标、Step 0、7 行样本矩阵、验证方式、失败/回滚边界和反向引用；确认 Rust owner 前置已完成，阶段 1 影响范围可控 | 当前专项计划、`docs/PLAN_MAP.md`、`plan-governance-cli check . --strict-readiness`（目标计划结构无 ERROR；全仓另有 ECS 计划状态漂移） | 通过（阶段 1 可实施） | Codex（独立复核轮次） |
-| 2026-08-31 | 阶段 1–3 实施验证 | 完成 Rust/Swift 配置字段、双表单备注、列表副标题、旧配置兼容、Unicode/引号、配置持久化、差分、smoke、release 打包和只读 AX 验证；未触碰真实隧道生命周期 | [阶段 1–3 实施证据](../data-quality/tunnelpad-tunnel-remarks-stage1-3-20260831.md)；当前工作树 `swift test` 82/82（含并行 ECS 测试）；`cargo test --manifest-path rust/Cargo.toml` 50/50；`./rust/scripts/differential.sh`；`./rust/scripts/smoke.sh`；`./scripts/build_app.sh` | 通过 | Codex |
+| 2026-08-31 | 阶段 1–3 实施验证 | 完成 Rust/Swift 配置字段、双表单备注、列表副标题、旧配置兼容、Unicode/引号、配置持久化、差分、smoke、release 打包和只读 AX 验证；未触碰真实隧道生命周期 | [阶段 1–3 实施证据](../../data-quality/tunnelpad-tunnel-remarks-stage1-3-20260831.md)；当前工作树 `swift test` 82/82（含并行 ECS 测试）；`cargo test --manifest-path rust/Cargo.toml` 50/50；`./rust/scripts/differential.sh`；`./rust/scripts/smoke.sh`；`./scripts/build_app.sh` | 通过 | Codex |
 
 阶段证据采用追加式记录；实施声明不能替代独立准入或完成复核。
 
@@ -229,7 +229,7 @@
 
 ## 关联 ADR、迁移、spec 或 issue
 
-- [TunnelPad v1 隧道管理应用](tunnelpad-v1.md)
+- [TunnelPad v1 隧道管理应用](../20260829/tunnelpad-v1.md)
 - [TunnelPad 代码质量重构](tunnelpad-code-quality-refactor.md)
 - [TunnelPad Rust Core 迁移](tunnelpad-rust-migration.md)
 - 当前仓库暂无与本计划对应的 ADR 或 migration 文件；若 Rust Core 迁移或配置 owner 发生持久边界变化，先补充对应文档，再更新本节和 `docs/PLAN_MAP.md`。

@@ -4,8 +4,8 @@
 
 本记录同时作为以下两个计划的阶段 2 最终用户验收证据：
 
-- [TunnelPad 无人值守 SSH 异常恢复与孤儿清理](../plans/tunnelpad-unattended-ssh-recovery-and-orphan-cleanup.md)
-- [TunnelPad 无人值守 ECS 公网 IP 漂移同步与断线恢复](../plans/tunnelpad-unattended-ecs-ip-drift-recovery.md)
+- [TunnelPad 无人值守 SSH 异常恢复与孤儿清理](../plans/20260919/tunnelpad-unattended-ssh-recovery-and-orphan-cleanup.md)
+- [TunnelPad 无人值守 ECS 公网 IP 漂移同步与断线恢复](../plans/20260919/tunnelpad-unattended-ecs-ip-drift-recovery.md)
 
 验收使用已部署的新 Release App；`motorcycle-local-docker` 保持远端转发端口 `18080`，并仅对该隧道开启默认关闭的 `forceRemotePortCleanup`。本轮不新增代码改动，也不重复发起独立复核；阶段 2 复用既有独立设计/实现复核及其修复自验证据。
 

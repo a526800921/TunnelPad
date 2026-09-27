@@ -4,7 +4,7 @@
 - 阶段：阶段 0
 - 结论：通过；阶段 0 完成，阶段 1 达到 `待实施` 标准
 - 复核者：Codex（基于当前仓库、真实 Release App 只读窗口和治理检查的独立复核）
-- 关联计划：[TunnelPad 日志低写放大与流式保留](../plans/tunnelpad-log-write-amplification.md)
+- 关联计划：[TunnelPad 日志低写放大与流式保留](../plans/20260905/tunnelpad-log-write-amplification.md)
 
 ## 复核范围
 

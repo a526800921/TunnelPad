@@ -1,7 +1,7 @@
 # TunnelPad 能耗修复后隔夜对比基线
 
 - 日期：2026-09-05（Asia/Shanghai），采集窗口 19:14–19:18。
-- 关联计划：[后台健康监测能耗优化](../plans/tunnelpad-health-monitor-energy.md)、[日志保留能耗回归](../plans/tunnelpad-log-retention-energy-regression.md)（两计划均已关闭）。
+- 关联计划：[后台健康监测能耗优化](../plans/20260904/tunnelpad-health-monitor-energy.md)、[日志保留能耗回归](../plans/20260905/tunnelpad-log-retention-energy-regression.md)（两计划均已关闭）。
 - 性质：只读观测基线，为 2026-09-06 隔夜对比提供当日锚点；不是准入复核，不改变任何计划状态。
 - 操作边界：未重启 App、未启停隧道、未清空或修改真实日志、未修改源码。
 - 机器：Mac17,9，macOS 26.6.2，物理内存 64 GB，电池 80%（接交流电，未充电，交流电时长 46:03→46:06），无热告警。

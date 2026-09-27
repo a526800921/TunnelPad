@@ -1,7 +1,7 @@
 # TunnelPad 后台健康监测能耗优化：阶段 2 真实 App 验收
 
 - 日期：2026-09-04
-- 关联计划：[TunnelPad 后台健康监测能耗优化](../plans/tunnelpad-health-monitor-energy.md)
+- 关联计划：[TunnelPad 后台健康监测能耗优化](../plans/20260904/tunnelpad-health-monitor-energy.md)
 - 前置：[阶段 2 Step 0](tunnelpad-health-monitor-energy-stage2-step0-20260904.md)
 - 结论：真实 App 能耗切片通过；活动 `admin-tunnel` 的 stop/start 状态收敛与自动恢复已在受控原 PID 释放窗口中通过；纯 `SIGSTOP` 无人工释放的进程处置边界仍未纳入生产行为，计划保持实施中
 

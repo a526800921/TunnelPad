@@ -3,7 +3,7 @@
 - 日期：2026-09-05
 - 阶段：阶段 1
 - 结论：实施完成；进入阶段 2 真实 Release 回归
-- 关联计划：[TunnelPad 日志低写放大与流式保留](../plans/tunnelpad-log-write-amplification.md)
+- 关联计划：[TunnelPad 日志低写放大与流式保留](../plans/20260905/tunnelpad-log-write-amplification.md)
 
 ## 实施内容
 

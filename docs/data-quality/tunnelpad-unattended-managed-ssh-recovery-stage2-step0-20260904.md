@@ -2,7 +2,7 @@
 
 - 日期：2026-09-04
 - 阶段：阶段 2
-- 计划：[TunnelPad 无人值守受管 SSH 收敛恢复](../plans/tunnelpad-unattended-managed-ssh-recovery.md)
+- 计划：[TunnelPad 无人值守受管 SSH 收敛恢复](../plans/20260904/tunnelpad-unattended-managed-ssh-recovery.md)
 - 前置：[阶段 1 独立完成复核](tunnelpad-unattended-managed-ssh-recovery-stage1-independent-completion-review-20260904.md)
 - 基线类型：当前工作树 Release 构建、Rust/Swift/FFI 兼容回归、隔离 App 产物校验；不把真实信号注入作为阶段 2 的证据
 

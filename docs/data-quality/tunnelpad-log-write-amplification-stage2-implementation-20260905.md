@@ -3,7 +3,7 @@
 - 日期：2026-09-05
 - 阶段：阶段 2
 - 结论：真实 Release 回归完成；进入独立完成复核
-- 关联计划：[TunnelPad 日志低写放大与流式保留](../plans/tunnelpad-log-write-amplification.md)
+- 关联计划：[TunnelPad 日志低写放大与流式保留](../plans/20260905/tunnelpad-log-write-amplification.md)
 - 产物：`/Users/jafish/Documents/work/TunnelPad/dist/TunnelPad.app`
 
 ## 真实窗口

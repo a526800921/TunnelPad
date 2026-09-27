@@ -1,0 +1,16 @@
+{
+  "plan": "tunnelpad-local-api",
+  "phase": "-",
+  "status": "已完成",
+  "plan_path": "docs/plans/20260902/tunnelpad-local-api.md",
+  "plan_map_path": "docs/PLAN_MAP.md",
+  "plan_sha256": "15325c66bdd90625cd60f1f86f7c09e0bc7148aee3dc5429fce93cf0579abfe6",
+  "plan_map_sha256": "01626407673bb5881f3f0174fd792ef7ff04d3403fb05c5b5e82ba272d3c9a70",
+  "created_at": "2026-09-27T09:53:41Z",
+  "created_by": "plan-governance",
+  "reason": "阶段完成快照",
+  "purpose": "phase_completion",
+  "snapshot_id": "20260927T095341Z-bd052f0d",
+  "supersedes": "docs/attestations/tunnelpad-local-api--phase_completion--20260902T093001Z-53b31c21.json",
+  "review_status": "needs_review"
+}

@@ -3,7 +3,7 @@
 - 日期：2026-09-04
 - 类型：完成后回归修复与验证记录
 - 结论：已修复并通过回归验证
-- 关联计划：[TunnelPad 后台健康监测能耗优化](../plans/tunnelpad-health-monitor-energy.md)
+- 关联计划：[TunnelPad 后台健康监测能耗优化](../plans/20260904/tunnelpad-health-monitor-energy.md)
 
 ## 问题
 

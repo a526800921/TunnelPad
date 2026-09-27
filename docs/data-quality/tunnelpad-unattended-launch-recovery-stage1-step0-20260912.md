@@ -2,7 +2,7 @@
 
 - 日期：2026-09-12；实施者：Codex；起始 HEAD：`92b610c`，保留此前日志修复和阶段 0 工作树。
 - 授权：用户在确认阶段 1 范围后明确回复“那你开始吧”；覆盖本阶段代码、隔离测试和打包检查。真实 ECS、运行中 App 替换、发布及设备重启仍留给阶段 2。
-- 事实源：[专项计划](../plans/tunnelpad-unattended-launch-recovery.md)。本阶段先加固前置与 Rust 入口，再接调度。
+- 事实源：[专项计划](../plans/20260912/tunnelpad-unattended-launch-recovery.md)。本阶段先加固前置与 Rust 入口，再接调度。
 
 ## 本阶段基线
 

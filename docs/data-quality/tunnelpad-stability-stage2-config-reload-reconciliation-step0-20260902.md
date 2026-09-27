@@ -1,7 +1,7 @@
 # TunnelPad 稳定性阶段 2：配置重载资源收敛切片 Step 0
 
 - 日期：2026-09-02
-- 计划：[TunnelPad 隧道稳定性与健康恢复](../plans/tunnelpad-stability.md)
+- 计划：[TunnelPad 隧道稳定性与健康恢复](../plans/20260830/tunnelpad-stability.md)
 - 切片：配置重载资源收敛
 - 基线类型：架构探索基线 + 缺陷安全边界
 - 当前结论：已达到待实施标准，尚未修改生产实现
