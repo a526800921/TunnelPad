@@ -23,4 +23,17 @@
 
 ## 后续
 
-用户可在需要时手动启动 `motorcycle-local-docker` 做真实连接验收；该操作会执行 required 的 ECS 前置及既有远端端口清理。技术部署已完成，阶段 2 的真实连接体验与用户验收尚未完成，计划继续保持实施中。
+技术部署已完成。部署当时未主动启动 `motorcycle-local-docker`；后续真实连接验收结果记录如下。阶段 2 在健康探针业务目标通过前保持实施中。
+
+## 提交后真实连接验收追加（2026-09-27）
+
+源代码和部署记录已提交为 `42d87d8`。提交前 `gitnexus detect-changes --scope all` 报告 21 个文件、205 个符号、101 条执行流，整体风险 `critical`；阶段 1 同范围独立复核的四项发现已修复自验，`git diff --cached --check` 与严格治理检查通过。
+
+- MacBook 上 `workbench list ecs` 未列出实例，因此未通过 Workbench 连接或修改实例。TunnelPad 自身既有 ECS 配置文件和 CLI 凭证路径均存在；打包同步器的 `--check --result-json` 在启动前后均返回 `success/synchronized`。这是只读云端状态验证，不能据此声称发生了安全组写入。
+- `admin-tunnel` 保持缺字段即 disabled：真实 API 启动返回 HTTP 200/running，精确 launchd label 为 loaded；随后 API 停止返回 HTTP 200/not_loaded，label 解除。健康探针指向本机 `8081/admin`，在运行窗口内为 failed；直接访问该回环地址得到连接拒绝。因此本轮证明启动/停止生命周期，**未证明该业务端到端可达**。阶段 1 spy 测试是 disabled 零 ECS 调用的证据，本轮未直接跟踪子进程，不把实机零调用冒充已观测。
+- `motorcycle-local-docker` 为唯一 required：真实 API 启动返回 HTTP 200/running，launchd label 运行且 SSH PID 存活；SSH 设置了 `ExitOnForwardFailure=yes`，本地 `127.0.0.1:10080` 监听可连接，HTTP `/` 返回 200。既有探针却仍指向本机 `8081/admin`，与该隧道的本地转发端口不同，实际连接被拒绝，API 探针为 failed。因此转发生效，但**健康探针验收未通过**；远端端口清理是否结束过监听进程、本轮是否发生 ECS 写入均无直接证据，不宣称通过。
+- 验收后主动停止 motorcycle，API 返回 HTTP 200/not_loaded；三条受管隧道均为 not_loaded，三个精确 launchd label 均未加载，`10080` 本地监听已消失。同步器再次只读检查为 `success/synchronized`。没有保留验收用 SSH 连接。
+
+用户确认 motorcycle 的健康探针继续使用 `8081/admin`，本轮没有修改探针配置。为排除 `admin-tunnel` 尚未运行这一原因，再次启动 `admin-tunnel`：本机 `127.0.0.1:8081` 可以建立 TCP 连接，但访问 `/` 和 `/admin` 都被重置；受管 SSH 日志在当次访问时记录 `connect failed: Connection refused`。配置中的 `-L` 将该端口转发到 SSH 目标的 8081。Workbench 在本机未列出实例，故使用已有 SSH 目标做一次只读 TCP 检查：远端 `127.0.0.1:8081` 返回 `closed`。这确认远端目标端口当前没有监听服务；没有尝试启动或修改该服务。
+
+保持 admin 运行时再次启动 motorcycle：两条 API 状态均为 running，但探针仍为 failed；`motorcycle` 的 `10080/` 继续返回 HTTP 200。随后依次停止 motorcycle 和 admin，均返回 not_loaded。`8081/admin` 是用户确认的期望目标，不能擅自改为 `10080/`。阶段 2 的 SSH 生命周期和 motorcycle 转发已验收，**健康探针/8081 业务可达性未通过**，需在目标服务恢复后复验。

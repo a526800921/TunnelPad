@@ -134,8 +134,8 @@ Rust 与 Swift 对字段缺失和显式 null 必须保持一致；不能直接�
 | 样本矩阵 | [验证矩阵](#验证方式)与[阶段 2 Step 0](../../data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage2-step0.md)中的部署样本 |
 | 验证方式 | 隔离 Release、签名/ABI、配置备份、真实 App/API/隧道状态与回滚边界 |
 | 失败/回滚边界 | [风险和回滚](#风险和回滚) |
-| 当前阻塞项 | 无 |
-| 下一动作 | 真实连接体验验收，随后等待用户验收 |
+| 当前阻塞项 | motorcycle 健康探针/8081 业务服务 |
+| 下一动作 | 目标服务恢复后复验 8081/admin，随后等待用户验收 |
 | 最新阶段复核 | [当前复核](#最新阶段复核) |
 
 ### 实施步骤
@@ -169,6 +169,7 @@ Rust 与 Swift 对字段缺失和显式 null 必须保持一致；不能直接�
 | 2026-09-27 | 阶段 1 实施与修复 | 用户授权后实现逐隧道策略，旧配置缺字段按 disabled；独立复核四项发现已修复并自验 | [阶段 1 实施证据](../../data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage1.md) | 实施中 | Codex 主代理 |
 | 2026-09-27 | 阶段 2 Step 0 | 用户授权 MacBook 部署；motorcycle-local-docker 为唯一 required 项；三条受管隧道均未加载；隔离 Release 签名通过 | [阶段 2 Step 0](../../data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage2-step0.md) | 实施中 | Codex 主代理 |
 | 2026-09-27 | 阶段 2 受控部署 | MacBook Release App 已替换并启动；仅 motorcycle-local-docker 配置 required；API 和三条未加载状态通过，真实连接与 ECS 写入未执行 | [阶段 2 部署记录](../../data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage2-deployment.md) | 实施中 | Codex 主代理 |
+| 2026-09-27 | 提交后真实连接验收 | 提交 `42d87d8`；disabled 和 required 实际启动/停止均成功，motorcycle 的 10080/ HTTP 200；用户确认保留的 8081/admin 探针失败，SSH 日志证实目标端口拒绝连接，验收连接已清理 | [阶段 2 部署记录](../../data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage2-deployment.md#提交后真实连接验收追加2026-09-27) | 实施中 | Codex 主代理 |
 
 ### 验证方式
 
@@ -215,8 +216,8 @@ Rust 与 Swift 对字段缺失和显式 null 必须保持一致；不能直接�
 | 方式 | 自验 |
 | 风险 | 高风险 |
 | 风险依据 | 替换运行中 App 和配置；复用阶段 1 已独立复核的同范围代码与安全边界 |
-| 结论 | 通过：签名、单一新进程、localhost API、唯一 required 字段和三条未加载状态；真实连接体验待验收 |
-| 证据 | [阶段 2 部署记录](../../data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage2-deployment.md) |
+| 结论 | 未通过：真实启停与 motorcycle 转发可用；用户确认的 8081/admin 探针背后目标端口拒绝连接 |
+| 证据 | [阶段 2 部署记录](../../data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage2-deployment.md#提交后真实连接验收追加2026-09-27) |
 | 复核者 | Codex 主代理 |
 
 ## 阶段复核记录
@@ -229,6 +230,7 @@ Rust 与 Swift 对字段缺失和显式 null 必须保持一致；不能直接�
 | 2026-09-27 | 复核基线复用 | 阶段 2 | 自验 | 高风险 | 通过：复用阶段 1 同范围独立复核及四项发现修复自验；本阶段无新代码范围 | [阶段 1 实施证据](../../data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage1.md#独立复核与修复自验) | Codex 主代理 |
 | 2026-09-27 | Step 0 自验 | 阶段 2 | 自验 | 高风险 | 通过：MacBook 未加载基线、唯一 required 项、隔离 Release 与回滚步骤已核对；部署结果待验证 | [阶段 2 Step 0](../../data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage2-step0.md) | Codex 主代理 |
 | 2026-09-27 | 受控部署自验 | 阶段 2 | 自验 | 高风险 | 通过：签名、单一新进程、localhost API、唯一 required 字段和三条未加载状态；真实连接体验待验收 | [阶段 2 部署记录](../../data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage2-deployment.md) | Codex 主代理 |
+| 2026-09-27 | 真实连接自验 | 阶段 2 | 自验 | 高风险 | 未通过：真实启停与 motorcycle 转发可用；用户确认的 8081/admin 探针背后目标端口拒绝连接 | [阶段 2 部署记录](../../data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage2-deployment.md#提交后真实连接验收追加2026-09-27) | Codex 主代理 |
 
 ### 文档验证记录
 
@@ -239,7 +241,8 @@ Rust 与 Swift 对字段缺失和显式 null 必须保持一致；不能直接�
 | 问题 | 推荐方案 | 是否阻塞当前阶段 | 状态 |
 |---|---|---|---|
 | 阶段 1 独立复核 | 同范围 high 只读复核四项发现由实施者修复并自验 | 否 | 已解决 |
-| 真实 ECS 写入验收 | 本轮部署不主动启动 motorcycle；真实 ECS 写入留待后续单独操作范围 | 否 | 待确定 |
+| 真实 ECS 写入验收 | required 实际启动成功，启动前后只读 ECS 检查均为 synchronized；未观测到本轮发生写入，不能把写入路径记为实测通过 | 否 | 待确定 |
+| motorcycle 健康探针/8081 业务服务 | 用户确认保留 8081/admin；需恢复 SSH 目标 8081 服务后再验证 HTTP 200/401 | 是 | 未解决 |
 
 ## 风险和回滚
 

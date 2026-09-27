@@ -45,7 +45,7 @@
 
 | 计划 | 状态 | 当前阶段 | 最后更新 | 依赖 | 证据 |
 |---|---|---|---|---|---|
-| [TunnelPad 逐隧道 ECS 同步策略](plans/20260927/tunnelpad-per-tunnel-ecs-policy.md) | 实施中 | 阶段 2 | 2026-09-27 | ecs-dynamic-ssh-ip, tunnelpad-unattended-launch-recovery, tunnelpad-unattended-ecs-ip-drift-recovery, tunnelpad-unattended-ssh-recovery-and-orphan-cleanup | [阶段 1 实施证据](data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage1.md)；[阶段 2 Step 0](data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage2-step0.md)；[MacBook 部署记录](data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage2-deployment.md)（新版 App/API 运行正常，仅 motorcycle-local-docker 为 required，三条隧道保持未加载；真实连接与用户验收待执行） |
+| [TunnelPad 逐隧道 ECS 同步策略](plans/20260927/tunnelpad-per-tunnel-ecs-policy.md) | 实施中 | 阶段 2 | 2026-09-27 | ecs-dynamic-ssh-ip, tunnelpad-unattended-launch-recovery, tunnelpad-unattended-ecs-ip-drift-recovery, tunnelpad-unattended-ssh-recovery-and-orphan-cleanup | [阶段 1 实施证据](data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage1.md)；[阶段 2 Step 0](data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage2-step0.md)；[MacBook 部署与真实连接验收](data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage2-deployment.md)（disabled/required 启停通过、motorcycle 10080/ HTTP 200；当前阻塞项：motorcycle 健康探针/8081 业务服务，远端目标拒绝连接；连接已清理，等待目标服务恢复） |
 
 ### 已完成
 
@@ -81,7 +81,7 @@
 
 2026-09-27 Mini 局域网 API 白名单直连已完成，[变更与验收证据](data-quality/20260927-mac-mini-lan-api.md)记录独立发现修复自验、214项回归及双端允许/拒绝验收；演进本机 API 的监听安全边界，保留127.0.0.1入口，现行配置契约见 [README](../README.md#可选可信局域网直连)。不改变下述 ECS 策略方案或历史完成状态。
 
-[逐隧道 ECS 同步策略](plans/20260927/tunnelpad-per-tunnel-ecs-policy.md)阶段 2 MacBook [受控部署已完成](data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage2-deployment.md)：仅 `motorcycle-local-docker` 显式 required；其他旧项保持 disabled。新版 App 与 localhost API 正常，三条受管隧道均未加载。Mac mini 空配置 App 不在本次替换范围；真实 ECS 写入与连接体验仍待验收。用户已直接访问 Mini API，历史新增 API SSH 隧道不再是本次交付目标。
+[逐隧道 ECS 同步策略](plans/20260927/tunnelpad-per-tunnel-ecs-policy.md)阶段 2 MacBook [受控部署与真实连接验收](data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage2-deployment.md)：仅 `motorcycle-local-docker` 显式 required；其他旧项保持 disabled。两类隧道的实际启停通过，motorcycle 本地转发 `10080/` HTTP 200；用户要求保留的 `8081/admin` 探针背后目标端口拒绝连接，尚未通过业务验收。验收后受管隧道均停止。Mac mini 空配置 App 不在本次替换范围；真实 ECS 写入未直接观测。用户已直接访问 Mini API，历史新增 API SSH 隧道不再是本次交付目标。
 
 [无人值守启动恢复](plans/tunnelpad-unattended-launch-recovery.md)阶段0–2已完成：实现与隔离回归、真实时间故障恢复、资源对照、实际重启及各适用独立复核通过，用户确认重启后全程无人工启动。当前为正常配置下的新版，临时只读护栏未跨重启保留。[探针误导问题](reviews/tunnelpad-deferred-runtime-issues-20260912.md)按用户要求后续统一修复；旧计划与历史证据保留原范围。
 
