@@ -106,7 +106,7 @@ struct ECSPreStartChecker: ECSPreStartChecking, Sendable {
     }
 
     func check(tunnel: TunnelConfig) throws {
-        guard SSHCommand.isSSH(tunnel.command) else { return }
+        guard tunnel.requiresECSSync else { return }
         guard let scriptURL, FileManager.default.fileExists(atPath: scriptURL.path) else {
             throw ECSPreStartError.scriptUnavailable
         }
@@ -127,7 +127,7 @@ struct ECSPreStartChecker: ECSPreStartChecking, Sendable {
     }
 
     func checkAsync(tunnel: TunnelConfig) async throws {
-        guard SSHCommand.isSSH(tunnel.command) else { return }
+        guard tunnel.requiresECSSync else { return }
         guard let scriptURL, FileManager.default.fileExists(atPath: scriptURL.path) else {
             throw ECSPreStartError.scriptUnavailable
         }
@@ -307,7 +307,7 @@ extension ECSPreStartChecker: LaunchPreflightChecking, ECSIPDriftChecking {
         return resource.resource
     }
     func checkLaunch(tunnel: TunnelConfig, timeout: TimeInterval) async throws -> LaunchPreflightResult {
-        guard SSHCommand.isSSH(tunnel.command) else {
+        guard tunnel.requiresECSSync == true else {
             return LaunchPreflightResult(version: 1, stage: "complete", category: .success, retryHint: 0, sanitizedCode: "not_required", exitCode: 0)
         }
         let result = try await launchInvocation(arguments: ["--result-json"], timeout: min(30, timeout))
@@ -358,7 +358,7 @@ extension ECSPreStartChecker: LaunchPreflightChecking, ECSIPDriftChecking {
     }
 
     func checkCurrentState(tunnel: TunnelConfig, timeout: TimeInterval) async throws -> LaunchPreflightResult {
-        guard SSHCommand.isSSH(tunnel.command) else {
+        guard tunnel.requiresECSSync == true else {
             return LaunchPreflightResult(version: 1, stage: "complete", category: .success, retryHint: 0, sanitizedCode: "not_required", exitCode: 0)
         }
         let result = try await launchInvocation(arguments: ["--check", "--result-json"], timeout: min(30, timeout))

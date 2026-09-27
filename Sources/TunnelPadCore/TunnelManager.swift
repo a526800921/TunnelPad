@@ -302,10 +302,6 @@ public final class TunnelManager: ObservableObject {
         guard !Task.isCancelled, !isShuttingDown else { return }
         let candidates = (launchInitialConfig ?? config).tunnels.filter { $0.autoStart && !launchExcludedIDs.contains($0.id) }
         launchPendingIDs = Set(candidates.map(\.id))
-        var resource = "ecs-unresolved"
-        if candidates.contains(where: { SSHCommand.isSSH($0.command) }), let checker = preStartChecker as? any LaunchPreflightChecking {
-            resource = (try? await checker.launchResource()) ?? resource
-        }
         guard !Task.isCancelled, !isShuttingDown else { return }
         let coordinator = LaunchRecoveryCoordinator(clock: launchClock, attempt: { [weak self] tunnel in
             guard let self else { return .cancelled }
@@ -317,8 +313,10 @@ public final class TunnelManager: ObservableObject {
             self.appEventLog.write("自动拉起「\(tunnel.name)」已确认运行；交接健康监测")
             // 已经处于 running 的 launchd 实例会在启动恢复中早退；交接后补做一次
             // 只读 ECS 复核，避免已有实例绕过连接建立前的公网 IP 前置。
-            Task { [weak self] in
-                await self?.runInitialIPDriftCheck()
+            if tunnel.requiresECSSync {
+                Task { [weak self] in
+                    await self?.runInitialIPDriftCheck(for: tunnel)
+                }
             }
         }, report: { [weak self] tunnel, category, count in
             self?.appEventLog.write("自动拉起「\(tunnel.name)」等待重试：\(category.rawValue)，累计 \(count) 次")
@@ -326,7 +324,9 @@ public final class TunnelManager: ObservableObject {
         launchCoordinator = coordinator
         let validCandidates = candidates.filter { !launchExcludedIDs.contains($0.id) && self.tunnel(id: $0.id)?.matchesLaunchRuntime($0) == true }
         for tunnel in validCandidates { cancelRecovery(for: tunnel.id) }
-        coordinator.start(validCandidates.map { .init(tunnel: $0, resource: SSHCommand.isSSH($0.command) ? resource : nil) })
+        // 当前只有一份全局 ECS 安全组配置。资源解析放到 required 项的实际
+        // 前置中，避免其凭据/脚本故障拖住同队列的普通 SSH。
+        coordinator.start(validCandidates.map { .init(tunnel: $0, resource: $0.requiresECSSync ? "ecs-global-config" : nil) })
         launchPendingIDs.removeAll()
         appEventLog.write("启动恢复队列已建立：候选 \(validCandidates.count) 条")
     }
@@ -391,12 +391,14 @@ public final class TunnelManager: ObservableObject {
         guard status == .notLoaded else { return .retry(.transient) }
         budget = remaining()
         guard budget > 0 else { return .retry(.transient) }
-        if SSHCommand.isSSH(expected.command) {
+        if expected.requiresECSSync || expected.forceRemotePortCleanup {
             guard let checker = preStartChecker as? any LaunchPreflightChecking else { return .retry(.local) }
-            let result = try await checker.checkLaunch(tunnel: expected, timeout: min(30, budget))
-            try validate()
-            if result.category == .cancelled { return .cancelled }
-            guard result.exitCode == 0 && result.category == .success else { return .retry(result.category == .success ? .unknown : result.category) }
+            if expected.requiresECSSync {
+                let result = try await checker.checkLaunch(tunnel: expected, timeout: min(30, budget))
+                try validate()
+                if result.category == .cancelled { return .cancelled }
+                guard result.exitCode == 0 && result.category == .success else { return .retry(result.category == .success ? .unknown : result.category) }
+            }
             budget = remaining()
             guard budget > 0 else { return .retry(.transient) }
             let cleanup = try await runRemotePortCleanupIfNeeded(
@@ -683,8 +685,7 @@ public final class TunnelManager: ObservableObject {
     /// 立即进入同一条 bootout-first → ECS 前置 → start 恢复链；不让 KeepAlive
     /// 先用旧规则反复重连，再等待另一个低频任务发现漂移。
     private func startLaunchdFailureMonitoring() {
-        guard preStartChecker is any ECSIPDriftChecking,
-              rustCore is any RustHealthStatusReader else { return }
+        guard rustCore is any RustHealthStatusReader else { return }
         launchdFailureMonitorTask?.cancel()
         launchdFailureMonitorTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -773,49 +774,46 @@ public final class TunnelManager: ObservableObject {
 
     /// 启动交接时只做一次只读 ECS 复核；运行期间的主触发来自 launchd
     /// 生命周期异常，恢复链中的 `checkAsync` 会在重新启动前完成同步。
-    private func runInitialIPDriftCheck() async {
-        guard !Task.isCancelled, !isShuttingDown,
+    private func runInitialIPDriftCheck(for candidate: TunnelConfig) async {
+        guard candidate.requiresECSSync, !Task.isCancelled, !isShuttingDown,
               let checker = preStartChecker as? any ECSIPDriftChecking,
-              let reader = rustCore as? any RustHealthStatusReader else { return }
+              let reader = rustCore as? any RustHealthStatusReader,
+              unattendedRecoveryCandidates().contains(where: { $0.id == candidate.id && $0.matchesLaunchRuntime(candidate) }) else { return }
 
-        let candidates = unattendedRecoveryCandidates()
-        for candidate in candidates {
-            let id = candidate.id
-            guard !Task.isCancelled, !isShuttingDown,
-                  !busyIDs.contains(id), !launchRecoveryIDs.contains(id),
-                  recoveryTasks[id] == nil else { continue }
-            let status: TunnelStatus
-            do {
-                status = try await Task.detached(priority: .utility) {
-                    try reader.status(id: id)
-                }.value
-            } catch {
-                // 无法确认当前是否运行时 fail-closed，不执行 ECS 写入或重启。
-                continue
-            }
+        let id = candidate.id
+        guard !busyIDs.contains(id), !launchRecoveryIDs.contains(id),
+              recoveryTasks[id] == nil else { return }
+        let status: TunnelStatus
+        do {
+            status = try await Task.detached(priority: .utility) {
+                try reader.status(id: id)
+            }.value
+        } catch {
+            // 无法确认当前是否运行时 fail-closed，不执行 ECS 写入或重启。
+            return
+        }
+        guard !Task.isCancelled, !isShuttingDown,
+              self.tunnel(id: id)?.matchesLaunchRuntime(candidate) == true else { return }
+        updateRuntime { $0.setStatus(status, for: id) }
+        guard isRunning(status), !busyIDs.contains(id), !launchRecoveryIDs.contains(id) else { return }
+
+        do {
+            let result = try await checker.checkCurrentState(tunnel: candidate, timeout: 30)
             guard !Task.isCancelled, !isShuttingDown,
                   self.tunnel(id: id)?.matchesLaunchRuntime(candidate) == true else { return }
-            updateRuntime { $0.setStatus(status, for: id) }
-            guard isRunning(status), !busyIDs.contains(id), !launchRecoveryIDs.contains(id) else { continue }
-
-            do {
-                let result = try await checker.checkCurrentState(tunnel: candidate, timeout: 30)
-                guard !Task.isCancelled, !isShuttingDown,
-                      self.tunnel(id: id)?.matchesLaunchRuntime(candidate) == true else { return }
-                if ["ip_drift", "transaction_pending"].contains(result.sanitizedCode) {
-                    triggerAutomaticRecovery(
-                        for: candidate,
-                        reason: "ECS SSH `/32` 漂移",
-                        allowNotRunning: false
-                    )
-                } else if result.exitCode != 0 {
-                    appEventLog.write("自动复核「\(candidate.name)」失败：\(result.sanitizedCode)")
-                }
-            } catch is CancellationError {
-                return
-            } catch {
-                appEventLog.write("自动复核「\(candidate.name)」异常：\(error)")
+            if ["ip_drift", "transaction_pending"].contains(result.sanitizedCode) {
+                triggerAutomaticRecovery(
+                    for: candidate,
+                    reason: "ECS SSH `/32` 漂移",
+                    allowNotRunning: false
+                )
+            } else if result.exitCode != 0 {
+                appEventLog.write("自动复核「\(candidate.name)」失败：\(result.sanitizedCode)")
             }
+        } catch is CancellationError {
+            return
+        } catch {
+            appEventLog.write("自动复核「\(candidate.name)」异常：\(error)")
         }
     }
 
@@ -1210,22 +1208,23 @@ public final class TunnelManager: ObservableObject {
     }
 
     private func runCoordinatedRecoveryPreflight(tunnel: TunnelConfig) async throws {
-        guard SSHCommand.isSSH(tunnel.command),
-              let resourceChecker = preStartChecker as? any LaunchPreflightChecking else {
-            try await preStartChecker.checkAsync(tunnel: tunnel)
+        guard tunnel.requiresECSSync || tunnel.forceRemotePortCleanup else { return }
+        guard let resourceChecker = preStartChecker as? any LaunchPreflightChecking else {
+            if tunnel.requiresECSSync { try await preStartChecker.checkAsync(tunnel: tunnel) }
+            else { throw ECSPreStartError.scriptUnavailable }
             return
         }
-        let resource = try await resourceChecker.launchResource()
-        try Task.checkCancellation()
-        let result = try await recoveryPreflightCoordinator.run(resource: resource) {
-            try await resourceChecker.checkLaunch(tunnel: tunnel, timeout: 30)
-        }
-        try Task.checkCancellation()
-        if result.category == .cancelled {
-            throw CancellationError()
-        }
-        guard result.exitCode == 0, result.category == .success else {
-            throw AutomaticRecoveryPreflightFailure(result: result)
+        if tunnel.requiresECSSync {
+            let resource = try await resourceChecker.launchResource()
+            try Task.checkCancellation()
+            let result = try await recoveryPreflightCoordinator.run(resource: resource) {
+                try await resourceChecker.checkLaunch(tunnel: tunnel, timeout: 30)
+            }
+            try Task.checkCancellation()
+            if result.category == .cancelled { throw CancellationError() }
+            guard result.exitCode == 0, result.category == .success else {
+                throw AutomaticRecoveryPreflightFailure(result: result)
+            }
         }
         let cleanup = try await runRemotePortCleanupIfNeeded(
             checker: resourceChecker,
@@ -1417,7 +1416,7 @@ public final class TunnelManager: ObservableObject {
         manuallyStoppedIDs.remove(id)
         resetHealthRecovery(for: id, phase: .monitoring)
         do {
-            try preStartChecker.check(tunnel: tunnel)
+            if tunnel.requiresECSSync { try preStartChecker.check(tunnel: tunnel) }
             guard let rustGeneration = beginRustOperation(for: id) else { return }
             let status = try rustCore.start(id: id, generation: rustGeneration)
             updateRuntime { $0.setStatus(status, for: id) }
@@ -1442,7 +1441,7 @@ public final class TunnelManager: ObservableObject {
         let preStartChecker = self.preStartChecker
         let rustCore = self.rustCore
         do {
-            try await preStartChecker.checkAsync(tunnel: tunnel)
+            if tunnel.requiresECSSync { try await preStartChecker.checkAsync(tunnel: tunnel) }
             guard !Task.isCancelled else { return .failed }
             guard let rustGeneration = beginRustOperation(for: id) else { return .failed }
             let status = try await runRustOperation(id: id, generation: rustGeneration) {
@@ -1537,7 +1536,7 @@ public final class TunnelManager: ObservableObject {
         manuallyStoppedIDs.remove(id)
         resetHealthRecovery(for: id, phase: .monitoring)
         do {
-            try preStartChecker.check(tunnel: tunnel)
+            if tunnel.requiresECSSync { try preStartChecker.check(tunnel: tunnel) }
             guard let rustGeneration = beginRustOperation(for: id) else { return }
             let status = try rustCore.restart(id: id, generation: rustGeneration)
             updateRuntime { $0.setStatus(status, for: id) }
@@ -1562,7 +1561,7 @@ public final class TunnelManager: ObservableObject {
         let preStartChecker = self.preStartChecker
         let rustCore = self.rustCore
         do {
-            try await preStartChecker.checkAsync(tunnel: tunnel)
+            if tunnel.requiresECSSync { try await preStartChecker.checkAsync(tunnel: tunnel) }
             guard !Task.isCancelled else { return .failed }
             guard let rustGeneration = beginRustOperation(for: id) else { return .failed }
             let status = try await runRustOperation(id: id, generation: rustGeneration) {

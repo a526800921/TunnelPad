@@ -18,7 +18,7 @@ use crate::launchd_executing::LaunchdExecuting;
 use crate::paths::TunnelPaths;
 use crate::plist_render::write_plist;
 use crate::ssh_command::is_ssh;
-use crate::{error_code, AppConfig, ExecutorKind, TpError, TunnelConfig};
+use crate::{error_code, AppConfig, EcsSyncPolicy, ExecutorKind, TpError, TunnelConfig};
 
 /// 阶段 5 owner 的 JSON 命令。字段采用 camelCase，命令本身不携带 Swift
 /// 对象或指针；handle 只在 C ABI 层存在。
@@ -248,9 +248,10 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
             .lock()
             .expect("owner config mutex 不应中毒")
             .clone();
-        self.stop_obsolete_launch_runtimes(&previous, &config, "配置刷新前停止")?;
-
-        *self.config.lock().expect("owner config mutex 不应中毒") = config.clone();
+        self.commit_config_transition(&previous, &config, "配置刷新前停止", || {
+            *self.config.lock().expect("owner config mutex 不应中毒") = config.clone();
+            Ok(())
+        })?;
         Ok(config)
     }
 
@@ -266,27 +267,47 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
             .lock()
             .expect("owner config mutex 不应中毒")
             .clone();
-        self.stop_obsolete_launch_runtimes(&previous, &config, "保存配置前停止")?;
-        ConfigStore::new(self.paths.clone())
-            .save(&config)
-            .map_err(|error| {
-                TpError::new(
-                    error_code::CONFIG_IO,
-                    format!("保存 config.json 失败：{error}"),
-                )
-            })?;
-        *self.config.lock().expect("owner config mutex 不应中毒") = config;
+        self.commit_config_transition(&previous, &config, "保存配置前停止", || {
+            ConfigStore::new(self.paths.clone())
+                .save(&config)
+                .map_err(|error| {
+                    TpError::new(
+                        error_code::CONFIG_IO,
+                        format!("保存 config.json 失败：{error}"),
+                    )
+                })?;
+            *self.config.lock().expect("owner config mutex 不应中毒") = config.clone();
+            Ok(())
+        })?;
         Ok(())
     }
 
-    /// 在旧运行身份被配置替换/删除前完成停止。每个目标均持有自己的生命周期
-    /// 锁；单条失败仍继续尝试其余目标，最后返回首个错误且不提交新配置。
-    fn stop_obsolete_launch_runtimes(
+    /// 在同一条隧道锁内完成策略升级检查、旧实例收敛与配置提交，防止
+    /// disabled→required 的状态确认与保存之间插入一次未通过 ECS 前置的启动。
+    fn commit_config_transition<F>(
         &self,
         previous: &AppConfig,
         next: &AppConfig,
         operation: &str,
-    ) -> Result<(), TpError> {
+        commit: F,
+    ) -> Result<(), TpError>
+    where
+        F: FnOnce() -> Result<(), TpError>,
+    {
+        let transitions: Vec<_> = previous
+            .tunnels
+            .iter()
+            .filter(|old| {
+                next.tunnels
+                    .iter()
+                    .find(|new| new.id == old.id)
+                    .is_some_and(|new| {
+                        old.effective_ecs_sync_policy() == EcsSyncPolicy::Disabled
+                            && new.effective_ecs_sync_policy() == EcsSyncPolicy::Required
+                    })
+            })
+            .cloned()
+            .collect();
         let mut obsolete: Vec<_> = previous
             .tunnels
             .iter()
@@ -299,17 +320,41 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
             .cloned()
             .collect();
         obsolete.sort_by(|left, right| left.id.cmp(&right.id));
-        let locks: Vec<_> = obsolete
+        let mut ids: Vec<_> = obsolete
             .iter()
-            .map(|tunnel| self.lock_for(&tunnel.id))
+            .chain(transitions.iter())
+            .map(|t| t.id.as_str())
             .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        let locks: Vec<_> = ids.iter().map(|id| self.lock_for(id)).collect();
         let _guards: Vec<_> = locks
             .iter()
             .map(|lock| lock.lock().expect("owner tunnel mutex 不应中毒"))
             .collect();
 
+        for tunnel in &transitions {
+            let status = self
+                .launchd
+                .status_checked(&tunnel.launchd_label())
+                .map_err(|error| executor_error("启用 ECS 前读取状态", error))?;
+            if status != TunnelStatus::NotLoaded {
+                return Err(TpError::new(
+                    error_code::STILL_RUNNING,
+                    format!("启用 ECS 同步前请先停止隧道：{}", tunnel.id),
+                ));
+            }
+            self.stop_tunnel_checked(tunnel, &CancellationToken::new(), "启用 ECS 前收敛")?;
+        }
+
         let mut first_error = None;
         for tunnel in &obsolete {
+            if transitions
+                .iter()
+                .any(|transition| transition.id == tunnel.id)
+            {
+                continue;
+            }
             let cancellation = CancellationToken::new();
             if let Err(mut error) = self.stop_tunnel_checked(tunnel, &cancellation, operation) {
                 if first_error.is_none() {
@@ -319,10 +364,10 @@ impl<L: LaunchdExecuting> CoreOwner<L> {
                 }
             }
         }
-        match first_error {
-            Some(error) => Err(error),
-            None => Ok(()),
+        if let Some(error) = first_error {
+            return Err(error);
         }
+        commit()
     }
 
     fn lock_for(&self, id: &str) -> Arc<Mutex<()>> {
@@ -953,6 +998,12 @@ fn validate_launchd_config(config: &AppConfig) -> Result<(), TpError> {
                 "command 不能为空且首元素必须是可执行路径",
             ));
         }
+        if !tunnel.is_ssh() && tunnel.ecs_sync_policy == Some(EcsSyncPolicy::Required) {
+            return Err(TpError::new(
+                error_code::INVALID_ARGUMENT,
+                "非 SSH 命令不能启用 ECS 同步",
+            ));
+        }
     }
     Ok(())
 }
@@ -1001,6 +1052,7 @@ fn same_launch_runtime(a: &TunnelConfig, b: &TunnelConfig) -> bool {
         && a.throttle_interval == b.throttle_interval
         && a.probe == b.probe
         && a.auto_start == b.auto_start
+        && a.effective_ecs_sync_policy() == b.effective_ecs_sync_policy()
 }
 
 /// 仅比较会改变 launchd plist/进程身份的字段。探针属于连接确认策略，
@@ -1436,6 +1488,7 @@ mod tests {
                     probe: None,
                     auto_start: false,
                     force_remote_port_cleanup: false,
+                    ecs_sync_policy: None,
                 })
                 .collect(),
         }
@@ -1460,6 +1513,7 @@ mod tests {
             probe: None,
             auto_start: false,
             force_remote_port_cleanup: false,
+            ecs_sync_policy: None,
         }
     }
 
@@ -2097,6 +2151,48 @@ mod tests {
             stops.lock().unwrap().len(),
             1,
             "探针变化不得中断 launchd 作业"
+        );
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn enabling_ecs_requires_stopped_tunnel_before_commit() {
+        let home = temp_home("ecs-policy-running");
+        let old = tunnel("ssh", "/usr/bin/ssh");
+        let runner = ScriptedRunner::new(vec![running(101)]);
+        let paths = TunnelPaths::new(&home);
+        ConfigStore::new(paths.clone())
+            .save(&config_with_tunnels(vec![old.clone()]))
+            .unwrap();
+        let owner = CoreOwner::new(paths, LaunchCtlExecutor::new(runner.clone(), 501)).unwrap();
+        let mut required = old.clone();
+        required.ecs_sync_policy = Some(EcsSyncPolicy::Required);
+        let error = owner
+            .save_config(config_with_tunnels(vec![required]))
+            .unwrap_err();
+        assert_eq!(error.code, error_code::STILL_RUNNING);
+        assert_eq!(owner.config.lock().unwrap().tunnels[0], old);
+        runner.assert_exhausted();
+        let _ = fs::remove_dir_all(home);
+
+        let home = temp_home("ecs-policy-stopped");
+        let paths = TunnelPaths::new(&home);
+        ConfigStore::new(paths.clone())
+            .save(&config_with_tunnels(vec![old.clone()]))
+            .unwrap();
+        let launchd = IdentityRecordingLaunchd::default();
+        let stops = launchd.stops.clone();
+        let owner = CoreOwner::new(paths, launchd).unwrap();
+        let mut required = old;
+        required.ecs_sync_policy = Some(EcsSyncPolicy::Required);
+        owner
+            .save_config(config_with_tunnels(vec![required.clone()]))
+            .unwrap();
+        assert_eq!(owner.config.lock().unwrap().tunnels[0], required);
+        assert_eq!(
+            stops.lock().unwrap().len(),
+            1,
+            "提交前必须确认旧 SSH 身份已收敛"
         );
         let _ = fs::remove_dir_all(home);
     }

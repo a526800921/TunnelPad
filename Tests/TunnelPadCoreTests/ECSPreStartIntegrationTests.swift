@@ -5,12 +5,33 @@ import XCTest
 final class ECSPreStartIntegrationTests: XCTestCase {
 
     @MainActor
+    func testDisabledSSHStartsWithoutECSResources() async {
+        let runner = RecordingPreflightRunner(result: ProcessResult(exitCode: 7))
+        let checker = ECSPreStartChecker(scriptURL: nil, runner: runner, environment: [:], timeout: 1)
+        let tunnel = TunnelConfig(
+            id: "lan-ssh",
+            name: "LAN SSH",
+            command: ["/usr/bin/ssh", "-N", "mini"],
+            ecsSyncPolicy: .disabled
+        )
+        let owner = RecordingRustOwner(config: AppConfig(tunnels: [tunnel]), order: nil)
+        let manager = TunnelManager(paths: temporaryPaths(), rustCore: owner, preStartChecker: checker)
+
+        let result = await manager.startAsync(tunnel.id)
+        XCTAssertEqual(result, .completed(status: .running(pid: 100)))
+        XCTAssertTrue(runner.syncCalls.isEmpty)
+        XCTAssertTrue(runner.asyncCalls.isEmpty)
+        XCTAssertEqual(owner.calls, ["begin", "start"])
+    }
+
+    @MainActor
     func testSSHStartRunsPreflightBeforeRustOwner() throws {
         let order = OrderLog()
         let tunnel = TunnelConfig(
             id: "ssh-start",
             name: "SSH start",
-            command: ["/usr/bin/ssh", "-N", "example"]
+            command: ["/usr/bin/ssh", "-N", "example"],
+            ecsSyncPolicy: .required
         )
         let owner = RecordingRustOwner(config: AppConfig(tunnels: [tunnel]), order: order)
         let checker = RecordingPreStartChecker(outcome: .success, order: order)
@@ -33,7 +54,8 @@ final class ECSPreStartIntegrationTests: XCTestCase {
         let tunnel = TunnelConfig(
             id: "ssh-restart",
             name: "SSH restart",
-            command: ["ssh", "-N", "example"]
+            command: ["ssh", "-N", "example"],
+            ecsSyncPolicy: .required
         )
         let owner = RecordingRustOwner(config: AppConfig(tunnels: [tunnel]), order: order)
         let checker = RecordingPreStartChecker(outcome: .success, order: order)
@@ -69,7 +91,8 @@ final class ECSPreStartIntegrationTests: XCTestCase {
         let tunnel = TunnelConfig(
             id: "drift-check",
             name: "Drift check",
-            command: ["/usr/bin/ssh", "-N", "example"]
+            command: ["/usr/bin/ssh", "-N", "example"],
+            ecsSyncPolicy: .required
         )
 
         let result = try await checker.checkCurrentState(tunnel: tunnel, timeout: 1)
@@ -90,7 +113,8 @@ final class ECSPreStartIntegrationTests: XCTestCase {
         let tunnel = TunnelConfig(
             id: "ssh-failure",
             name: "SSH failure",
-            command: ["/usr/bin/ssh", "-N", "example"]
+            command: ["/usr/bin/ssh", "-N", "example"],
+            ecsSyncPolicy: .required
         )
         let owner = RecordingRustOwner(config: AppConfig(tunnels: [tunnel]), order: order)
         let checker = RecordingPreStartChecker(
@@ -117,7 +141,8 @@ final class ECSPreStartIntegrationTests: XCTestCase {
         let tunnel = TunnelConfig(
             id: "ssh-cancel",
             name: "SSH cancel",
-            command: ["/usr/bin/ssh", "-N", "example"]
+            command: ["/usr/bin/ssh", "-N", "example"],
+            ecsSyncPolicy: .required
         )
         let owner = RecordingRustOwner(config: AppConfig(tunnels: [tunnel]), order: order)
         let checker = RecordingPreStartChecker(outcome: .cancelled, order: order)
@@ -184,7 +209,8 @@ final class ECSPreStartIntegrationTests: XCTestCase {
         let tunnel = TunnelConfig(
             id: "env-paths",
             name: "Environment paths",
-            command: ["/usr/bin/ssh", "-N", "example"]
+            command: ["/usr/bin/ssh", "-N", "example"],
+            ecsSyncPolicy: .required
         )
 
         try checker.check(tunnel: tunnel)
@@ -233,7 +259,8 @@ final class ECSPreStartIntegrationTests: XCTestCase {
         let tunnel = TunnelConfig(
             id: "error-map",
             name: "Error map",
-            command: ["/usr/bin/ssh", "-N", "example"]
+            command: ["/usr/bin/ssh", "-N", "example"],
+            ecsSyncPolicy: .required
         )
 
         XCTAssertThrowsError(try checker.check(tunnel: tunnel)) { error in
@@ -264,7 +291,8 @@ final class ECSPreStartIntegrationTests: XCTestCase {
         let tunnel = TunnelConfig(
             id: "timeout",
             name: "Timeout",
-            command: ["/usr/bin/ssh", "-N", "example"]
+            command: ["/usr/bin/ssh", "-N", "example"],
+            ecsSyncPolicy: .required
         )
 
         do {
@@ -318,7 +346,8 @@ final class ECSPreStartIntegrationTests: XCTestCase {
         let tunnel = TunnelConfig(
             id: "system-cancel",
             name: "System cancel",
-            command: ["/usr/bin/ssh", "-N", "example"]
+            command: ["/usr/bin/ssh", "-N", "example"],
+            ecsSyncPolicy: .required
         )
         let task = Task {
             try await checker.checkAsync(tunnel: tunnel)

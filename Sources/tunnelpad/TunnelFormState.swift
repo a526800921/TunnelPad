@@ -7,6 +7,7 @@ enum TunnelFormValidationError: LocalizedError {
     case invalidThrottle
     case invalidProbeURL
     case invalidProbeStatuses
+    case ecsRequiresSSH
 
     var errorDescription: String? {
         switch self {
@@ -15,6 +16,7 @@ enum TunnelFormValidationError: LocalizedError {
         case .invalidThrottle: return "重启间隔至少为 1 秒"
         case .invalidProbeURL: return "探针 URL 无效"
         case .invalidProbeStatuses: return "期望状态码无效（示例：200 或 200,301）"
+        case .ecsRequiresSSH: return "只有 SSH 命令能启用 ECS 安全组同步"
         }
     }
 }
@@ -33,6 +35,7 @@ struct TunnelFormState: Equatable {
     var probeStatuses = "200"
     var autoStart = false
     var forceRemotePortCleanup = false
+    var ecsSyncPolicy: ECSSyncPolicy = .disabled
 
     init() {}
 
@@ -49,6 +52,7 @@ struct TunnelFormState: Equatable {
         probeStatuses = tunnel.probe.map { $0.expectedStatuses.map(String.init).joined(separator: ", ") } ?? "200"
         autoStart = tunnel.autoStart
         forceRemotePortCleanup = tunnel.forceRemotePortCleanup
+        ecsSyncPolicy = tunnel.effectiveECSSyncPolicy
     }
 
     var parsedCommand: [String] {
@@ -60,6 +64,10 @@ struct TunnelFormState: Equatable {
 
     var hasSSHVerboseFlag: Bool {
         SSHCommand.hasVerboseFlag(parsedCommand)
+    }
+
+    var showsECSSyncControl: Bool {
+        SSHCommand.isSSH(parsedCommand) || ecsSyncPolicy == .required
     }
 
     mutating func setSSHVerbose(_ enabled: Bool) {
@@ -75,6 +83,9 @@ struct TunnelFormState: Equatable {
         guard !trimmedName.isEmpty else { throw TunnelFormValidationError.emptyName }
         guard !parsedCommand.isEmpty else { throw TunnelFormValidationError.emptyCommand }
         guard throttleInterval >= 1 else { throw TunnelFormValidationError.invalidThrottle }
+        guard SSHCommand.isSSH(parsedCommand) || ecsSyncPolicy == .disabled else {
+            throw TunnelFormValidationError.ecsRequiresSSH
+        }
 
         let probe = try makeProbe()
         return TunnelConfig(
@@ -87,7 +98,8 @@ struct TunnelFormState: Equatable {
             throttleInterval: throttleInterval,
             probe: probe,
             autoStart: autoStart,
-            forceRemotePortCleanup: forceRemotePortCleanup
+            forceRemotePortCleanup: forceRemotePortCleanup,
+            ecsSyncPolicy: ecsSyncPolicy
         )
     }
 

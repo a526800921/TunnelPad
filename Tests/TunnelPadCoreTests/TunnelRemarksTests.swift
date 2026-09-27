@@ -44,6 +44,22 @@ final class TunnelRemarksTests: XCTestCase {
         XCTAssertTrue(TunnelFormState(tunnel: tunnel).forceRemotePortCleanup)
     }
 
+    func testECSControlStaysVisibleUntilInvalidNonSSHPolicyIsDisabled() throws {
+        var form = TunnelFormState()
+        form.name = "远程连接"
+        form.commandText = "/usr/bin/ssh\n-N"
+        form.ecsSyncPolicy = .required
+        XCTAssertTrue(form.showsECSSyncControl)
+
+        form.commandText = "/bin/true"
+        XCTAssertTrue(form.showsECSSyncControl)
+        XCTAssertThrowsError(try form.makeTunnel(id: "switch-command"))
+
+        form.ecsSyncPolicy = .disabled
+        XCTAssertFalse(form.showsECSSyncControl)
+        XCTAssertEqual(try form.makeTunnel(id: "switch-command").effectiveECSSyncPolicy, .disabled)
+    }
+
     func testSidebarSubtitlePrefersTrimmedRemark() {
         let tunnel = TunnelConfig(
             id: "admin-tunnel", name: "后台", remark: "  用于后台访问  ", command: ["/bin/true"]

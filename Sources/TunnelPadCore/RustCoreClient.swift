@@ -47,7 +47,7 @@ final class RustCoreClient: @unchecked Sendable {
     private typealias CoreLastError = @convention(c) () -> UnsafeMutablePointer<CChar>?
     private typealias CoreStringFree = @convention(c) (UnsafeMutablePointer<CChar>?) -> Void
 
-    private static let expectedABI: UInt32 = 1
+    private static let expectedABI: UInt32 = 2
 
     private let libraryHandle: UnsafeMutableRawPointer?
     private let ownerHandle: UnsafeMutableRawPointer?

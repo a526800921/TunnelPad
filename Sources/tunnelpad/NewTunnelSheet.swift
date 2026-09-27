@@ -101,6 +101,18 @@ struct NewTunnelSheet: View {
                         .strokeBorder(Color.secondary.opacity(0.3))
                 )
 
+            if form.showsECSSyncControl {
+                Toggle("连接前同步阿里云 ECS 安全组", isOn: ecsSyncEnabled)
+                Text("仅适用于当前全局配置的安全组和 SSH 22 端口。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if !SSHCommand.isSSH(form.parsedCommand) {
+                    Text("当前命令不是 SSH，请先关闭 ECS 同步再保存。")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+
             Toggle("断线自动重连（keepAlive）", isOn: $form.keepAlive)
             Toggle("随 App 启动自动拉起（登录自启场景使用）", isOn: $form.autoStart)
             Toggle("恢复前强制清理远端 -R 端口", isOn: $form.forceRemotePortCleanup)
@@ -119,6 +131,13 @@ struct NewTunnelSheet: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private var ecsSyncEnabled: Binding<Bool> {
+        Binding(
+            get: { form.ecsSyncPolicy == .required },
+            set: { form.ecsSyncPolicy = $0 ? .required : .disabled }
+        )
     }
 
     private var probeSection: some View {

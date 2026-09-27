@@ -35,7 +35,7 @@ char *tp_last_error(void);
 void tp_string_free(char *s);
 
 /*
- * 阶段 5 owner 扩展（tp_core_abi_version() == 1）。
+ * owner 扩展（tp_core_abi_version() == 2）。
  *
  * 该扩展使用长期 opaque handle + UTF-8 JSON 命令。owner 命令的业务失败
  * 仍返回 {"ok":false,...} JSON；只有参数/传输错误返回 NULL，并通过

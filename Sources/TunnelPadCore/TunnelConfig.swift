@@ -5,6 +5,12 @@ public enum ExecutorKind: String, Codable, Sendable, CaseIterable {
     case launchd
 }
 
+/// 是否在 SSH 连接前同步当前全局 ECS 安全组规则。
+public enum ECSSyncPolicy: String, Codable, Sendable {
+    case disabled
+    case required
+}
+
 /// 可选状态探针配置（schema v1 追加的可选字段，向后兼容）。
 public struct ProbeConfig: Codable, Equatable, Sendable {
     public var url: String
@@ -44,6 +50,16 @@ public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
     public var autoStart: Bool
     /// 无人值守恢复前强制结束远端 `-R` 端口的全部监听进程；高风险且默认关闭。
     public var forceRemotePortCleanup: Bool
+    /// nil 代表旧配置缺字段；按用户要求默认关闭 ECS 前置。
+    public var ecsSyncPolicy: ECSSyncPolicy?
+
+    public var effectiveECSSyncPolicy: ECSSyncPolicy {
+        ecsSyncPolicy ?? .disabled
+    }
+
+    public var requiresECSSync: Bool {
+        SSHCommand.isSSH(command) && effectiveECSSyncPolicy == .required
+    }
 
     public static let idPattern = "^[a-z0-9-]+$"
     public static let launchdLabelPrefix = "com.jafish.tunnelpad."
@@ -58,7 +74,8 @@ public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
         throttleInterval: Int = 10,
         probe: ProbeConfig? = nil,
         autoStart: Bool = false,
-        forceRemotePortCleanup: Bool = false
+        forceRemotePortCleanup: Bool = false,
+        ecsSyncPolicy: ECSSyncPolicy? = .disabled
     ) {
         self.id = id
         self.name = name
@@ -70,6 +87,7 @@ public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
         self.probe = probe
         self.autoStart = autoStart
         self.forceRemotePortCleanup = forceRemotePortCleanup
+        self.ecsSyncPolicy = ecsSyncPolicy
     }
 
     public var launchdLabel: String { Self.launchdLabelPrefix + id }
@@ -80,7 +98,7 @@ public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, remark, command, executor, keepAlive, throttleInterval, probe, autoStart, forceRemotePortCleanup
+        case id, name, remark, command, executor, keepAlive, throttleInterval, probe, autoStart, forceRemotePortCleanup, ecsSyncPolicy
     }
 
     /// 手写配置允许省略带默认值的字段；缺 `remark` 时为空字符串，缺 `probe` 即不探测，
@@ -97,6 +115,17 @@ public struct TunnelConfig: Codable, Equatable, Identifiable, Sendable {
         probe = try container.decodeIfPresent(ProbeConfig.self, forKey: .probe)
         autoStart = try container.decodeIfPresent(Bool.self, forKey: .autoStart) ?? false
         forceRemotePortCleanup = try container.decodeIfPresent(Bool.self, forKey: .forceRemotePortCleanup) ?? false
+        ecsSyncPolicy = container.contains(.ecsSyncPolicy)
+            ? try container.decode(ECSSyncPolicy.self, forKey: .ecsSyncPolicy)
+            : nil
+
+        if !SSHCommand.isSSH(command), ecsSyncPolicy == .required {
+            throw DecodingError.dataCorruptedError(
+                forKey: .ecsSyncPolicy,
+                in: container,
+                debugDescription: "非 SSH 命令不能启用 ECS 同步"
+            )
+        }
 
         guard Self.isValidID(id) else {
             throw DecodingError.dataCorruptedError(

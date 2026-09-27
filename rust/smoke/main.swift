@@ -107,7 +107,7 @@ let ownerHome = FileManager.default.temporaryDirectory
 try? FileManager.default.removeItem(at: ownerHome)
 try? FileManager.default.createDirectory(at: ownerHome, withIntermediateDirectories: true)
 let ownerHandle = ownerHome.path.withCString { tp_core_create($0) }
-expectTrue(tp_core_abi_version() == 1, "tp_core_abi_version == 1")
+expectTrue(tp_core_abi_version() == 2, "tp_core_abi_version == 2")
 if let ownerHandle {
     let snapshot = "{\"op\":\"snapshot\"}".withCString { tp_core_command(ownerHandle, $0) }
     if let output = takeString(snapshot) {

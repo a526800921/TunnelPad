@@ -77,7 +77,7 @@ unsafe fn read_utf8<'a>(input: *const c_char, label: &str) -> Result<&'a str, Tp
 /// 破坏现有 shadow bridge。
 #[no_mangle]
 pub extern "C" fn tp_core_abi_version() -> u32 {
-    1
+    2
 }
 
 /// 创建 Rust Core owner。`home` 为测试可注入的用户 home；传 NULL 时使用

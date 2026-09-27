@@ -26,6 +26,26 @@ final class TunnelConfigTests: XCTestCase {
         XCTAssertTrue(tunnel.keepAlive)
         XCTAssertEqual(tunnel.throttleInterval, 10)
         XCTAssertFalse(tunnel.forceRemotePortCleanup)
+        XCTAssertEqual(tunnel.effectiveECSSyncPolicy, .disabled)
+    }
+
+    func testECSSyncPolicyRejectsInvalidValuesAndPreservesExplicitChoice() throws {
+        let base = #"{"version":1,"tunnels":[{"id":"x","name":"X","command":["/usr/bin/ssh"]}]}"#
+        let legacy = try JSONDecoder().decode(AppConfig.self, from: Data(base.utf8))
+        XCTAssertEqual(legacy.tunnels[0].effectiveECSSyncPolicy, .disabled)
+
+        let required = base.replacingOccurrences(of: #""command":["/usr/bin/ssh"]"#, with: #""command":["/usr/bin/ssh"],"ecsSyncPolicy":"required""#)
+        let configured = try JSONDecoder().decode(AppConfig.self, from: Data(required.utf8))
+        XCTAssertTrue(configured.tunnels[0].requiresECSSync)
+        let roundtrip = try JSONDecoder().decode(AppConfig.self, from: JSONEncoder().encode(configured))
+        XCTAssertEqual(roundtrip, configured)
+
+        for value in ["null", "\"unknown\"", "true"] {
+            let malformed = base.replacingOccurrences(of: #""command":["/usr/bin/ssh"]"#, with: #""command":["/usr/bin/ssh"],"ecsSyncPolicy":\#(value)"#)
+            XCTAssertThrowsError(try JSONDecoder().decode(AppConfig.self, from: Data(malformed.utf8)))
+        }
+        let nonSSH = #"{"version":1,"tunnels":[{"id":"x","name":"X","command":["/bin/true"],"ecsSyncPolicy":"required"}]}"#
+        XCTAssertThrowsError(try JSONDecoder().decode(AppConfig.self, from: Data(nonSSH.utf8)))
     }
 
     func testDecodingRejectsInvalidID() {

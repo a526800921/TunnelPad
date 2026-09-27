@@ -237,7 +237,8 @@ final class StabilityStage2Tests: XCTestCase {
             id: "stage2-ecs-order",
             name: "ECS order",
             command: ["/usr/bin/ssh", "-N"],
-            probe: ProbeConfig(url: "http://fixture.invalid/health")
+            probe: ProbeConfig(url: "http://fixture.invalid/health"),
+            ecsSyncPolicy: .required
         )
         let order = Stage2OrderLog()
         let owner = Stage2RecordingOwner(config: AppConfig(tunnels: [tunnel]), order: order)
@@ -269,7 +270,8 @@ final class StabilityStage2Tests: XCTestCase {
             id: "stage2-ecs-failure",
             name: "ECS failure",
             command: ["/usr/bin/ssh", "-N"],
-            probe: ProbeConfig(url: "http://fixture.invalid/health")
+            probe: ProbeConfig(url: "http://fixture.invalid/health"),
+            ecsSyncPolicy: .required
         )
         let order = Stage2OrderLog()
         let owner = Stage2RecordingOwner(config: AppConfig(tunnels: [tunnel]), order: order)
@@ -305,7 +307,8 @@ final class StabilityStage2Tests: XCTestCase {
             id: "stage2-ecs-retry",
             name: "ECS retry",
             command: ["/usr/bin/ssh", "-N"],
-            probe: ProbeConfig(url: "http://fixture.invalid/health")
+            probe: ProbeConfig(url: "http://fixture.invalid/health"),
+            ecsSyncPolicy: .required
         )
         let order = Stage2OrderLog()
         let probes = Stage2ProbeSequence(failures: 3, failUntilReleased: true)
@@ -348,7 +351,8 @@ final class StabilityStage2Tests: XCTestCase {
             id: "stage2-ecs-not-quiesced",
             name: "ECS not quiesced",
             command: ["/usr/bin/ssh", "-N"],
-            probe: ProbeConfig(url: "http://fixture.invalid/health")
+            probe: ProbeConfig(url: "http://fixture.invalid/health"),
+            ecsSyncPolicy: .required
         )
         let order = Stage2OrderLog()
         let owner = Stage2RecordingOwner(
@@ -382,7 +386,8 @@ final class StabilityStage2Tests: XCTestCase {
             id: "stage2-ecs-transient-status",
             name: "ECS transient status",
             command: ["/usr/bin/ssh", "-N"],
-            probe: ProbeConfig(url: "http://fixture.invalid/health")
+            probe: ProbeConfig(url: "http://fixture.invalid/health"),
+            ecsSyncPolicy: .required
         )
         let order = Stage2OrderLog()
         let owner = Stage2RecordingOwner(
@@ -417,7 +422,8 @@ final class StabilityStage2Tests: XCTestCase {
             id: "stage2-ecs-transient-start",
             name: "ECS transient start",
             command: ["/usr/bin/ssh", "-N"],
-            probe: ProbeConfig(url: "http://fixture.invalid/health")
+            probe: ProbeConfig(url: "http://fixture.invalid/health"),
+            ecsSyncPolicy: .required
         )
         let order = Stage2OrderLog()
         let owner = Stage2RecordingOwner(
@@ -502,6 +508,34 @@ final class StabilityStage2Tests: XCTestCase {
         XCTAssertEqual(order.values, ["restart"])
         XCTAssertEqual(owner.lifecycleEvents, ["restart"])
         XCTAssertTrue(checker.asyncIDs.isEmpty, "非 SSH 隧道不应运行 ECS 前置")
+        await manager.shutdownAsync()
+    }
+
+    @MainActor
+    func testDisabledSSHAutomaticRecoverySkipsECSPreflight() async throws {
+        let tunnel = TunnelConfig(
+            id: "stage2-disabled-ssh",
+            name: "Disabled SSH",
+            command: ["/usr/bin/ssh", "-N"],
+            probe: ProbeConfig(url: "http://fixture.invalid/health"),
+            ecsSyncPolicy: .disabled
+        )
+        let order = Stage2OrderLog()
+        let owner = Stage2RecordingOwner(config: AppConfig(tunnels: [tunnel]), order: order)
+        let checker = Stage2PreStartChecker(outcome: .success, requiresQuiescence: true, order: order)
+        let manager = makeManager(
+            owner: owner,
+            checker: checker,
+            config: AppConfig(tunnels: [tunnel]),
+            probes: Stage2ProbeSequence(failures: 3)
+        )
+
+        try await Self.waitUntil(timeout: 2) {
+            owner.lifecycleEvents.contains("start")
+        }
+
+        XCTAssertEqual(order.values, ["stop", "start"])
+        XCTAssertTrue(checker.asyncIDs.isEmpty)
         await manager.shutdownAsync()
     }
 

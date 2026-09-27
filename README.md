@@ -5,8 +5,8 @@ TunnelPad 是一个 macOS 菜单栏应用，用于统一管理本机与服务器
 ## 当前状态
 
 - v1 隧道管理、菜单栏入口、`launchd` 生命周期、配置 v1 和 Rust Core 迁移已完成。
-- ECS 动态 SSH 公网 IP 同步阶段 2 已完成：SSH 隧道执行启动/重启前，App 会调用 `.app/Contents/Resources/update-ecs-ssh-ip`，同步受管安全组规则后再调用 Rust Core。
-- 无人值守 SSH 异常恢复与 ECS IP 漂移恢复已完成：受管 SSH 断线、launchd 状态异常或 PID 变化后立即进入同一条恢复链，先收敛旧实例并校验/同步 ECS `/32`，再按需清理远端排他转发端口并重连；真实 IP 切换验收约 23 秒恢复，无需人工点击。
+- ECS 动态 SSH 公网 IP 同步能力已完成；当前源码按每条隧道的 `ecsSyncPolicy` 决定是否在连接前同步，缺字段的旧配置按 `disabled` 处理。新策略的 Release 与真实环境验收见当前专项计划。
+- 无人值守 SSH 异常恢复与 ECS IP 漂移恢复已完成：受管 SSH 断线、launchd 状态异常或 PID 变化后先收敛旧实例；仅 `required` 项校验/同步 ECS `/32`，再按需清理远端排他转发端口并重连。
 - 稳定性与健康恢复、日志事件流、日志保留与低写放大、后台健康监测能耗、无人值守受管 SSH 收敛恢复以及 Rust Core 风险收敛计划均已完成。
 - 当前生产执行器和自动恢复范围固定为 `launchd`；`app` 执行器仍是非目标，未来另立计划。
 - 日志优化已完成：正常追加采用增量采集，持久日志达到约 512 KiB 后才批量压缩，压缩后保留最近 2000 个逻辑行；正常 SSH 默认不带独立 `-v`，详细日志可按需开启。
@@ -18,13 +18,13 @@ TunnelPad 是一个 macOS 菜单栏应用，用于统一管理本机与服务器
 - 菜单栏和主窗口管理多条 `launchd` SSH 隧道。
 - Rust Core 作为配置、生命周期、运行时状态、并发和退出清理的唯一 owner；SwiftUI/AppKit 负责界面和 FFI 适配。
 - HTTP 探针检查并展示隧道健康结果；`launchd` 范围内的后台健康恢复和资源收敛已完成。
-- 对 `autoStart + keepAlive` 的 SSH 隧道持续观察 launchd 生命周期；断线、退出或 PID 变化后立即执行“bootout 收敛 → ECS 前置 → 远端端口清理（如启用）→ 启动”恢复链。
+- 对 `autoStart + keepAlive` 的 SSH 隧道持续观察 launchd 生命周期；断线、退出或 PID 变化后执行“bootout 收敛 → ECS 前置（仅 `required`）→ 远端端口清理（如启用）→ 启动”恢复链。
 - 自动恢复按 `0、5、10、30、60、60…` 秒退避持续重试，不因历史尝试次数耗尽而永久停止；连续两次健康确认后才清零失败历史，用户手动停止则取消自动恢复。
 - 本机代理和 SSH 按受管身份、进程组与代次收敛；日志代理异常、I/O 失败和信号退出也必须回收子 SSH。逐隧道 `forceRemotePortCleanup` 默认关闭，只有明确声明远端转发端口为排他资源时才启用。
 - 以事件流和增量采集更新日志；面板关闭期间仍保留每条隧道最近 500 条内存日志，持久文件在压缩后保留最近 2000 个逻辑行。
 - 通过本机 HTTP API 对外提供受控的状态、生命周期和日志调用。
 - 接管旧版 LaunchAgent，提供备份与失败回滚边界。
-- 对识别为 SSH 的命令，在启动/重启前执行 ECS 动态 IP 同步；非 SSH 命令不触发该同步。
+- 只有 SSH 命令且 `ecsSyncPolicy` 为 `required` 时，启动/重启前才执行 ECS 动态 IP 同步。
 - 支持登录自启动（`SMAppService`）与按隧道的「随 App 启动自动拉起」；启动恢复全过程写入 `~/Library/Logs/TunnelPad/app.log`。
 
 ## 架构边界
@@ -65,7 +65,7 @@ API 服务随 TunnelPad App 启停，默认只监听 `127.0.0.1:9998`。端口�
 
 所有路由在调用 backend 前校验实际 socket 来源和 `Host`，不采信 `Forwarded` / `X-Forwarded-For`；带 `Origin` 或 `Sec-Fetch-Site: cross-site` 的请求被拒绝，不支持跨站网页调用。拒绝返回 `403 access_denied`；全部监听尚未就绪时返回 `503 service_unavailable`，不执行业务操作。OpenAPI 使用相对服务地址 `/`，适用于回环与局域网入口。
 
-这是 **IP 来源限制，不是密码认证，也没有 TLS 加密**。只用于可信局域网；共享/不可信网络应另用加密认证通道，不得映射到公网。允许的 IP 被其他设备占用后也会获得访问能力。来源限制不会跳过既有 ECS 前置或更改隧道生命周期。
+这是 **IP 来源限制，不是密码认证，也没有 TLS 加密**。只用于可信局域网；共享/不可信网络应另用加密认证通道，不得映射到公网。允许的 IP 被其他设备占用后也会获得访问能力。来源限制不会覆盖逐隧道 ECS 策略或更改隧道生命周期。
 
 接口清单：
 
@@ -111,6 +111,8 @@ open dist/TunnelPad.app
 
 ## ECS 动态 SSH 同步
 
+每条隧道可设置 `ecsSyncPolicy` 为 `disabled` 或 `required`。新建隧道和缺少此字段的旧配置均为 `disabled`；旧 ECS 隧道不会自动迁移，升级 App 前应盘点并在停止该隧道、确认旧连接收敛后显式设为 `required`。运行中或状态不可信时，保存/重载 `disabled`→`required` 会被拒绝。该开关只适用于连接**当前全局配置的同一个 ECS 安全组、SSH TCP 22** 的隧道，受管入方向规则描述为 `tunnelpad-dynamic-ssh-managed`；它不按隧道选择安全组，也不适用于其他 SSH 端口。非 SSH 命令不能设置 `required`。
+
 首次配置请参考 [`docs/examples/ecs-ssh-ip.env.example`](docs/examples/ecs-ssh-ip.env.example)，并将实际配置放在仓库外：
 
 ```text
@@ -135,11 +137,11 @@ open dist/TunnelPad.app
 
 ### 无人值守断线恢复
 
-无人值守恢复只适用于同时开启 `autoStart` 和 `keepAlive` 的 SSH 隧道。App 启动交接时会做一次只读 IP 漂移检查；运行期间不使用固定 5 分钟 IP 轮询，而是观察 launchd 状态和 PID。检测到断线或实例变化后，恢复顺序固定为：
+无人值守恢复只适用于同时开启 `autoStart` 和 `keepAlive` 的 SSH 隧道。只有 `required` 项在 App 启动交接时做一次只读 IP 漂移检查；运行期间不使用固定 5 分钟 IP 轮询，而是观察 launchd 状态和 PID。检测到断线或实例变化后，恢复顺序为：
 
 ```text
 停止并确认旧 launchd/本机 SSH 收敛
-  → 检查并同步 ECS 受管 SSH /32
+  → 检查并同步 ECS 受管 SSH /32（仅 required）
   → 可选清理 ECS 上的排他远端转发端口
   → 启动新 SSH
   → 连续健康采样确认恢复
@@ -153,6 +155,7 @@ open dist/TunnelPad.app
 
 - [计划索引与依赖](docs/PLAN_MAP.md)
 - [ECS 动态 SSH 公网 IP 同步计划](docs/plans/ecs-dynamic-ssh-ip.md)
+- [逐隧道 ECS 同步策略计划](docs/plans/20260927/tunnelpad-per-tunnel-ecs-policy.md)
 - [隧道稳定性与健康恢复计划](docs/plans/tunnelpad-stability.md)
 - [日志事件流与面板生命周期计划](docs/plans/tunnelpad-log-streaming.md)
 - [日志保留与能耗回归修复计划](docs/plans/tunnelpad-log-retention-energy-regression.md)

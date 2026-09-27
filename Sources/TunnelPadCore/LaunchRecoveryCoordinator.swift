@@ -360,5 +360,6 @@ extension TunnelConfig {
         id == other.id && command == other.command && executor == other.executor && keepAlive == other.keepAlive
             && throttleInterval == other.throttleInterval && probe == other.probe && autoStart == other.autoStart
             && forceRemotePortCleanup == other.forceRemotePortCleanup
+            && effectiveECSSyncPolicy == other.effectiveECSSyncPolicy
     }
 }

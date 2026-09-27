@@ -111,6 +111,25 @@ pub struct TunnelConfig {
     pub auto_start: bool,
     #[serde(default)]
     pub force_remote_port_cleanup: bool,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_ecs_sync_policy"
+    )]
+    pub ecs_sync_policy: Option<EcsSyncPolicy>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EcsSyncPolicy {
+    Disabled,
+    Required,
+}
+
+fn deserialize_ecs_sync_policy<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<EcsSyncPolicy>, D::Error> {
+    EcsSyncPolicy::deserialize(deserializer).map(Some)
 }
 
 fn default_true() -> bool {
@@ -122,6 +141,22 @@ fn default_throttle_interval() -> i64 {
 }
 
 impl TunnelConfig {
+    pub fn effective_ecs_sync_policy(&self) -> EcsSyncPolicy {
+        self.ecs_sync_policy.unwrap_or(EcsSyncPolicy::Disabled)
+    }
+
+    pub fn is_ssh(&self) -> bool {
+        self.command.first().is_some_and(|command| {
+            std::path::Path::new(command)
+                .file_name()
+                .is_some_and(|name| name == "ssh")
+        })
+    }
+
+    pub fn requires_ecs_sync(&self) -> bool {
+        self.is_ssh() && self.effective_ecs_sync_policy() == EcsSyncPolicy::Required
+    }
+
     /// 与 Swift `TunnelConfig.idPattern` 一致：`^[a-z0-9-]+$`。
     pub fn is_valid_id(id: &str) -> bool {
         !id.is_empty()
@@ -196,6 +231,12 @@ pub fn parse_config_envelope(input: &str) -> Result<AppConfig, TpError> {
             return Err(TpError::new(
                 error_code::INVALID_COMMAND,
                 "command 不能为空且首元素必须是可执行路径",
+            ));
+        }
+        if !tunnel.is_ssh() && tunnel.ecs_sync_policy == Some(EcsSyncPolicy::Required) {
+            return Err(TpError::new(
+                error_code::INVALID_ARGUMENT,
+                "非 SSH 命令不能启用 ECS 同步",
             ));
         }
     }
@@ -298,6 +339,28 @@ mod tests {
         let out = parse_app_config(MINIMAL_INPUT).expect("最小配置应可解析");
         assert_eq!(canon(&out), canon(MINIMAL_CANONICAL));
         assert_eq!(out, MINIMAL_CANONICAL);
+    }
+
+    #[test]
+    fn ecs_policy_defaults_disabled_and_rejects_invalid_or_non_ssh_required() {
+        let legacy = parse_config_envelope(MINIMAL_INPUT).unwrap();
+        assert_eq!(
+            legacy.tunnels[0].effective_ecs_sync_policy(),
+            EcsSyncPolicy::Disabled
+        );
+        let required = r#"{"version":1,"tunnels":[{"id":"ecs","name":"ECS","command":["/usr/bin/ssh"],"ecsSyncPolicy":"required"}]}"#;
+        let parsed = parse_config_envelope(required).unwrap();
+        assert!(parsed.tunnels[0].requires_ecs_sync());
+        let encoded = serde_json::to_string(&parsed).unwrap();
+        assert_eq!(parse_config_envelope(&encoded).unwrap(), parsed);
+        for bad in ["null", "\"unknown\"", "true"] {
+            let input = format!(
+                r#"{{"version":1,"tunnels":[{{"id":"x","name":"X","command":["/usr/bin/ssh"],"ecsSyncPolicy":{bad}}}]}}"#
+            );
+            assert!(parse_config_envelope(&input).is_err());
+        }
+        let non_ssh = r#"{"version":1,"tunnels":[{"id":"x","name":"X","command":["/bin/true"],"ecsSyncPolicy":"required"}]}"#;
+        assert!(parse_config_envelope(non_ssh).is_err());
     }
 
     #[test]

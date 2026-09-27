@@ -11,7 +11,8 @@ final class IPDriftRecoveryTests: XCTestCase {
             name: "漂移隧道",
             command: ["/usr/bin/ssh", "-N", "fixture"],
             keepAlive: true,
-            autoStart: true
+            autoStart: true,
+            ecsSyncPolicy: .required
         )
         let owner = IPDriftOwner(config: AppConfig(tunnels: [tunnel]))
         let checker = IPDriftChecker()
@@ -71,7 +72,8 @@ final class IPDriftRecoveryTests: XCTestCase {
             name: "抖动隧道",
             command: ["/usr/bin/ssh", "-N", "fixture"],
             keepAlive: true,
-            autoStart: true
+            autoStart: true,
+            ecsSyncPolicy: .required
         )
         let owner = IPDriftOwner(config: AppConfig(tunnels: [tunnel]))
         owner.enablePIDChurn()
@@ -125,7 +127,8 @@ final class IPDriftRecoveryTests: XCTestCase {
             name: "断开隧道",
             command: ["/usr/bin/ssh", "-N", "fixture"],
             keepAlive: true,
-            autoStart: true
+            autoStart: true,
+            ecsSyncPolicy: .required
         )
         let owner = IPDriftOwner(config: AppConfig(tunnels: [tunnel]))
         owner.enableImmediateFailure()
@@ -177,7 +180,8 @@ final class IPDriftRecoveryTests: XCTestCase {
             name: "重启循环隧道",
             command: ["/usr/bin/ssh", "-N", "fixture"],
             keepAlive: true,
-            autoStart: true
+            autoStart: true,
+            ecsSyncPolicy: .required
         )
         let owner = IPDriftOwner(config: AppConfig(tunnels: [tunnel]))
         owner.enableImmediateFailure()
@@ -218,7 +222,8 @@ final class IPDriftRecoveryTests: XCTestCase {
             name: "持续恢复隧道",
             command: ["/usr/bin/ssh", "-N", "fixture"],
             keepAlive: true,
-            autoStart: true
+            autoStart: true,
+            ecsSyncPolicy: .required
         )
         let owner = IPDriftOwner(config: AppConfig(tunnels: [tunnel]))
         owner.enableImmediateFailure()
@@ -266,7 +271,8 @@ final class IPDriftRecoveryTests: XCTestCase {
                 command: ["/usr/bin/ssh", "-N", "-R", "127.0.0.1:\(18_080 + index):127.0.0.1:8080", "root@fixture"],
                 keepAlive: true,
                 autoStart: true,
-                forceRemotePortCleanup: true
+                forceRemotePortCleanup: true,
+                ecsSyncPolicy: .required
             )
         }
         let owner = SharedRuntimeRecoveryOwner(config: AppConfig(tunnels: tunnels))
@@ -302,6 +308,50 @@ final class IPDriftRecoveryTests: XCTestCase {
         XCTAssertEqual(checker.cleanupIDs.count, 2, "远端清理成功不能跨隧道复用")
         XCTAssertEqual(checker.maxConcurrentCalls, 1)
         await manager.shutdownAsync()
+    }
+
+    func testDisabledRuntimeRecoveryKeepsRemoteCleanupWithoutECS() async throws {
+        for category in [LaunchRecoveryCategory.success, .local] {
+            let home = FileManager.default.temporaryDirectory
+                .appendingPathComponent("tunnelpad-disabled-cleanup-\(UUID().uuidString)", isDirectory: true)
+            let tunnel = TunnelConfig(
+                id: "cleanup-lan",
+                name: "Cleanup LAN",
+                command: ["/usr/bin/ssh", "-N", "-R", "127.0.0.1:18080:127.0.0.1:8080", "root@fixture"],
+                keepAlive: true,
+                autoStart: true,
+                forceRemotePortCleanup: true,
+                ecsSyncPolicy: .disabled
+            )
+            let owner = SharedRuntimeRecoveryOwner(config: AppConfig(tunnels: [tunnel]))
+            let checker = SharedRuntimeRecoveryChecker(cleanupCategory: category)
+            let manager = TunnelManager(
+                paths: TunnelPaths(homeDirectory: home),
+                rustCore: owner,
+                preStartChecker: checker,
+                healthMonitorIntervalNanoseconds: 3_600_000_000_000,
+                launchdFailureMonitorIntervalNanoseconds: 1_000_000,
+                healthSleep: { nanoseconds in
+                    try await Task.sleep(nanoseconds: min(nanoseconds, 1_000_000))
+                }
+            )
+            defer { try? FileManager.default.removeItem(at: home) }
+
+            let deadline = Date().addingTimeInterval(2)
+            while checker.cleanupIDs.isEmpty, Date() < deadline {
+                try await Task.sleep(nanoseconds: 1_000_000)
+            }
+            if category == .success {
+                while !owner.startedIDs.contains(tunnel.id), Date() < deadline {
+                    try await Task.sleep(nanoseconds: 1_000_000)
+                }
+            }
+            XCTAssertEqual(checker.cleanupIDs, [tunnel.id])
+            XCTAssertEqual(checker.calls, 0)
+            XCTAssertEqual(checker.resourceCalls, 0)
+            XCTAssertEqual(owner.startedIDs.contains(tunnel.id), category == .success)
+            await manager.shutdownAsync()
+        }
     }
 
     func testDisplayEditDoesNotReviveManuallyStoppedTunnel() async throws {
@@ -461,13 +511,20 @@ private final class IPDriftDelayRecorder: @unchecked Sendable {
 private final class SharedRuntimeRecoveryChecker: LaunchPreflightChecking, ECSIPDriftChecking, @unchecked Sendable {
     private let lock = NSLock()
     private var callsStorage = 0
+    private var resourceCallsStorage = 0
     private var activeCalls = 0
     private var maxConcurrentCallsStorage = 0
     private var continuation: CheckedContinuation<Void, Never>?
     private var cleanupIDsStorage: [String] = []
+    private let cleanupCategory: LaunchRecoveryCategory
+
+    init(cleanupCategory: LaunchRecoveryCategory = .success) {
+        self.cleanupCategory = cleanupCategory
+    }
 
     var requiresAutomaticRecoveryQuiescence: Bool { true }
     var calls: Int { lock.withLock { callsStorage } }
+    var resourceCalls: Int { lock.withLock { resourceCallsStorage } }
     var maxConcurrentCalls: Int { lock.withLock { maxConcurrentCallsStorage } }
     var cleanupIDs: [String] { lock.withLock { cleanupIDsStorage } }
 
@@ -506,7 +563,10 @@ private final class SharedRuntimeRecoveryChecker: LaunchPreflightChecking, ECSIP
         continuation?.resume()
     }
 
-    func launchResource() async throws -> String { "shared-resource" }
+    func launchResource() async throws -> String {
+        lock.withLock { resourceCallsStorage += 1 }
+        return "shared-resource"
+    }
 
     func remotePortCleanupResource(tunnel: TunnelConfig) -> String? { "cleanup:\(tunnel.id)" }
 
@@ -515,10 +575,10 @@ private final class SharedRuntimeRecoveryChecker: LaunchPreflightChecking, ECSIP
         return .init(
             version: 1,
             stage: "remoteCleanup",
-            category: .success,
+            category: cleanupCategory,
             retryHint: 0,
             sanitizedCode: "listener_absent",
-            exitCode: 0
+            exitCode: cleanupCategory == .success ? 0 : 3
         )
     }
 
