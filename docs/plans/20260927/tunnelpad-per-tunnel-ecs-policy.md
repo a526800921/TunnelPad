@@ -4,9 +4,9 @@
 
 2026-09-27 用户确认已经直接使用 `10.0.0.2:9998` 访问 Mini，并要求针对“所有 SSH 隧道都触发 ECS 同步”提出解决方案。此前的 [Mini API SSH 隧道记录](../../data-quality/20260927-mac-mini-api-tunnel.md)保留为历史证据，不再以新增该隧道为本计划交付目标。本轮未核验实际监听或修改机器配置。
 
-当前源码只根据可执行文件末段是否为 `ssh` 决定 ECS 前置。目标为局域网机器或非阿里云服务器也会调用同一套同步流程；配置中没有逐隧道关闭入口。该行为来自旧 ECS 集成范围，本计划明确演进其适用条件，不重开已完成计划。
+实施前源码只根据可执行文件末段是否为 `ssh` 决定 ECS 前置。目标为局域网机器或非阿里云服务器也会调用同一套同步流程；配置中没有逐隧道关闭入口。该行为来自旧 ECS 集成范围，本计划明确演进其适用条件，不重开已完成计划。
 
-用户随后明确授权阶段 1 实现，指定旧配置缺字段保持 `disabled`；阶段 2 又授权 MacBook 受控部署。真实连接的启停与 motorcycle 本地转发已验证；`8081/admin` 探针未通过，本轮没有直接观测到云端安全组写入。
+用户随后明确授权阶段 1 实现，指定旧配置缺字段保持 `disabled`；阶段 2 又授权 MacBook 受控部署。真实连接的启停、motorcycle 本地转发和保留的 `8081/admin` 探针已验证，用户接受体验并要求关闭计划。本轮没有直接观测到云端安全组写入。
 
 ## 目标
 
@@ -67,7 +67,7 @@
 
 ## 公共契约变化
 
-现行配置来源为上述 Swift/Rust 类型，未发现独立配置 Schema。本节承载拟议契约，尚未实现；配置顶层 `version=1` 保持兼容读取，降级限制见风险和回滚。
+现行配置来源为上述 Swift/Rust 类型，未发现独立配置 Schema。本节承载已实施的逐隧道契约；配置顶层 `version=1` 保持兼容读取，降级限制见风险和回滚。
 
 ### 字段和兼容规则
 
@@ -116,26 +116,26 @@ Rust 与 Swift 对字段缺失和显式 null 必须保持一致；不能直接�
 |---|---|---|---|---|
 | 阶段 0 | 方案、源码基线与验收边界 | 用户要求解决方案 | 路径覆盖、兼容与回滚文档自验 | 已完成 |
 | 阶段 1 | 策略与所有运行入口解耦 | 明确实现授权；本阶段 Step 0、impact 与样本就绪 | Swift/Rust、假云、隔离恢复；收敛后一次 high 独立复核 | 已完成 |
-| 阶段 2 | 配套 Release 与使用验收 | 阶段 1 完成；实际构建、替换及隧道操作授权明确 | 普通 SSH 零 ECS 调用、已有 ECS 不退化、回滚演练 | 实施中 |
+| 阶段 2 | 配套 Release 与使用验收 | 阶段 1 完成；实际构建、替换及隧道操作授权明确 | 普通 SSH 零 ECS 调用、已有 ECS 不退化、回滚边界核对 | 已完成 |
 
 ## 当前阶段
 
 ### 范围
 
-阶段 2 目标为 MacBook 受控替换和用户可观察验收。用户指定仅 `motorcycle-local-docker` 显式启用 required，并已授权部署；Mac mini 不在本次范围。用户在设置页保存时发现 ECS 策略字段丢失，现已修复写盘器并重新部署 MacBook；真实 UI 的立即重开与刷新后重开均保留选择。验收后用户再次选中 motorcycle 的 `required`，当前落盘 `ecsSyncPolicy=required`、`autoStart=true`，其他旧项仍缺字段（等效 disabled）。`8081/admin` 业务探针尚待另行复验。真实 ECS 写入不作为本次部署的必要步骤。
+阶段 2 目标为 MacBook 受控替换和用户可观察验收。用户指定仅 `motorcycle-local-docker` 显式启用 required，并已授权部署；Mac mini 不在本次范围。用户在设置页保存时发现 ECS 策略字段丢失，现已修复写盘器并重新部署 MacBook；真实 UI 的立即重开与刷新后重开均保留选择。验收后用户再次选中 motorcycle 的 `required`，当前落盘 `ecsSyncPolicy=required`、`autoStart=true`，其他旧项仍缺字段（等效 disabled）。8081 恢复后，保留的探针返回 401、motorcycle 转发返回 200，用户确认体验通过。真实 ECS 写入不作为本次部署的必要步骤。
 
 ### 阶段准入摘要
 
 | 字段 | 内容 |
 |---|---|
-| 准入状态 | 实施中 |
+| 准入状态 | 已完成 |
 | 复核策略 | 风险分流 |
 | Step 0 | [阶段 2 Step 0](../../data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage2-step0.md) |
 | 样本矩阵 | [验证矩阵](#验证方式)与[阶段 2 Step 0](../../data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage2-step0.md)中的部署样本 |
 | 验证方式 | 隔离 Release、签名/ABI、配置备份、真实 App/API/隧道状态与回滚边界 |
 | 失败/回滚边界 | [风险和回滚](#风险和回滚) |
-| 当前阻塞项 | motorcycle 健康探针/8081 业务服务 |
-| 下一动作 | 复验 8081/admin 业务探针，再等待用户体验验收 |
+| 当前阻塞项 | 无 |
+| 下一动作 | 无；阶段 2 已完成 |
 | 最新阶段复核 | [当前复核](#最新阶段复核) |
 
 ### 实施步骤
@@ -173,6 +173,7 @@ Rust 与 Swift 对字段缺失和显式 null 必须保持一致；不能直接�
 | 2026-09-27 | 提交后真实连接验收 | 提交 `42d87d8`；disabled 和 required 实际启动/停止均成功，motorcycle 的 10080/ HTTP 200；用户确认保留的 8081/admin 探针失败，SSH 日志证实目标端口拒绝连接，验收连接已清理 | [阶段 2 部署记录](../../data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage2-deployment.md#提交后真实连接验收追加2026-09-27) | 实施中 | Codex 主代理 |
 | 2026-09-27 | 设置页策略丢失复查 | 用户勾选 ECS 后立即重开及刷新均仍关闭；当前配置仅 autoStart 变化，写盘器未输出 ecsSyncPolicy；即时 UI 状态尚需单独判定，用户要求保留当前配置 | [策略丢失复现与提案](../../data-quality/20260927-ecs-policy-save-loss-regression.md) | 实施中 | Codex 主代理 |
 | 2026-09-27 | 策略写盘修复与 MacBook UI 验收 | Rust 写盘器补齐字段，独立只读复核未发现新缺陷；新版立即重开、刷新重开均显示 required，用户随后再次选择 required，当前三条受管隧道未加载 | [策略丢失复现、修复与验收](../../data-quality/20260927-ecs-policy-save-loss-regression.md) | 实施中 | Codex 主代理 |
+| 2026-09-27 | 阶段 2 收尾与用户验收 | OrbStack 8081/admin 返回 401；motorcycle required 启动、10080/ 返回 200，探针 satisfied/401，云端只读检查 synchronized；用户明确回复“通过，关闭计划” | [阶段 2 收尾验收](../../data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage2-deployment.md#8081-恢复后的阶段-2-收尾验收2026-09-27) | 已完成 | Codex 主代理 |
 
 ### 验证方式
 
@@ -201,6 +202,8 @@ Rust 与 Swift 对字段缺失和显式 null 必须保持一致；不能直接�
 - 关闭一条旧局域网 SSH 项的 ECS 后，其他 ECS 项不受影响；保存不引起无关隧道重启。反向开启 ECS 时，运行中的该隧道须先停止并确认收敛，不能继续以未经过前置的连接运行。
 - 技术完成后由用户确认上述体验；待确认时计划保持实施中，下一动作记为等待用户验收。
 
+2026-09-27，用户在 MacBook 真实连接、探针和 UI 回读结果公布后明确确认体验通过并要求关闭计划；验收证据见[阶段 2 收尾记录](../../data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage2-deployment.md#8081-恢复后的阶段-2-收尾验收2026-09-27)。
+
 ### 测试覆盖率
 
 阶段 1 已执行配置解析、前置调用 spy、恢复和混合队列测试；尚未采集单独的行覆盖率数据，不能用字段往返测试替代入口零调用与恢复行为验证。
@@ -219,8 +222,8 @@ Rust 与 Swift 对字段缺失和显式 null 必须保持一致；不能直接�
 | 方式 | 自验 |
 | 风险 | 高风险 |
 | 风险依据 | 写盘器改变 ECS 门禁持久化，MacBook App 已替换；新增范围完成 high 独立只读复核 |
-| 结论 | 未通过：Rust/Swift 串行回归、MacBook UI 保存/立即重开/刷新和用户 required 配置均通过；8081 业务探针仍未通过 |
-| 证据 | [策略丢失复现、修复与验收](../../data-quality/20260927-ecs-policy-save-loss-regression.md) |
+| 结论 | 通过：复用同范围独立复核与回归；MacBook UI 回读、required 真实连接、10080 转发、保留的 8081 探针及用户体验验收均通过；真实 ECS 写入未直接观测 |
+| 证据 | [阶段 2 收尾验收](../../data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage2-deployment.md#8081-恢复后的阶段-2-收尾验收2026-09-27) |
 | 复核者 | Codex 主代理 |
 
 ## 阶段复核记录
@@ -237,6 +240,7 @@ Rust 与 Swift 对字段缺失和显式 null 必须保持一致；不能直接�
 | 2026-09-27 | 策略写盘回归自验 | 阶段 2 | 自验 | 高风险 | 未通过：ECS 策略写盘器丢失字段，即时 UI 状态待查；8081 业务探针仍未通过 | [策略丢失复现与提案](../../data-quality/20260927-ecs-policy-save-loss-regression.md) | Codex 主代理 |
 | 2026-09-27 | 策略写盘独立复核 | 阶段 2 | 独立 | 高风险 | 通过：Rust 三文件修复与回读测试未见可证实新缺陷；立即重开需真实 UI 验收 | [策略丢失复现、修复与验收](../../data-quality/20260927-ecs-policy-save-loss-regression.md) | Codex 独立子代理 ecs_save_review |
 | 2026-09-27 | 策略写盘修复自验 | 阶段 2 | 自验 | 高风险 | 未通过：Rust/Swift 串行回归、MacBook UI 保存/立即重开/刷新和用户 required 配置均通过；8081 业务探针仍未通过 | [策略丢失复现、修复与验收](../../data-quality/20260927-ecs-policy-save-loss-regression.md) | Codex 主代理 |
+| 2026-09-27 | 阶段 2 完成自验 | 阶段 2 | 自验 | 高风险 | 通过：复用阶段 1 同范围独立复核和策略写盘独立复核；8081 探针、motorcycle required 转发及用户体验验收通过，云端写入未直接观测 | [阶段 2 收尾验收](../../data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage2-deployment.md#8081-恢复后的阶段-2-收尾验收2026-09-27) | Codex 主代理 |
 
 ### 文档验证记录
 
@@ -248,7 +252,7 @@ Rust 与 Swift 对字段缺失和显式 null 必须保持一致；不能直接�
 |---|---|---|---|
 | 阶段 1 独立复核 | 同范围 high 只读复核四项发现由实施者修复并自验 | 否 | 已解决 |
 | 真实 ECS 写入验收 | required 实际启动成功，启动前后只读 ECS 检查均为 synchronized；未观测到本轮发生写入，不能把写入路径记为实测通过 | 否 | 待确定 |
-| motorcycle 健康探针/8081 业务服务 | 用户确认保留 8081/admin；需恢复 SSH 目标 8081 服务后再验证 HTTP 200/401 | 是 | 未解决 |
+| motorcycle 健康探针/8081 业务服务 | 用户保留的 8081/admin 由本机 OrbStack 恢复并返回 401；motorcycle 10080 转发独立返回 200。admin-tunnel 指向的远端 8081 仍未监听，不把本机探针冒充其远端业务验收 | 否 | 已解决（motorcycle 验收）；admin 远端业务另行处理 |
 | ECS 策略保存/回读丢失 | `apple_json::render_tunnel` 已输出 ecsSyncPolicy；[修复与验收](../../data-quality/20260927-ecs-policy-save-loss-regression.md)覆盖写盘回读、立即重开与刷新重开；用户最终选中 required | 否 | 已解决 |
 
 ## 风险和回滚

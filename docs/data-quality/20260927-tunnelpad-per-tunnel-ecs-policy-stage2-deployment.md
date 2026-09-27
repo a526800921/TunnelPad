@@ -37,3 +37,13 @@
 用户确认 motorcycle 的健康探针继续使用 `8081/admin`，本轮没有修改探针配置。为排除 `admin-tunnel` 尚未运行这一原因，再次启动 `admin-tunnel`：本机 `127.0.0.1:8081` 可以建立 TCP 连接，但访问 `/` 和 `/admin` 都被重置；受管 SSH 日志在当次访问时记录 `connect failed: Connection refused`。配置中的 `-L` 将该端口转发到 SSH 目标的 8081。Workbench 在本机未列出实例，故使用已有 SSH 目标做一次只读 TCP 检查：远端 `127.0.0.1:8081` 返回 `closed`。这确认远端目标端口当前没有监听服务；没有尝试启动或修改该服务。
 
 保持 admin 运行时再次启动 motorcycle：两条 API 状态均为 running，但探针仍为 failed；`motorcycle` 的 `10080/` 继续返回 HTTP 200。随后依次停止 motorcycle 和 admin，均返回 not_loaded。`8081/admin` 是用户确认的期望目标，不能擅自改为 `10080/`。阶段 2 的 SSH 生命周期和 motorcycle 转发已验收，**健康探针/8081 业务可达性未通过**，需在目标服务恢复后复验。
+
+## 8081 恢复后的阶段 2 收尾验收（2026-09-27）
+
+用户要求继续完成计划。本次开始时三条受管隧道均为 `not_loaded`，`motorcycle-local-docker` 落盘策略为 `required`、`autoStart=true`，另外两条旧项缺字段（有效值 `disabled`）。`workbench list ecs` 未列出实例；未通过 Workbench 修改 ECS。先为诊断短暂启动 `admin-tunnel`：本机 8081 由 SSH 监听，但 `/admin` 连接被重置；使用原配置的 SSH 目标做只读检查，远端 `127.0.0.1:8081` 没有监听。随后通过 App API 停止 admin，确认其 label 未加载、8081 不再由 SSH 占用。
+
+之后 MacBook 上原有 OrbStack 的 motorcycle 容器恢复并显示 `healthy`，其本机 8081 监听可访问，`GET http://127.0.0.1:8081/admin` 返回预期的 HTTP 401。保持 admin 停止，使用 App API 启动唯一 `required` 的 `motorcycle-local-docker`：返回 `running`，精确 launchd label 的 PID 与 API 一致、`runs=1`、无退出；本地转发 `127.0.0.1:10080/` 返回 HTTP 200；App API 随后的探针为 `satisfied/401`。打包同步器的只读 `--check --result-json` 返回 `success/synchronized`，未据此声称本次发生云端写入。`admin-tunnel`、`reverse-ssh` 仍为 `not_loaded`；验收后保留用户当前 `autoStart=true` 的 motorcycle 运行状态。
+
+这两条 HTTP 证据各有边界：8081 由本机 OrbStack 监听，401 证明用户保留的探针端点可用，不能单独证明流量经过 motorcycle SSH；`10080/` 的 200 加上受管 SSH 运行状态证明该隧道的本地转发可用。远端 ECS 的 8081 仍未监听，因此本次未把 `admin-tunnel` 的远端后台管理业务记为通过，也未修改用户要求保留的探针 URL。这是既有配置和业务服务的独立限制，不再作为逐隧道 ECS 策略交付的阻塞项。
+
+用户在技术结果公布后明确回复“通过，关闭计划”。本阶段保存/回读、真实 required 启动、disabled 生命周期、探针端点与转发及用户体验验收均已形成证据；真实安全组写入仍无本次直接观测，沿用隔离回归和只读 synchronized 证据，不扩写为实测写入。
