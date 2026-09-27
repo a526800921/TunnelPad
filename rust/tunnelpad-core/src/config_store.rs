@@ -169,6 +169,7 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::EcsSyncPolicy;
     use std::ffi::OsString;
     use std::sync::{Mutex, MutexGuard};
 
@@ -265,5 +266,43 @@ mod tests {
             local_components(1_719_792_000),
             Some((2024, 6, 30, 17, 0, 0))
         );
+    }
+
+    #[test]
+    fn saved_ecs_policy_survives_disk_reload() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let home = std::env::temp_dir().join(format!(
+            "tp-ecs-policy-store-{}-{stamp}",
+            std::process::id()
+        ));
+        let paths = TunnelPaths::new(&home);
+        let store = ConfigStore::new(paths.clone());
+        let mut config: AppConfig = serde_json::from_str(
+            r#"{"version":1,"tunnels":[{"id":"ssh","name":"SSH","command":["/usr/bin/ssh"]}]}"#,
+        )
+        .unwrap();
+
+        for policy in [
+            Some(EcsSyncPolicy::Required),
+            Some(EcsSyncPolicy::Disabled),
+            None,
+        ] {
+            config.tunnels[0].ecs_sync_policy = policy;
+            store.save(&config).unwrap();
+            let raw = fs::read_to_string(paths.config_url()).unwrap();
+            let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            let stored = value["tunnels"][0].get("ecsSyncPolicy");
+            match policy {
+                Some(EcsSyncPolicy::Required) => assert_eq!(stored.unwrap(), "required"),
+                Some(EcsSyncPolicy::Disabled) => assert_eq!(stored.unwrap(), "disabled"),
+                None => assert!(stored.is_none()),
+            }
+            assert_eq!(store.load().config.tunnels[0].ecs_sync_policy, policy);
+        }
+
+        fs::remove_dir_all(home).unwrap();
     }
 }

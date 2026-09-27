@@ -2190,6 +2190,15 @@ mod tests {
             .unwrap();
         assert_eq!(owner.config.lock().unwrap().tunnels[0], required);
         assert_eq!(
+            ConfigStore::new(TunnelPaths::new(&home))
+                .load()
+                .config
+                .tunnels[0]
+                .ecs_sync_policy,
+            Some(EcsSyncPolicy::Required),
+            "owner 保存成功后，磁盘重载仍须保留 ECS 前置策略"
+        );
+        assert_eq!(
             stops.lock().unwrap().len(),
             1,
             "提交前必须确认旧 SSH 身份已收敛"

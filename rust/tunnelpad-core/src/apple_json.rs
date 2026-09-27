@@ -6,7 +6,7 @@
 //! 闭括号（Swift prettyPrinted 的已知行为）；输出不以换行结尾。
 //! 键序由各类型的固定字段集决定（与 serde 字段名一致）。
 
-use crate::{AppConfig, TunnelConfig};
+use crate::{AppConfig, EcsSyncPolicy, TunnelConfig};
 
 pub fn app_config_to_apple_json(config: &AppConfig) -> String {
     let tunnels = render_array(&config.tunnels, 2, render_tunnel);
@@ -18,13 +18,23 @@ pub fn app_config_to_apple_json(config: &AppConfig) -> String {
 
 /// 层级：`{`(0) → 键(2) → tunnel `{`(4) → 键(6) → probe `{`(6→键 8) → 数组项(8→项 10)。
 fn render_tunnel(tunnel: &TunnelConfig) -> String {
-    // 键按字母序：autoStart, command, executor, forceRemotePortCleanup, id, keepAlive, name, probe, remark, throttleInterval
+    // 键按字母序：autoStart, command, ecsSyncPolicy(可选), executor, forceRemotePortCleanup, id, keepAlive, name, probe, remark, throttleInterval
     let mut out = String::from("{\n");
     out.push_str(&format!("      \"autoStart\" : {},\n", tunnel.auto_start));
     out.push_str(&format!(
         "      \"command\" : {},\n",
         render_string_array(&tunnel.command, 6)
     ));
+    if let Some(policy) = tunnel.ecs_sync_policy {
+        let value = match policy {
+            EcsSyncPolicy::Disabled => "disabled",
+            EcsSyncPolicy::Required => "required",
+        };
+        out.push_str(&format!(
+            "      \"ecsSyncPolicy\" : {},\n",
+            render_string(value)
+        ));
+    }
     out.push_str(&format!(
         "      \"executor\" : {},\n",
         render_string("launchd")
@@ -132,5 +142,18 @@ mod tests {
         .unwrap();
         let expected = "{\n  \"tunnels\" : [\n    {\n      \"autoStart\" : false,\n      \"command\" : [\n        \"\\/usr\\/bin\\/ssh\",\n        \"-N\",\n        \"-L\",\n        \"8080:127.0.0.1:80\",\n        \"host\"\n      ],\n      \"executor\" : \"launchd\",\n      \"forceRemotePortCleanup\" : false,\n      \"id\" : \"admin-tunnel\",\n      \"keepAlive\" : true,\n      \"name\" : \"管理\\\"引号\\\"\\\\反斜杠\",\n      \"probe\" : {\n        \"expectedStatuses\" : [\n          200,\n          204\n        ],\n        \"url\" : \"http:\\/\\/127.0.0.1:8080\\/health\"\n      },\n      \"remark\" : \"\",\n      \"throttleInterval\" : 10\n    }\n  ],\n  \"version\" : 1\n}";
         assert_eq!(app_config_to_apple_json(&config), expected);
+    }
+
+    #[test]
+    fn ecs_policy_uses_sorted_key_position() {
+        let config: AppConfig = serde_json::from_str(
+            r#"{"version":1,"tunnels":[{"id":"ssh","name":"SSH","command":["/usr/bin/ssh"],"ecsSyncPolicy":"required"}]}"#,
+        )
+        .unwrap();
+        let rendered = app_config_to_apple_json(&config);
+        let command = rendered.find("\"command\" :").unwrap();
+        let policy = rendered.find("\"ecsSyncPolicy\" : \"required\"").unwrap();
+        let executor = rendered.find("\"executor\" :").unwrap();
+        assert!(command < policy && policy < executor);
     }
 }
