@@ -78,6 +78,8 @@
 
 ## 推荐顺序
 
+2026-09-27 Mini 局域网 API 白名单直连已完成，[变更与验收证据](data-quality/20260927-mac-mini-lan-api.md)记录独立发现修复自验、214项回归及双端允许/拒绝验收；演进本机 API 的监听安全边界，保留127.0.0.1入口，现行配置契约见 [README](../README.md#可选可信局域网直连)。不改变下述 ECS 策略方案或历史完成状态。
+
 [无人值守启动恢复](plans/tunnelpad-unattended-launch-recovery.md)阶段0–2已完成：实现与隔离回归、真实时间故障恢复、资源对照、实际重启及各适用独立复核通过，用户确认重启后全程无人工启动。当前为正常配置下的新版，临时只读护栏未跨重启保留。[探针误导问题](reviews/tunnelpad-deferred-runtime-issues-20260912.md)按用户要求后续统一修复；旧计划与历史证据保留原范围。
 
 1. 核心生命周期或恢复变更先核对 [Rust Core 迁移](plans/tunnelpad-rust-migration.md)、[稳定性](plans/tunnelpad-stability.md)、[Core 风险收敛](plans/tunnelpad-core-hardening.md)和[无人值守 SSH 恢复](plans/tunnelpad-unattended-managed-ssh-recovery.md)的职责边界。

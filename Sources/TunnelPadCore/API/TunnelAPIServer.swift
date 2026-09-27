@@ -6,7 +6,7 @@ import NIOFoundationCompat
 
 /// TunnelPad 本机 HTTP API Server。
 ///
-/// 生产实例固定由 AppDelegate 以 127.0.0.1:9998 启动；业务操作只能经过
+/// 默认回环监听；显式 LAN 配置启用精确来源白名单。业务操作只能经过
 /// TunnelAPIBackend，避免 HTTP handler 绕过 TunnelManager/Rust Core owner。
 public final class TunnelAPIServer: @unchecked Sendable {
     public static let defaultHost = "127.0.0.1"
@@ -15,67 +15,102 @@ public final class TunnelAPIServer: @unchecked Sendable {
 
     private let host: String
     private let port: Int
+    private let configuration: TunnelAPIConfiguration
     private let backend: any TunnelAPIBackend
     private let operationTimeoutNanoseconds: UInt64
-    private var channel: Channel?
+    private var channels: [Channel] = []
     private var group: MultiThreadedEventLoopGroup?
+    private let readiness = TunnelAPIReadiness()
 
     public init(
         host: String = "127.0.0.1",
         port: Int = 9998,
+        allowedClientIPs: [String] = [],
         operationTimeoutNanoseconds: UInt64 = 60_000_000_000,
         backend: any TunnelAPIBackend
     ) {
         self.host = host
         self.port = port
+        self.configuration = TunnelAPIConfiguration(host: host, allowedClientIPs: allowedClientIPs)
         self.operationTimeoutNanoseconds = operationTimeoutNanoseconds
         self.backend = backend
     }
 
     /// 测试 fixture 可使用 port=0，并在绑定后读取实际端口。
-    public var localPort: Int? { channel?.localAddress?.port }
+    public var localPort: Int? { channels.first?.localAddress?.port }
 
-    public var isRunning: Bool { channel != nil }
+    public var isRunning: Bool { !channels.isEmpty }
 
     /// 绑定失败直接抛出，由 AppDelegate 记录错误并继续启动 App；不自动换端口或重试。
     public func start() throws {
-        guard channel == nil else { return }
+        try start(listenerHosts: host == "127.0.0.1" ? [host] : [host, "127.0.0.1"])
+    }
+
+    /// Internal seam for deterministic partial-bind failure tests; production uses start().
+    func start(listenerHosts: [String], afterBind: ((Int) -> Void)? = nil) throws {
+        guard channels.isEmpty else { return }
+        try configuration.validate()
+        readiness.setReady(false)
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         do {
             let backend = self.backend
             let timeout = self.operationTimeoutNanoseconds
+            let accessPolicy = TunnelAPIAccessPolicy(configuration: configuration)
+            let readiness = self.readiness
             let bootstrap = ServerBootstrap(group: group)
                 .childChannelInitializer { channel in
                     let handler = TunnelAPIHandler(
                         backend: backend,
-                        operationTimeoutNanoseconds: timeout
+                        operationTimeoutNanoseconds: timeout,
+                        accessPolicy: accessPolicy,
+                        readiness: readiness
                     )
                     return channel.pipeline.configureHTTPServerPipeline().flatMap {
                         channel.pipeline.addHandler(handler)
                     }
                 }
             let option = ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR)
-            let channel = try bootstrap
-                .serverChannelOption(option, value: 1)
-                .bind(host: host, port: port)
-                .wait()
+            for address in listenerHosts {
+                let channel = try bootstrap
+                    .serverChannelOption(option, value: 1)
+                    .bind(host: address, port: localPort ?? port)
+                    .wait()
+                channels.append(channel)
+                if let port = channel.localAddress?.port { afterBind?(port) }
+            }
             self.group = group
-            self.channel = channel
+            readiness.setReady(true)
         } catch {
+            readiness.setReady(false)
+            for channel in channels { try? channel.close().wait() }
+            channels.removeAll()
             try? group.syncShutdownGracefully()
             throw error
         }
     }
 
     public func stop() throws {
-        let channel = self.channel
+        readiness.setReady(false)
+        let channels = self.channels
         let group = self.group
-        self.channel = nil
+        self.channels = []
         self.group = nil
-        try channel?.close().wait()
-        try group?.syncShutdownGracefully()
+        var firstError: Error?
+        for channel in channels {
+            do { try channel.close().wait() } catch { firstError = firstError ?? error }
+        }
+        do { try group?.syncShutdownGracefully() } catch { firstError = firstError ?? error }
+        if let firstError { throw firstError }
     }
+}
+
+private final class TunnelAPIReadiness: @unchecked Sendable {
+    private let lock = NSLock()
+    private var ready = false
+
+    var isReady: Bool { lock.withLock { ready } }
+    func setReady(_ value: Bool) { lock.withLock { ready = value } }
 }
 
 private struct TunnelAPIResponse: Sendable {
@@ -96,19 +131,37 @@ private final class TunnelAPIHandler: ChannelInboundHandler, @unchecked Sendable
 
     private let backend: any TunnelAPIBackend
     private let operationTimeoutNanoseconds: UInt64
+    private let accessPolicy: TunnelAPIAccessPolicy
+    private let readiness: TunnelAPIReadiness
+    private var rejected = false
+    private var responseStarted = false
     private var method: HTTPMethod = .GET
     private var uri = "/"
     private var body = Data()
 
-    init(backend: any TunnelAPIBackend, operationTimeoutNanoseconds: UInt64) {
+    init(backend: any TunnelAPIBackend, operationTimeoutNanoseconds: UInt64,
+         accessPolicy: TunnelAPIAccessPolicy, readiness: TunnelAPIReadiness) {
         self.backend = backend
         self.operationTimeoutNanoseconds = operationTimeoutNanoseconds
+        self.accessPolicy = accessPolicy
+        self.readiness = readiness
     }
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let part = unwrapInboundIn(data)
         switch part {
         case .head(let head):
+            guard !responseStarted else { return }
+            guard accessPolicy.permits(peerIP: context.channel.remoteAddress?.ipAddress,
+                                       headers: head.headers,
+                                       port: context.channel.localAddress?.port ?? 0) else {
+                rejected = true
+                responseStarted = true
+                send(response: TunnelAPIResponse(statusCode: 403,
+                    body: Data(#"{"ok":false,"error":{"code":"access_denied","message":"访问被拒绝"}}"#.utf8),
+                    contentType: "application/json"), on: context.channel)
+                return
+            }
             method = head.method
             uri = head.uri
             body.removeAll(keepingCapacity: true)
@@ -116,6 +169,7 @@ private final class TunnelAPIHandler: ChannelInboundHandler, @unchecked Sendable
                 respond(context: context)
             }
         case .body(let buffer):
+            guard !rejected && !responseStarted else { return }
             if let chunk = buffer.getData(
                 at: buffer.readerIndex,
                 length: buffer.readableBytes
@@ -123,13 +177,20 @@ private final class TunnelAPIHandler: ChannelInboundHandler, @unchecked Sendable
                 body.append(chunk)
             }
         case .end:
-            if method == .POST {
+            if !rejected && !responseStarted && method == .POST {
                 respond(context: context)
             }
         }
     }
 
     private func respond(context: ChannelHandlerContext) {
+        responseStarted = true
+        guard readiness.isReady else {
+            send(response: TunnelAPIResponse(statusCode: 503,
+                body: Data(#"{"ok":false,"error":{"code":"service_unavailable","message":"API 尚未就绪"}}"#.utf8),
+                contentType: "application/json"), on: context.channel)
+            return
+        }
         let request = TunnelAPIRequest(method: method, uri: uri, body: body)
         let backend = self.backend
         let timeout = self.operationTimeoutNanoseconds
@@ -153,9 +214,11 @@ private final class TunnelAPIHandler: ChannelInboundHandler, @unchecked Sendable
         switch response.statusCode {
         case 200: status = .ok
         case 400: status = .badRequest
+        case 403: status = .forbidden
         case 404: status = .notFound
         case 409: status = .conflict
         case 500: status = .internalServerError
+        case 503: status = .serviceUnavailable
         case 504: status = .gatewayTimeout
         default: status = .internalServerError
         }
@@ -173,8 +236,9 @@ private final class TunnelAPIHandler: ChannelInboundHandler, @unchecked Sendable
         )
         _ = channel.write(HTTPServerResponsePart.head(head))
         _ = channel.write(HTTPServerResponsePart.body(.byteBuffer(buffer)))
-        _ = channel.writeAndFlush(HTTPServerResponsePart.end(nil as HTTPHeaders?))
-        _ = channel.close(mode: .all)
+        channel.writeAndFlush(HTTPServerResponsePart.end(nil as HTTPHeaders?)).whenComplete { _ in
+            channel.close(promise: nil)
+        }
     }
 }
 
@@ -441,7 +505,7 @@ private enum TunnelAPIRouter {
                     "content": ["application/json": ["schema": response]]
                 ]
             ]
-            for code in statusCodes {
+            for code in Set(statusCodes + ["403", "503"]) {
                 responses[code] = [
                     "description": "失败",
                     "content": ["application/json": ["schema": errorResponse]]
@@ -457,11 +521,11 @@ private enum TunnelAPIRouter {
         let spec: [String: Any] = [
             "openapi": "3.1.0",
             "info": [
-                "title": "TunnelPad 本机 API",
+                "title": "TunnelPad API",
                 "version": "1.0.0",
-                "description": "TunnelPad 本机隧道状态、启停和日志 API。"
+                "description": "默认仅本机；可显式启用受限局域网访问。来源白名单不是用户认证，仅适用于可信局域网。"
             ],
-            "servers": [["url": "http://127.0.0.1:9998", "description": "本机回环服务"]],
+            "servers": [["url": "/", "description": "当前连接的 API 服务（默认回环，可配置受限局域网）"]],
             "paths": [
                 "/api/health": ["get": operation("健康检查", response: ["type": "object", "properties": ["ok": ["type": "boolean"]]])],
                 "/api/tunnels": ["get": operation("隧道列表", response: ["type": "object", "properties": ["ok": ["type": "boolean"], "tunnels": ["type": "array", "items": summaryRef]]])],

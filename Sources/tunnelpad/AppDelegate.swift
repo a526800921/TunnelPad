@@ -55,10 +55,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Shutdown.installSignalHandlers(owner: manager.shutdownHandle)
-        let apiServer = TunnelAPIServer(backend: TunnelManagerAPIBackend(manager: manager))
-        self.apiServer = apiServer
         do {
+            let configuration = try TunnelAPIConfiguration.load(
+                from: manager.paths.supportDirectory.appendingPathComponent("api.json")
+            )
+            let apiServer = TunnelAPIServer(
+                host: configuration.host,
+                allowedClientIPs: configuration.allowedClientIPs,
+                backend: TunnelManagerAPIBackend(manager: manager)
+            )
             try apiServer.start()
+            self.apiServer = apiServer
         } catch {
             // 与 ModelPad 一致：端口冲突只记录，App 继续运行，不换端口、不重试。
             print("[TunnelPad] API 服务启动失败：\(error)")
