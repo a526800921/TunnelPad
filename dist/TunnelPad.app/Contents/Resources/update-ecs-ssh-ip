@@ -1,0 +1,30 @@
+#!/bin/bash
+# 配置仅从操作者维护的仓库外文件读取；实际同步由同版原生监督器执行。
+set -u
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  printf '%s\n' '用法：update-ecs-ssh-ip [--check|--local-check|--resource] [--result-json]' '无参数同步；--check 只读；--local-check 本地前提；--resource 脱敏资源键。'
+  exit 0
+fi
+CONFIG_FILE=${TUNNELPAD_CONFIG_FILE:-${HOME:-}/.config/tunnelpad/ecs-ssh-ip.env}
+if [ ! -f "$CONFIG_FILE" ] || [ ! -r "$CONFIG_FILE" ]; then
+  printf '%s\n' '{"version":1,"stage":"local","category":"local","retryHint":60,"sanitizedCode":"configuration_missing","exitCode":2}'
+  exit 2
+fi
+set -a
+if ! . "$CONFIG_FILE" >/dev/null 2>&1; then
+  printf '%s\n' '{"version":1,"stage":"local","category":"local","retryHint":60,"sanitizedCode":"configuration_invalid","exitCode":2}'
+  exit 2
+fi
+set +a
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+HELPER=${TUNNELPAD_PREFLIGHT_HELPER:-$SCRIPT_DIR/tunnelpad-preflight}
+if [ ! -x "$HELPER" ]; then
+  for candidate in "$SCRIPT_DIR/../rust/target/debug/tunnelpad-preflight" "$SCRIPT_DIR/../rust/target/release/tunnelpad-preflight"; do
+    if [ -x "$candidate" ]; then HELPER=$candidate; break; fi
+  done
+fi
+if [ ! -x "$HELPER" ]; then
+  printf '%s\n' '{"version":1,"stage":"local","category":"local","retryHint":60,"sanitizedCode":"helper_missing","exitCode":2}'
+  exit 2
+fi
+exec "$HELPER" "$@"
