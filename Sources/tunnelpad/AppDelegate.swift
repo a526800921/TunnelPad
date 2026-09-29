@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import TunnelPadCore
+import Darwin
 
 struct ApplicationTerminationGate {
     enum Decision: Equatable {
@@ -40,6 +41,7 @@ struct ApplicationTerminationGate {
 final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     let manager: TunnelManager
+    private var instanceLockFileDescriptor: Int32?
     private var apiServer: TunnelAPIServer?
     private var menuBarController: MenuBarController?
     private var mainWindow: NSWindow?
@@ -47,7 +49,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     @Published private(set) var isMainWindowVisible = false
 
     override init() {
-        self.manager = TunnelManager(paths: .standard())
+        let paths = TunnelPaths.standard()
+        do {
+            try FileManager.default.createDirectory(
+                at: paths.supportDirectory,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            NSLog("[TunnelPad] 无法建立单实例锁目录：\(error)")
+            exit(EXIT_FAILURE)
+        }
+
+        let lockURL = paths.supportDirectory.appendingPathComponent("app-instance.lock")
+        let lockDescriptor = Darwin.open(
+            lockURL.path,
+            O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW,
+            mode_t(0o600)
+        )
+        guard lockDescriptor >= 0 else {
+            NSLog("[TunnelPad] 无法打开单实例锁：\(String(cString: strerror(errno)))")
+            exit(EXIT_FAILURE)
+        }
+
+        if flock(lockDescriptor, LOCK_EX | LOCK_NB) != 0 {
+            let lockError = errno
+            _ = Darwin.close(lockDescriptor)
+            if lockError == EWOULDBLOCK || lockError == EAGAIN {
+                exit(EXIT_SUCCESS)
+            }
+            NSLog("[TunnelPad] 无法取得单实例锁：\(String(cString: strerror(lockError)))")
+            exit(EXIT_FAILURE)
+        }
+
+        // 持有文件描述符直到进程退出；内核会在正常退出或崩溃时释放 flock。
+        self.instanceLockFileDescriptor = lockDescriptor
+        self.manager = TunnelManager(paths: paths)
         super.init()
     }
 

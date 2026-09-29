@@ -50,6 +50,7 @@
 
 | 计划 | 状态 | 当前阶段 | 最后更新 | 依赖 | 证据 |
 |---|---|---|---|---|---|
+| [TunnelPad 单实例运行约束](plans/20260929/tunnelpad-single-instance.md) | 已完成 | 阶段 1 | 2026-09-29 | tunnelpad-launch-autostart, tunnelpad-stability, tunnelpad-local-api | [专项计划与命令行验收](plans/20260929/tunnelpad-single-instance.md)；[独立复核](reviews/20260929-tunnelpad-single-instance-stage1-independent-review.md)；用户确认 Finder、Launchpad、Spotlight、Dock、登录项通过 |
 | [TunnelPad 逐隧道 ECS 同步策略](plans/20260927/tunnelpad-per-tunnel-ecs-policy.md) | 已完成 | - | 2026-09-27 | ecs-dynamic-ssh-ip, tunnelpad-unattended-launch-recovery, tunnelpad-unattended-ecs-ip-drift-recovery, tunnelpad-unattended-ssh-recovery-and-orphan-cleanup | [阶段 1 实施证据](data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage1.md)；[MacBook 部署、收尾与用户验收](data-quality/20260927-tunnelpad-per-tunnel-ecs-policy-stage2-deployment.md)；[ECS 策略保存修复与 UI 验收](data-quality/20260927-ecs-policy-save-loss-regression.md) |
 | [TunnelPad 无人值守 SSH 异常恢复与孤儿清理](plans/20260919/tunnelpad-unattended-ssh-recovery-and-orphan-cleanup.md) | 已完成 | - | 2026-09-19 | tunnelpad-unattended-launch-recovery, tunnelpad-unattended-managed-ssh-recovery, tunnelpad-log-write-amplification | [专项计划](plans/20260919/tunnelpad-unattended-ssh-recovery-and-orphan-cleanup.md)；[远端清理独立复核](reviews/tunnelpad-unattended-remote-forward-cleanup-independent-review-20260919.md)；[修复自验](data-quality/tunnelpad-unattended-remote-forward-cleanup-remediation-20260919.md)；[真实 IP 切换与用户验收](data-quality/tunnelpad-unattended-final-acceptance-20260919.md) |
 | [TunnelPad 无人值守 ECS 公网 IP 漂移同步与断线恢复](plans/20260919/tunnelpad-unattended-ecs-ip-drift-recovery.md) | 已完成 | - | 2026-09-19 | ecs-dynamic-ssh-ip, tunnelpad-launch-autostart, tunnelpad-unattended-ssh-recovery-and-orphan-cleanup | [专项计划](plans/20260919/tunnelpad-unattended-ecs-ip-drift-recovery.md)；[合并独立复核](reviews/tunnelpad-unattended-stage1-consolidated-review-20260919.md)；[阶段 1 修复自验](data-quality/tunnelpad-unattended-stage1-review-remediation-20260919.md)；[运行期退避修复](data-quality/tunnelpad-unattended-runtime-backoff-remediation-20260919.md)；[真实 IP 切换与用户验收](data-quality/tunnelpad-unattended-final-acceptance-20260919.md) |
@@ -85,6 +86,8 @@
 
 [无人值守启动恢复](plans/20260912/tunnelpad-unattended-launch-recovery.md)阶段0–2已完成：实现与隔离回归、真实时间故障恢复、资源对照、实际重启及各适用独立复核通过，用户确认重启后全程无人工启动。当前为正常配置下的新版，临时只读护栏未跨重启保留。[探针误导问题](reviews/tunnelpad-deferred-runtime-issues-20260912.md)按用户要求后续统一修复；旧计划与历史证据保留原范围。
 
+[单实例运行约束](plans/20260929/tunnelpad-single-instance.md)已完成：`AppDelegate` 在初始化 `TunnelManager` 前取得 per-user `flock`；锁被占用时重复进程立即退出，不启动第二套 API、菜单栏或自动恢复。独立代码复核通过；Swift executable 编译通过，222 项测试中 221 通过、0 失败、1 跳过。Release App 的 `open -a`、`open -n` 和直接可执行文件顺序重复启动均只保留一个进程及一个 API 监听；停止后重新启动成功。用户确认 Finder、Launchpad、Spotlight、Dock 和登录项入口验收通过。关窗和异常结束未单独做故障注入；并发启动不单独验收。
+
 1. 核心生命周期或恢复变更先核对 [Rust Core 迁移](plans/20260830/tunnelpad-rust-migration.md)、[稳定性](plans/20260830/tunnelpad-stability.md)、[Core 风险收敛](plans/20260902/tunnelpad-core-hardening.md)和[无人值守 SSH 恢复](plans/20260904/tunnelpad-unattended-managed-ssh-recovery.md)的职责边界。
 2. 日志与资源开销变更按[日志事件流](plans/20260830/tunnelpad-log-streaming.md)、[保留回归修复](plans/20260905/tunnelpad-log-retention-energy-regression.md)、[低写放大](plans/20260905/tunnelpad-log-write-amplification.md)的演进关系读取；能耗验收以[后台健康监测](plans/20260904/tunnelpad-health-monitor-energy.md)的最新有效证据为入口。
 3. 云端前置与本机 API 分别归属 [ECS 动态 SSH IP](plans/20260829/ecs-dynamic-ssh-ip.md)和[本机 HTTP API](plans/20260902/tunnelpad-local-api.md)；后续能力按各自非目标、授权与外部边界判断。
@@ -95,6 +98,7 @@
 
 | 计划 | 依赖 | 原因 |
 |---|---|---|
+| tunnelpad-single-instance | tunnelpad-launch-autostart, tunnelpad-stability, tunnelpad-local-api | 单实例锁必须先于 TunnelManager 初始化，确保登录项、手动启动、App 生命周期和本机 API 只有一个应用服务 owner；这些计划已完成，本次不重开其历史阶段。 |
 | tunnelpad-unattended-ssh-recovery-and-orphan-cleanup | tunnelpad-unattended-launch-recovery, tunnelpad-unattended-managed-ssh-recovery, tunnelpad-log-write-amplification | 在已完成的无人值守退避、受管 SSH 收敛和日志写入边界上，补齐日志代理引入的两级进程树所有权、I/O 失败清理、launchd 身份对齐和重复启动防护；共享生命周期文件必须串行编辑。 |
 | tunnelpad-unattended-launch-recovery | tunnelpad-launch-autostart, tunnelpad-unattended-managed-ssh-recovery, ecs-dynamic-ssh-ip, tunnelpad-health-monitor-energy, tunnelpad-rust-migration | 承接首次启动失败的持续限频恢复，复用 autoStart、既有健康恢复所有权、ECS fail-closed 和能耗边界；追加严格自动启动命令及同版打包前置监督，不重开历史完成阶段。 |
 | tunnelpad-launch-autostart | tunnelpad-stability, tunnelpad-rust-migration, ecs-dynamic-ssh-ip, tunnelpad-health-monitor-energy | 恢复入口复用已完成的首轮状态发现/busy 保护/CfgR 不变量与 Rust 配置 owner 边界；SSH 隧道恢复沿用 ECS 前置同步 fail-closed；启动期不做重试循环沿用能耗计划的边界；四计划均已完成，阶段 3 实施与共享生命周期文件编辑需保持单一编辑窗口。 |
