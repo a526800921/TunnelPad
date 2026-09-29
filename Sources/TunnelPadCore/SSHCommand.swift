@@ -54,6 +54,8 @@ public enum SSHCommand {
         var explicitUser: String?
         var addressFamily: String?
         var strictHostKeyChecking = "accept-new"
+        var userKnownHostsFile: String?
+        var globalKnownHostsFile: String?
         var seenOptions = Set<String>()
         var remotePort: Int?
         var destination: String?
@@ -133,6 +135,29 @@ public enum SSHCommand {
                         throw RemotePortCleanupParseError.invalidValue
                     }
                     strictHostKeyChecking = normalized
+                case "userknownhostsfile":
+                    guard isSafeKnownHostsFileList(
+                        optionValue,
+                        allowNullDevice: false,
+                        requireWritableStore: true
+                    ) else {
+                        throw RemotePortCleanupParseError.invalidValue
+                    }
+                    userKnownHostsFile = optionValue
+                case "globalknownhostsfile":
+                    guard isSafeKnownHostsFileList(
+                        optionValue,
+                        allowNullDevice: true,
+                        requireWritableStore: false
+                    ) else {
+                        throw RemotePortCleanupParseError.invalidValue
+                    }
+                    globalKnownHostsFile = optionValue
+                case "connecttimeout":
+                    // Cleanup uses its own fixed connect timeout and a separately enforced process deadline.
+                    guard let seconds = Int(optionValue), seconds >= 0 else {
+                        throw RemotePortCleanupParseError.invalidValue
+                    }
                 case "serveraliveinterval":
                     guard let number = Int(optionValue), (0...300).contains(number) else {
                         throw RemotePortCleanupParseError.invalidValue
@@ -167,6 +192,12 @@ public enum SSHCommand {
         if let identityFile { arguments += ["-i", identityFile] }
         if let sshPort { arguments += ["-p", String(sshPort)] }
         if let explicitUser { arguments += ["-l", explicitUser] }
+        if let userKnownHostsFile {
+            arguments += ["-o", "UserKnownHostsFile=\(userKnownHostsFile)"]
+        }
+        if let globalKnownHostsFile {
+            arguments += ["-o", "GlobalKnownHostsFile=\(globalKnownHostsFile)"]
+        }
         arguments += [
             "-o", "BatchMode=yes",
             "-o", "ClearAllForwardings=yes",
@@ -200,6 +231,96 @@ public enum SSHCommand {
         let target = remainder[remainder.index(after: separator)...]
         guard !target.isEmpty else { return nil }
         return decimalPort(port)
+    }
+
+    private static func isSafeKnownHostsFileList(
+        _ value: String,
+        allowNullDevice: Bool,
+        requireWritableStore: Bool
+    ) -> Bool {
+        guard isSafeScalarValue(value), let paths = parseSSHConfigPathList(value), !paths.isEmpty else {
+            return false
+        }
+
+        var firstPathWritable = false
+        for (index, path) in paths.enumerated() {
+            guard path.lowercased() != "none",
+                  !path.contains("%"),
+                  !path.contains("$") else { return false }
+
+            let expandedPath = (path as NSString).expandingTildeInPath
+            let fileURL = URL(fileURLWithPath: expandedPath)
+            let resolvedPath = fileURL.resolvingSymlinksInPath().standardizedFileURL.path
+            let isNullDevice = fileURL.standardizedFileURL.path == "/dev/null" || resolvedPath == "/dev/null"
+            guard !isNullDevice || allowNullDevice else { return false }
+            if isNullDevice { continue }
+
+            // 只有普通文件能持久保存 accept-new 的信任记录。允许指向普通文件的符号链接，
+            // 但拒绝设备、管道、socket、悬空链接，以及指向这些对象的链接。
+            if (try? FileManager.default.attributesOfItem(atPath: expandedPath)) != nil {
+                guard let resolvedAttributes = try? FileManager.default.attributesOfItem(atPath: resolvedPath),
+                      let type = resolvedAttributes[.type] as? FileAttributeType,
+                      type.rawValue == FileAttributeType.typeRegular.rawValue else {
+                    return false
+                }
+                if index == 0, FileManager.default.isWritableFile(atPath: resolvedPath) {
+                    firstPathWritable = true
+                }
+            } else {
+                let parentPath = URL(fileURLWithPath: resolvedPath).deletingLastPathComponent().path
+                if let parentAttributes = try? FileManager.default.attributesOfItem(atPath: parentPath),
+                   let type = parentAttributes[.type] as? FileAttributeType,
+                   type.rawValue == FileAttributeType.typeDirectory.rawValue,
+                   FileManager.default.isWritableFile(atPath: parentPath) {
+                    if index == 0 {
+                        firstPathWritable = true
+                    }
+                }
+            }
+        }
+        // OpenSSH stores newly accepted host keys in the first user known-hosts file.
+        return !requireWritableStore || firstPathWritable
+    }
+
+    private static func parseSSHConfigPathList(_ value: String) -> [String]? {
+        var paths: [String] = []
+        var current = ""
+        var quote: Character?
+        var tokenStarted = false
+
+        for character in value {
+            if character == "\\" { return nil }
+            if let activeQuote = quote {
+                if character == activeQuote {
+                    quote = nil
+                } else {
+                    current.append(character)
+                }
+                tokenStarted = true
+                continue
+            }
+            if character == "'" || character == "\"" {
+                quote = character
+                tokenStarted = true
+            } else if character.isWhitespace {
+                if tokenStarted {
+                    guard !current.isEmpty else { return nil }
+                    paths.append(current)
+                    current = ""
+                    tokenStarted = false
+                }
+            } else {
+                current.append(character)
+                tokenStarted = true
+            }
+        }
+
+        guard quote == nil else { return nil }
+        if tokenStarted {
+            guard !current.isEmpty else { return nil }
+            paths.append(current)
+        }
+        return paths
     }
 
     private static func decimalPort(_ value: String) -> Int? {
